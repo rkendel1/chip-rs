@@ -17,8 +17,7 @@ fn get_workspace_root() -> PathBuf {
 #[test]
 fn fx_core_does_not_depend_on_chip_core() {
     let fx_manifest_path = get_workspace_root().join("crates/fx-core/Cargo.toml");
-    let manifest = fs::read_to_string(fx_manifest_path)
-        .expect("fx-core Cargo.toml must exist");
+    let manifest = fs::read_to_string(fx_manifest_path).expect("fx-core Cargo.toml must exist");
 
     assert!(
         !manifest.contains("chip-core"),
@@ -29,8 +28,7 @@ fn fx_core_does_not_depend_on_chip_core() {
 #[test]
 fn chip_core_depends_on_fx_core() {
     let chip_manifest_path = get_workspace_root().join("crates/chip-core/Cargo.toml");
-    let manifest = fs::read_to_string(chip_manifest_path)
-        .expect("chip-core Cargo.toml must exist");
+    let manifest = fs::read_to_string(chip_manifest_path).expect("chip-core Cargo.toml must exist");
 
     assert!(
         manifest.contains("fx-core"),
@@ -41,8 +39,8 @@ fn chip_core_depends_on_fx_core() {
 #[test]
 fn workspace_resolver_is_configured() {
     let workspace_manifest_path = get_workspace_root().join("Cargo.toml");
-    let manifest = fs::read_to_string(workspace_manifest_path)
-        .expect("workspace Cargo.toml must exist");
+    let manifest =
+        fs::read_to_string(workspace_manifest_path).expect("workspace Cargo.toml must exist");
 
     assert!(
         manifest.contains("resolver = \"2\""),

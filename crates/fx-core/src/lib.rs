@@ -37,7 +37,7 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelRequest {
     pub model: ModelId,
     pub messages: Vec<Message>,
@@ -90,10 +90,36 @@ impl ModelResponse {
     }
 }
 
+/// A secret string (e.g. an API key). Never shown by `Debug`; read it only via `expose`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Secret(<redacted>)")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FxError {
     InvalidRequest(String),
     Provider(String),
+    Configuration(String),
+    Authentication(String),
+    Http(String),
+    InvalidResponse(String),
+    Timeout(String),
+    Serialization(String),
 }
 
 impl fmt::Display for FxError {
@@ -101,6 +127,12 @@ impl fmt::Display for FxError {
         match self {
             Self::InvalidRequest(message) => write!(f, "invalid request: {message}"),
             Self::Provider(message) => write!(f, "provider error: {message}"),
+            Self::Configuration(message) => write!(f, "configuration error: {message}"),
+            Self::Authentication(message) => write!(f, "authentication failure: {message}"),
+            Self::Http(message) => write!(f, "http failure: {message}"),
+            Self::InvalidResponse(message) => write!(f, "invalid response: {message}"),
+            Self::Timeout(message) => write!(f, "timeout: {message}"),
+            Self::Serialization(message) => write!(f, "serialization error: {message}"),
         }
     }
 }

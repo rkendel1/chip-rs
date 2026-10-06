@@ -43,7 +43,10 @@ async fn complete_path_turn_to_turn_result() {
     assert!(matches!(result.events[0], AgentEvent::TurnReceived { .. }));
     assert!(matches!(result.events[1], AgentEvent::RequestBuilt { .. }));
     assert!(matches!(result.events[2], AgentEvent::ModelInvoked { .. }));
-    assert!(matches!(result.events[3], AgentEvent::ModelResponded { .. }));
+    assert!(matches!(
+        result.events[3],
+        AgentEvent::ModelResponded { .. }
+    ));
     assert!(matches!(result.events[4], AgentEvent::TurnCompleted { .. }));
 }
 

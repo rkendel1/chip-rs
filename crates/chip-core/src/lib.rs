@@ -49,22 +49,34 @@ impl fmt::Display for AgentError {
 
 impl Error for AgentError {}
 
+const DEFAULT_MODEL: &str = "chip-test-model";
+
 pub struct Agent {
     provider: Arc<dyn ModelProvider>,
+    model: String,
 }
 
 impl Agent {
     pub fn new(provider: Arc<dyn ModelProvider>) -> Self {
-        Self { provider }
+        Self::with_model(provider, DEFAULT_MODEL)
+    }
+
+    pub fn with_model(provider: Arc<dyn ModelProvider>, model: impl Into<String>) -> Self {
+        Self {
+            provider,
+            model: model.into(),
+        }
     }
 
     pub async fn turn(&self, turn: Turn) -> Result<TurnResult, AgentError> {
         if turn.user_message.trim().is_empty() {
-            return Err(AgentError::InvalidTurn("turn message cannot be empty".to_string()));
+            return Err(AgentError::InvalidTurn(
+                "turn message cannot be empty".to_string(),
+            ));
         }
 
         let request = ModelRequest::new(
-            "chip-test-model",
+            self.model.clone(),
             vec![Message::new(MessageRole::User, turn.user_message.clone())],
         );
 
