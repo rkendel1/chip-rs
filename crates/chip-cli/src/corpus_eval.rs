@@ -281,7 +281,10 @@ mod tests {
             result,
             description: "test/model (revision r), backend onnx, target Cpu".into(),
             init: std::time::Duration::from_millis(5),
-            samples: vec![crate::native::Sample { confidence: 0.9 }],
+            samples: vec![crate::native::Sample {
+                confidence: 0.9,
+                calibrated: None,
+            }],
         };
         render(&report)
     }

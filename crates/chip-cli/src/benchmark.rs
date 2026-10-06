@@ -77,6 +77,7 @@ pub struct Report {
     pub evidence_hit: Measured,
     pub evidence_stale_wasm: Measured,
     pub native: NativeTiming,
+    pub laya: NativeTiming,
 }
 
 /// Timing of the optional native local model, with initialization kept apart from inference.
@@ -349,7 +350,36 @@ pub async fn run(per_state: usize) -> Result<Report, String> {
 
     // Native local model (optional). Initialization is never mixed into inference timing,
     // and only a small sample is taken because a real model is slower than the others.
-    let native = match crate::native::load() {
+    let native = time_loaded(crate::native::load(), &cases, per_state);
+    let laya = time_loaded(
+        crate::native::load_laya(crate::native::laya_location(None)),
+        &cases,
+        per_state,
+    );
+
+    Ok(Report {
+        cases: n,
+        per_state,
+        wasm_compile,
+        rust,
+        wasm,
+        fx,
+        evidence_hit,
+        evidence_stale_wasm,
+        native,
+        laya,
+    })
+}
+
+/// Times a loaded reasoner with initialization kept apart from inference. A reasoner that is
+/// not available is skipped, never counted as a failure. Only a small sample is taken because
+/// a real model is slower than the other paths.
+fn time_loaded(
+    loaded: Result<crate::native::Native, String>,
+    cases: &[Case],
+    per_state: usize,
+) -> NativeTiming {
+    match loaded {
         Err(reason) => NativeTiming::Skipped(reason),
         Ok(model) => {
             let mut samples = Vec::new();
@@ -372,19 +402,7 @@ pub async fn run(per_state: usize) -> Result<Report, String> {
                 }
             }
         }
-    };
-
-    Ok(Report {
-        cases: n,
-        per_state,
-        wasm_compile,
-        rust,
-        wasm,
-        fx,
-        evidence_hit,
-        evidence_stale_wasm,
-        native,
-    })
+    }
 }
 
 pub(crate) fn fmt(d: Duration) -> String {
@@ -434,25 +452,30 @@ pub fn render(report: &Report) -> String {
         out += &section(m);
         out.push('\n');
     }
-    match &report.native {
-        NativeTiming::Skipped(reason) => out += &format!("Native model: skipped — {reason}\n\n"),
-        NativeTiming::Measured {
-            description,
-            init,
-            inference,
-            errors,
-        } => {
-            out += &format!(
-                "Native model ({description}):\n  initialization (runtime + load): {}\n  first inference: {}\n  subsequent median: {}\n  min: {}\n  median: {}\n  p95: {}\n  max: {}\n  samples: {} (errors: {errors})\n\n",
-                fmt(*init),
-                fmt(inference.first),
-                fmt(inference.repeated_median),
-                fmt(inference.min),
-                fmt(inference.median),
-                fmt(inference.p95),
-                fmt(inference.max),
-                inference.samples
-            );
+    for (label, timing) in [
+        ("Native model", &report.native),
+        ("Laya native model", &report.laya),
+    ] {
+        match timing {
+            NativeTiming::Skipped(reason) => out += &format!("{label}: skipped — {reason}\n\n"),
+            NativeTiming::Measured {
+                description,
+                init,
+                inference,
+                errors,
+            } => {
+                out += &format!(
+                    "{label} ({description}):\n  initialization: {}\n  first inference: {}\n  repeated median: {}\n  min: {}\n  median: {}\n  p95: {}\n  max: {}\n  samples: {} (errors: {errors})\n\n",
+                    fmt(*init),
+                    fmt(inference.first),
+                    fmt(inference.repeated_median),
+                    fmt(inference.min),
+                    fmt(inference.median),
+                    fmt(inference.p95),
+                    fmt(inference.max),
+                    inference.samples
+                );
+            }
         }
     }
     out += &format!(

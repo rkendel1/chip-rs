@@ -1,5 +1,6 @@
 mod benchmark;
 mod corpus_eval;
+mod laya_eval;
 mod live_benchmark;
 mod native;
 
@@ -839,6 +840,20 @@ async fn main() {
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-laya-reasoner" {
+        // Experimental. Needs an explicit local checkpoint directory (argument or
+        // CHIP_LAYA_MODEL_DIR); nothing is downloaded. Exit 3 means SKIPPED.
+        let location = native::laya_location(args.get(2).map(String::as_str));
+        match laya_eval::run(location) {
+            Ok((report, laya)) => print!("{}", laya_eval::render(&report, &laya)),
+            Err(reason) => {
+                println!("Laya reasoner: SKIPPED\nReason: {reason}");
+                std::process::exit(3);
             }
         }
         return;

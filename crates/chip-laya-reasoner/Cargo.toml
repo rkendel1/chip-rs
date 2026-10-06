@@ -1,0 +1,29 @@
+[package]
+name = "chip-laya-reasoner"
+version = "0.1.0"
+edition = "2024"
+description = "Experimental LocalReasoner backed by the native Rust Laya typed-decision model (laya-decision)"
+license = "MIT"
+
+# laya-decision pulls in candle, a tokenizer and hf-hub, so it is opt-in: without the
+# `laya` feature this crate is empty and the default workspace build does not compile it.
+[features]
+laya = ["dep:laya-decision", "dep:serde_json", "dep:indexmap"]
+# Test support only: builds a tiny random-weight checkpoint so the real candle path can be
+# exercised without downloading anything. Its verdicts mean nothing.
+fixture = ["laya", "dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+laya-decision = { version = "0.2.4", optional = true }
+serde_json = { version = "1", optional = true }
+indexmap = { version = "2", optional = true }
+candle-core = { version = "0.9", optional = true }
+candle-nn = { version = "0.9", optional = true }
+candle-transformers = { version = "0.9", optional = true }
+tokenizers = { version = "0.21", optional = true, default-features = false, features = ["onig"] }
+
+[dev-dependencies]
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+fx-core = { path = "../fx-core" }
+async-trait = "0.1"

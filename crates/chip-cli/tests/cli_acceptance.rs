@@ -461,3 +461,30 @@ fn cli_corpus_reports_the_native_model_as_evaluated_or_skipped() {
     );
     assert!(stdout.contains("Rust/WASM agreement: 32/32"));
 }
+
+/// Experimental Laya: either it runs on a local checkpoint, or it is explicitly skipped (exit 3).
+#[test]
+fn cli_test_laya_reasoner_is_real_or_explicitly_skipped() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-laya-reasoner",
+        ])
+        .env_remove("CHIP_LAYA_MODEL_DIR")
+        .output()
+        .expect("CLI should execute");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Laya reasoner: SKIPPED\nReason: "),
+        "{stdout}"
+    );
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        !stdout.contains("Laya Decision Reasoner"),
+        "no results when skipped: {stdout}"
+    );
+}

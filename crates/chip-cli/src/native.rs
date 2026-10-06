@@ -13,6 +13,8 @@ use chip_core::LocalReasoner;
 #[derive(Debug, Clone)]
 pub struct Sample {
     pub confidence: f64,
+    /// A second, calibrated confidence when the model reports one.
+    pub calibrated: Option<f64>,
 }
 
 pub struct Native {
@@ -67,6 +69,80 @@ pub fn load() -> Result<Native, String> {
     })
 }
 
+/// Where an explicit local Laya checkpoint is expected: a directory given on the command line,
+/// else `CHIP_LAYA_MODEL_DIR`. Nothing is downloaded or searched for.
+pub fn laya_location(cli_dir: Option<&str>) -> Option<(String, Option<String>)> {
+    let dir = cli_dir
+        .map(str::to_owned)
+        .or_else(|| std::env::var("CHIP_LAYA_MODEL_DIR").ok())
+        .filter(|d| !d.trim().is_empty())?;
+    let subfolder = std::env::var("CHIP_LAYA_SUBFOLDER")
+        .ok()
+        .filter(|d| !d.trim().is_empty());
+    Some((dir, subfolder))
+}
+
+#[cfg(not(feature = "laya"))]
+pub fn load_laya(_location: Option<(String, Option<String>)>) -> Result<Native, String> {
+    Err("built without the laya feature".to_string())
+}
+
+#[cfg(feature = "laya")]
+pub fn load_laya(location: Option<(String, Option<String>)>) -> Result<Native, String> {
+    use chip_laya_reasoner::LayaReasoner;
+    let (dir, subfolder) = location.ok_or_else(|| {
+        "model not installed: pass a checkpoint directory or set CHIP_LAYA_MODEL_DIR".to_string()
+    })?;
+    let started = std::time::Instant::now();
+    let reasoner = match subfolder {
+        Some(sub) => LayaReasoner::from_dir_subfolder(&dir, &sub),
+        None => LayaReasoner::from_dir(&dir),
+    }
+    .map_err(|e| e.to_string())?;
+    let init = started.elapsed();
+    let description = reasoner.provenance().to_string();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    Ok(Native {
+        reasoner: Arc::new(laya_recording::Recording {
+            inner: reasoner,
+            log: log.clone(),
+        }),
+        description,
+        init,
+        log,
+    })
+}
+
+#[cfg(feature = "laya")]
+mod laya_recording {
+    use std::sync::{Arc, Mutex};
+
+    use chip_core::{LocalReasoner, LocalReasoningResult, ReasoningError, ReasoningInput};
+    use chip_laya_reasoner::LayaReasoner;
+
+    use super::Sample;
+
+    /// Records each judgment's confidences (output only), returning the adapter's result.
+    pub struct Recording {
+        pub inner: LayaReasoner,
+        pub log: Arc<Mutex<Vec<Sample>>>,
+    }
+
+    impl LocalReasoner for Recording {
+        fn reason(&self, input: &ReasoningInput) -> Result<LocalReasoningResult, ReasoningError> {
+            let judgment = self.inner.judge(input)?;
+            self.log
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(Sample {
+                    confidence: f64::from(judgment.confidence),
+                    calibrated: Some(f64::from(judgment.answer_confidence)),
+                });
+            Ok(judgment.result)
+        }
+    }
+}
+
 #[cfg(feature = "local-ml")]
 mod recording {
     use std::sync::{Arc, Mutex};
@@ -99,6 +175,7 @@ mod recording {
                 .unwrap_or_else(|e| e.into_inner())
                 .push(Sample {
                     confidence: judgment.confidence,
+                    calibrated: None,
                 });
             Ok(result)
         }
@@ -252,7 +329,10 @@ mod tests {
 
     impl LocalReasoner for Stub {
         fn reason(&self, _i: &ReasoningInput) -> Result<LocalReasoningResult, ReasoningError> {
-            self.0.lock().unwrap().push(Sample { confidence: 0.75 });
+            self.0.lock().unwrap().push(Sample {
+                confidence: 0.75,
+                calibrated: None,
+            });
             Ok(LocalReasoningResult::Escalate {
                 reason: "stub".into(),
             })
