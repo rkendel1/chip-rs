@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/fx-core", "crates/chip-core", "crates/chip-cli"]
+resolver = "2"
