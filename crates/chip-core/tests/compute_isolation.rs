@@ -36,7 +36,12 @@ fn chip_core_manifest_has_no_execution_system_dependency() {
 
 #[test]
 fn chip_core_source_does_not_reference_execution_systems() {
-    for file in ["src/lib.rs", "src/decision.rs", "tests/execution.rs"] {
+    for file in [
+        "src/lib.rs",
+        "src/decision.rs",
+        "src/observation.rs",
+        "tests/execution.rs",
+    ] {
         let source = norm(&fs::read_to_string(chip_core().join(file)).unwrap());
         for forbidden in FORBIDDEN {
             assert!(!source.contains(forbidden), "{file} references {forbidden}");

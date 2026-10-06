@@ -1,4 +1,5 @@
 mod decision;
+mod observation;
 
 use std::error::Error;
 use std::fmt;
@@ -9,6 +10,9 @@ pub use decision::{
     ScriptedDecision,
 };
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
+pub use observation::{
+    ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Turn {
@@ -230,6 +234,8 @@ impl ExecutionRequest {
 pub enum ExecutionStatus {
     Success,
     Failure,
+    /// The executor reports the work was cancelled.
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +384,7 @@ pub struct Agent {
     executor: Option<Arc<dyn Executor>>,
     capabilities: Option<Arc<dyn CapabilityProvider>>,
     decision: Option<Arc<dyn DecisionBoundary>>,
+    observer: Option<Arc<dyn Observer>>,
 }
 
 impl Agent {
@@ -392,6 +399,24 @@ impl Agent {
             executor: None,
             capabilities: None,
             decision: None,
+            observer: None,
+        }
+    }
+
+    /// Optionally injects the observer that represents execution results.
+    pub fn with_observer(mut self, observer: Arc<dyn Observer>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    /// Represents an execution result as an `Observation` via the injected
+    /// observer. Does not execute, call the model, or start another turn.
+    pub fn observe(&self, result: &ExecutionResult) -> Result<Observation, ObservationError> {
+        match &self.observer {
+            Some(observer) => observer.observe(result),
+            None => Err(ObservationError::ObserverUnavailable(
+                "no observer injected".to_string(),
+            )),
         }
     }
 

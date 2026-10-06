@@ -88,3 +88,31 @@ fn cli_test_turn_mode_runs_the_full_lifecycle() {
         );
     }
 }
+
+#[test]
+fn cli_test_observation_mode_prints_the_observation() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-observation",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Execution: success",
+        "Observation: execution.completed",
+        "Execution ID: observation-1",
+        "Receipt: sha256:test-receipt",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}

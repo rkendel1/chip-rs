@@ -184,3 +184,22 @@ async fn run_turn_executes_a_capability_through_compute_with_receipt() {
     assert_eq!(result.receipt_id.as_deref(), Some("sha256:fake"));
     assert!(marker.exists());
 }
+
+#[tokio::test]
+async fn a_compute_result_passes_through_the_generic_observer() {
+    use chip_core::{ExecutionObserver, ObservationKind, Observer};
+    let (script, _) = fake_compute("observe");
+    let executor = ComputeExecutor::with_binary(&script);
+    let request = chip_core::ExecutionRequest::new(ExecutionId::new("o1"), SELFTEST_INTENT);
+    let result = chip_core::Executor::execute(&executor, request)
+        .await
+        .unwrap();
+    let observation = ExecutionObserver.observe(&result).unwrap();
+    assert_eq!(observation.kind, ObservationKind::ExecutionCompleted);
+    assert_eq!(observation.execution_id, ExecutionId::new("o1"));
+    assert_eq!(
+        observation.output.as_deref(),
+        Some("chip-compute selftest ok")
+    );
+    assert_eq!(observation.receipt_id.as_deref(), Some("sha256:fake"));
+}

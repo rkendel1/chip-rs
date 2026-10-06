@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use chip_core::{
     Agent, AgentDecision, CapabilityAvailability, CapabilityDescriptor, CapabilityError,
-    CapabilityId, CapabilityProvider, DecisionInput, ExecutionId, ExecutionRequest,
-    ScriptedDecision, TestExecutor, Turn,
+    CapabilityId, CapabilityProvider, DecisionInput, ExecutionId, ExecutionObserver,
+    ExecutionRequest, ExecutionResult, ScriptedDecision, TestExecutor, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -189,6 +189,32 @@ async fn main() {
                 }
                 println!("Events: {}", outcome.events.len());
                 println!("Turn completed");
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-observation" {
+        // Deterministic and offline: a fixed result passed through the observer.
+        let agent =
+            Agent::new(Arc::new(TestModelProvider)).with_observer(Arc::new(ExecutionObserver));
+        let result = ExecutionResult::success(ExecutionId::new("observation-1"), "hello")
+            .with_receipt_id("sha256:test-receipt");
+        match agent.observe(&result) {
+            Ok(observation) => {
+                println!("Chip");
+                println!("Execution: success");
+                println!("Observation: {}", observation.kind.as_str());
+                println!("Execution ID: {}", observation.execution_id);
+                println!("Output: {}", observation.output.as_deref().unwrap_or(""));
+                println!(
+                    "Receipt: {}",
+                    observation.receipt_id.as_deref().unwrap_or("none")
+                );
             }
             Err(error) => {
                 eprintln!("error: {error}");
