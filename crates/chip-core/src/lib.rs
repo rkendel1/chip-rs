@@ -1,14 +1,16 @@
 mod decision;
+mod evidence;
 mod observation;
 
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
 };
+pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
@@ -68,6 +70,8 @@ pub enum AgentError {
     Decision(DecisionError),
     Capability(CapabilityError),
     Execution(ExecutionError),
+    Observation(ObservationError),
+    Evidence(EvidenceError),
 }
 
 /// Stable, opaque name of a declared ability (for example `vendor.operation`).
@@ -331,6 +335,18 @@ pub struct ExecutionReport {
     pub events: Vec<ExecutionEvent>,
 }
 
+/// How `Agent::obtain_evidence` satisfied a request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvidenceOutcome {
+    /// Existing evidence returned unchanged; nothing was executed.
+    Reused(Observation),
+    /// The operation was executed once and its observation recorded.
+    Performed {
+        result: ExecutionResult,
+        observation: Observation,
+    },
+}
+
 struct DecideStep {
     turn: TurnResult,
     response: ModelResponse,
@@ -370,6 +386,8 @@ impl fmt::Display for AgentError {
             Self::Decision(error) => write!(f, "{error}"),
             Self::Capability(error) => write!(f, "{error}"),
             Self::Execution(error) => write!(f, "{error}"),
+            Self::Observation(error) => write!(f, "{error}"),
+            Self::Evidence(error) => write!(f, "{error}"),
         }
     }
 }
@@ -385,6 +403,7 @@ pub struct Agent {
     capabilities: Option<Arc<dyn CapabilityProvider>>,
     decision: Option<Arc<dyn DecisionBoundary>>,
     observer: Option<Arc<dyn Observer>>,
+    evidence: Mutex<evidence::EvidenceStore>,
 }
 
 impl Agent {
@@ -400,7 +419,77 @@ impl Agent {
             capabilities: None,
             decision: None,
             observer: None,
+            evidence: Mutex::new(evidence::EvidenceStore::default()),
         }
+    }
+
+    fn evidence_store(&self) -> std::sync::MutexGuard<'_, evidence::EvidenceStore> {
+        self.evidence.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Retains the observation of `request`'s execution as reusable evidence.
+    /// Only an observation of the execution this request produced is accepted,
+    /// so a request alone can never become evidence. Cancelled executions
+    /// did not establish an outcome and are not retained (returns `false`).
+    pub fn record_evidence(
+        &self,
+        request: &CapabilityRequest,
+        observation: &Observation,
+    ) -> Result<bool, EvidenceError> {
+        if observation.execution_id != request.execution_id {
+            return Err(EvidenceError::ExecutionMismatch(format!(
+                "observation is of execution {}, not {}",
+                observation.execution_id, request.execution_id
+            )));
+        }
+        if observation.kind == ObservationKind::ExecutionCancelled {
+            return Ok(false);
+        }
+        self.evidence_store()
+            .record(EvidenceKey::from_request(request), observation.clone());
+        Ok(true)
+    }
+
+    /// Deterministic lookup of evidence for the same operation. No model, no
+    /// execution; the stored observation is returned unchanged.
+    pub fn lookup_evidence(&self, request: &CapabilityRequest) -> EvidenceLookup {
+        self.evidence_store()
+            .lookup(&EvidenceKey::from_request(request))
+    }
+
+    /// Explicitly discards all evidence for a capability. Returns how many
+    /// entries were removed.
+    pub fn invalidate_evidence(&self, capability: &CapabilityId) -> usize {
+        self.evidence_store().invalidate(capability)
+    }
+
+    pub fn evidence_stats(&self) -> EvidenceStats {
+        self.evidence_store().stats()
+    }
+
+    /// The fast path: reuse existing evidence for this operation, otherwise
+    /// validate, execute once, observe, and record. A hit performs no model
+    /// call, no validation round trip and no execution.
+    pub async fn obtain_evidence(
+        &self,
+        request: &CapabilityRequest,
+    ) -> Result<EvidenceOutcome, AgentError> {
+        if let EvidenceLookup::Found(observation) = self.lookup_evidence(request) {
+            return Ok(EvidenceOutcome::Reused(observation));
+        }
+        let execution = self
+            .validate_capability_request(request)
+            .await
+            .map_err(AgentError::Capability)?;
+        let report = self.execute(execution).await;
+        let result = report.result.map_err(AgentError::Execution)?;
+        let observation = self.observe(&result).map_err(AgentError::Observation)?;
+        self.record_evidence(request, &observation)
+            .map_err(AgentError::Evidence)?;
+        Ok(EvidenceOutcome::Performed {
+            result,
+            observation,
+        })
     }
 
     /// Optionally injects the observer that represents execution results.

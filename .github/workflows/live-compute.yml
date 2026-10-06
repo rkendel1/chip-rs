@@ -22,3 +22,4 @@ jobs:
           cargo test -p chip-compute --test live_compute -- --nocapture
           cargo run -p chip-cli -- --compute-test
           cargo run -p chip-cli -- --test-real-cycle
+          cargo run -p chip-cli -- --test-real-evidence

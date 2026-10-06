@@ -197,3 +197,52 @@ fn cli_test_real_cycle_is_real_or_explicitly_skipped() {
         eprintln!("PASSED — real Compute execution");
     }
 }
+
+#[test]
+fn cli_test_evidence_reuses_without_executing() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "chip-cli", "--quiet", "--", "--test-evidence"])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Execution: performed",
+        "Evidence: reused",
+        "Execution: skipped",
+        "Model calls added: 0",
+        "Executions: 1",
+        "Evidence reuses: 1",
+        "Local fast path completed.",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}
+
+#[test]
+fn cli_test_real_evidence_is_real_or_explicitly_skipped() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-real-evidence",
+        ])
+        .output()
+        .expect("CLI should execute");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.contains("SKIPPED — Compute unavailable") {
+        assert_eq!(output.status.code(), Some(3));
+        assert!(!stdout.contains("Local fast path completed."), "{stdout}");
+    } else {
+        assert!(output.status.success(), "{stdout}");
+        assert!(stdout.contains("Receipt: sha256:"), "{stdout}");
+        assert!(stdout.contains("Evidence: reused"), "{stdout}");
+        assert!(stdout.contains("Executions: 1"), "{stdout}");
+    }
+}

@@ -11,7 +11,7 @@ use fx_core::ModelResponse;
 use crate::{Capability, CapabilityError, CapabilityId, ExecutionId};
 
 /// A typed input value. Deliberately small; not an expression language.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InputValue {
     Text(String),
     Integer(i64),

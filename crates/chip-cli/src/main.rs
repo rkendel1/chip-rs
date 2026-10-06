@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use chip_core::{
-    Agent, AgentDecision, Capability, CapabilityAvailability, CapabilityDescriptor,
-    CapabilityError, CapabilityId, CapabilityProvider, DecisionBoundary, DecisionError,
-    DecisionInput, ExecutionError, ExecutionId, ExecutionObserver, ExecutionRequest,
-    ExecutionResult, Executor, ScriptedDecision, TestExecutor, Turn,
+    Agent, AgentDecision, AgentError, Capability, CapabilityAvailability, CapabilityDescriptor,
+    CapabilityError, CapabilityId, CapabilityProvider, CapabilityRequest, DecisionBoundary,
+    DecisionError, DecisionInput, EvidenceOutcome, ExecutionError, ExecutionId, ExecutionObserver,
+    ExecutionRequest, ExecutionResult, Executor, ScriptedDecision, TestExecutor, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -213,6 +213,106 @@ async fn run_workload_proof(
         "Proof:\n  Model calls: {}\n  Executions: {}\n  Observations: 1\n  Automatic follow-ups: 0\n",
         model_calls.load(Ordering::SeqCst),
         executions.load(Ordering::SeqCst)
+    );
+    ProofOutcome::Completed
+}
+
+/// Adds a fixed receipt id to results from a wrapped executor (deterministic demo).
+struct FixedReceipt(Arc<dyn Executor>);
+
+#[async_trait::async_trait]
+impl Executor for FixedReceipt {
+    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError> {
+        Ok(self
+            .0
+            .execute(request)
+            .await?
+            .with_receipt_id("sha256:test"))
+    }
+}
+
+/// Local evidence fast path: the same operation requested twice. The caller
+/// (this function) makes both requests explicitly.
+async fn run_evidence_demo(
+    title: &str,
+    capability: &'static str,
+    capabilities: Arc<dyn CapabilityProvider>,
+    executor: Arc<dyn Executor>,
+    skippable: bool,
+) -> ProofOutcome {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let agent = Agent::new(Arc::new(ProofModel(model_calls.clone())))
+        .with_capabilities(capabilities)
+        .with_executor(Arc::new(CountingExecutor {
+            inner: executor,
+            calls: executions.clone(),
+        }))
+        .with_observer(Arc::new(ExecutionObserver));
+    let id = |n: u32| ExecutionId::new(format!("evidence-{n}"));
+    let request = |n: u32| match CapabilityId::new(capability) {
+        Ok(capability_id) => Ok(CapabilityRequest::new(id(n), capability_id)),
+        Err(e) => Err(e.to_string()),
+    };
+    let (first, second) = match (request(1), request(2)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) => return ProofOutcome::Failed(e),
+    };
+
+    if skippable {
+        if let Ok(found) = agent.discover_capabilities().await.result {
+            for capability in found {
+                if let CapabilityAvailability::Unavailable(reason)
+                | CapabilityAvailability::Misconfigured(reason) = capability.availability
+                {
+                    return ProofOutcome::Skipped(reason);
+                }
+            }
+        }
+    }
+
+    println!("{title}\n");
+    let observation = match agent.obtain_evidence(&first).await {
+        Ok(EvidenceOutcome::Performed { observation, .. }) => observation,
+        Ok(EvidenceOutcome::Reused(_)) => return ProofOutcome::Failed("unexpected reuse".into()),
+        Err(AgentError::Execution(ExecutionError::ExecutorUnavailable(reason))) if skippable => {
+            return ProofOutcome::Skipped(reason);
+        }
+        Err(e) => return ProofOutcome::Failed(e.to_string()),
+    };
+    println!(
+        "First request:\n  Capability: {capability}\n  Execution: performed\n  Observation: {}\n  Receipt: {}\n",
+        observation.kind.as_str(),
+        observation.receipt_id.as_deref().unwrap_or("none")
+    );
+
+    let (models_before, runs_before) = (
+        model_calls.load(Ordering::SeqCst),
+        executions.load(Ordering::SeqCst),
+    );
+    match agent.obtain_evidence(&second).await {
+        Ok(EvidenceOutcome::Reused(reused)) if reused == observation => {}
+        Ok(_) => return ProofOutcome::Failed("second request did not reuse the evidence".into()),
+        Err(e) => return ProofOutcome::Failed(e.to_string()),
+    }
+    let models_added = model_calls.load(Ordering::SeqCst) - models_before;
+    if executions.load(Ordering::SeqCst) != runs_before {
+        return ProofOutcome::Failed("second request executed".into());
+    }
+    println!(
+        "Second request:\n  Capability: {capability}\n  Evidence: reused\n  Execution: skipped\n  Receipt: {}\n  Model calls added: {models_added}\n",
+        observation.receipt_id.as_deref().unwrap_or("none")
+    );
+
+    let stats = agent.evidence_stats();
+    println!(
+        "Proof:\n  Executions: {}\n  Observations: 1\n  Evidence reuses: {}\n  Evidence lookups: {} (hits {}, misses {})\n",
+        executions.load(Ordering::SeqCst),
+        stats.hits,
+        stats.lookups,
+        stats.hits,
+        stats.misses
     );
     ProofOutcome::Completed
 }
@@ -492,6 +592,50 @@ async fn main() {
         match outcome {
             ProofOutcome::Completed => println!("Bounded workload completed."),
             ProofOutcome::Skipped(reason) | ProofOutcome::Failed(reason) => {
+                eprintln!("error: {reason}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-evidence" {
+        let outcome = run_evidence_demo(
+            "Local Evidence Fast Path",
+            "compute.selftest",
+            Arc::new(DemoCapabilities("compute.selftest")),
+            Arc::new(FixedReceipt(Arc::new(TestExecutor))),
+            false,
+        )
+        .await;
+        match outcome {
+            ProofOutcome::Completed => println!("Local fast path completed."),
+            ProofOutcome::Skipped(reason) | ProofOutcome::Failed(reason) => {
+                eprintln!("error: {reason}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-real-evidence" {
+        // Real Compute once; the repeat must not invoke it. Exit 3 means SKIPPED.
+        let compute = Arc::new(chip_compute::ComputeExecutor::new());
+        let outcome = run_evidence_demo(
+            "Local Evidence Fast Path (real Compute)",
+            chip_compute::SELFTEST_INTENT,
+            compute.clone(),
+            compute,
+            true,
+        )
+        .await;
+        match outcome {
+            ProofOutcome::Completed => println!("Local fast path completed."),
+            ProofOutcome::Skipped(reason) => {
+                println!("SKIPPED — Compute unavailable ({reason})");
+                std::process::exit(3);
+            }
+            ProofOutcome::Failed(reason) => {
                 eprintln!("error: {reason}");
                 std::process::exit(1);
             }
