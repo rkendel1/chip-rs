@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use chip_core::{Agent, ExecutionId, ExecutionRequest, TestExecutor, Turn};
+use chip_core::{
+    Agent, AgentDecision, CapabilityAvailability, CapabilityDescriptor, CapabilityError,
+    CapabilityId, CapabilityProvider, DecisionInput, ExecutionId, ExecutionRequest,
+    ScriptedDecision, TestExecutor, Turn,
+};
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
@@ -15,6 +19,24 @@ impl ModelProvider for TestModelProvider {
             "Hello from the test provider.",
             Usage::new(4, 6),
         ))
+    }
+}
+
+/// Declares one deterministic capability for the decision demonstration.
+struct DemoCapabilities;
+
+#[async_trait::async_trait]
+impl CapabilityProvider for DemoCapabilities {
+    async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
+        Ok(vec![CapabilityDescriptor::new(
+            CapabilityId::new("test.operation")?,
+            "Test Operation",
+            "Deterministic test capability",
+        )])
+    }
+
+    async fn availability(&self, _id: &CapabilityId) -> CapabilityAvailability {
+        CapabilityAvailability::Available
     }
 }
 
@@ -87,6 +109,50 @@ async fn main() {
         println!("{}", result.turn.response);
         match result.execution.result {
             Ok(execution) => println!("Execution {:?}: {}", execution.status, execution.output),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-decision" {
+        // Deterministic demonstration only: scripted decision, test executor.
+        let agent = Agent::new(Arc::new(TestModelProvider))
+            .with_decision_boundary(Arc::new(ScriptedDecision::new(
+                DecisionInput::RequestCapability {
+                    execution_id: ExecutionId::new("decision-1"),
+                    capability_id: "test.operation".into(),
+                    inputs: Default::default(),
+                },
+            )))
+            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_executor(Arc::new(TestExecutor));
+        let report = agent
+            .decide(Turn::new("Hello"))
+            .await
+            .expect("turn should succeed");
+        println!("Chip");
+        println!("Model response: {}", report.turn.response);
+        match report.decision {
+            Ok(AgentDecision::RequestCapability(request)) => {
+                println!("Decision: request capability {}", request.capability_id);
+                match agent.execute_capability(&request).await {
+                    Ok(execution) => match execution.result {
+                        Ok(result) => println!("Execution {:?}: {}", result.status, result.output),
+                        Err(error) => {
+                            eprintln!("error: {error}");
+                            std::process::exit(1);
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(AgentDecision::Respond(_)) => println!("Decision: respond"),
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);

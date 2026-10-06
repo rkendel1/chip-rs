@@ -1,7 +1,13 @@
+mod decision;
+
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
+pub use decision::{
+    AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
+    ScriptedDecision,
+};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +127,7 @@ pub enum CapabilityError {
     InvalidId(String),
     Unknown(String),
     Unavailable(String),
+    InvalidInput(String),
 }
 
 impl fmt::Display for CapabilityError {
@@ -129,6 +136,7 @@ impl fmt::Display for CapabilityError {
             Self::InvalidId(id) => write!(f, "invalid capability id: {id:?}"),
             Self::Unknown(id) => write!(f, "unknown capability: {id}"),
             Self::Unavailable(message) => write!(f, "capabilities unavailable: {message}"),
+            Self::InvalidInput(message) => write!(f, "invalid capability input: {message}"),
         }
     }
 }
@@ -297,6 +305,13 @@ pub struct ExecutionReport {
     pub events: Vec<ExecutionEvent>,
 }
 
+/// The outcome of `Agent::decide`: the model turn and the decision about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionReport {
+    pub turn: TurnResult,
+    pub decision: Result<AgentDecision, DecisionError>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentResult {
     pub turn: TurnResult,
@@ -321,6 +336,7 @@ pub struct Agent {
     model: String,
     executor: Option<Arc<dyn Executor>>,
     capabilities: Option<Arc<dyn CapabilityProvider>>,
+    decision: Option<Arc<dyn DecisionBoundary>>,
 }
 
 impl Agent {
@@ -334,7 +350,88 @@ impl Agent {
             model: model.into(),
             executor: None,
             capabilities: None,
+            decision: None,
         }
+    }
+
+    /// Optionally injects the boundary that turns model output into a decision.
+    pub fn with_decision_boundary(mut self, boundary: Arc<dyn DecisionBoundary>) -> Self {
+        self.decision = Some(boundary);
+        self
+    }
+
+    /// One model turn, then one decision about its response. Decides only;
+    /// nothing is validated against the executor or executed.
+    pub async fn decide(&self, turn: Turn) -> Result<DecisionReport, AgentError> {
+        let (turn, response) = self.run_turn(turn).await?;
+        let decision = match &self.decision {
+            None => Err(DecisionError::InvalidDecision(
+                "no decision boundary injected".to_string(),
+            )),
+            Some(boundary) => {
+                let capabilities = match &self.capabilities {
+                    None => Ok(Vec::new()),
+                    Some(_) => self.discover_capabilities().await.result,
+                };
+                match capabilities {
+                    Ok(capabilities) => boundary.decide(&response, &capabilities),
+                    Err(error) => Err(DecisionError::Capability(error)),
+                }
+            }
+        };
+        Ok(DecisionReport { turn, decision })
+    }
+
+    /// Validates a capability request: declared, available, valid inputs, in that
+    /// order. Only then does it yield an `ExecutionRequest`. Never executes.
+    pub async fn validate_capability_request(
+        &self,
+        request: &CapabilityRequest,
+    ) -> Result<ExecutionRequest, CapabilityError> {
+        let provider = self.capabilities.as_ref().ok_or_else(|| {
+            CapabilityError::Unavailable("no capability provider injected".to_string())
+        })?;
+        let declared = provider.capabilities().await?;
+        let descriptor = declared
+            .iter()
+            .find(|d| d.id == request.capability_id)
+            .ok_or_else(|| CapabilityError::Unknown(request.capability_id.to_string()))?;
+        match provider.availability(&request.capability_id).await {
+            CapabilityAvailability::Available => {}
+            CapabilityAvailability::Unavailable(reason)
+            | CapabilityAvailability::Misconfigured(reason) => {
+                return Err(CapabilityError::Unavailable(reason));
+            }
+        }
+        for name in request.inputs.keys() {
+            if !descriptor.inputs.iter().any(|i| &i.name == name) {
+                return Err(CapabilityError::InvalidInput(format!(
+                    "capability does not accept input '{name}'"
+                )));
+            }
+        }
+        for input in descriptor.inputs.iter().filter(|i| i.required) {
+            if !request.inputs.contains_key(&input.name) {
+                return Err(CapabilityError::InvalidInput(format!(
+                    "missing required input '{}'",
+                    input.name
+                )));
+            }
+        }
+        Ok(ExecutionRequest::for_capability(
+            request.execution_id.clone(),
+            &request.capability_id,
+        ))
+    }
+
+    /// Validates, then executes, an explicit capability request. A request that
+    /// fails validation never reaches the executor.
+    pub async fn execute_capability(
+        &self,
+        request: &CapabilityRequest,
+    ) -> Result<ExecutionReport, CapabilityError> {
+        let execution = self.validate_capability_request(request).await?;
+        Ok(self.execute(execution).await)
     }
 
     /// Optionally injects a source of capability descriptors.
@@ -383,22 +480,8 @@ impl Agent {
         id: ExecutionId,
         capability: &CapabilityId,
     ) -> Result<ExecutionRequest, CapabilityError> {
-        let provider = self.capabilities.as_ref().ok_or_else(|| {
-            CapabilityError::Unavailable("no capability provider injected".to_string())
-        })?;
-        let declared = provider.capabilities().await?;
-        if !declared.iter().any(|d| &d.id == capability) {
-            return Err(CapabilityError::Unknown(capability.to_string()));
-        }
-        match provider.availability(capability).await {
-            CapabilityAvailability::Available => {
-                Ok(ExecutionRequest::for_capability(id, capability))
-            }
-            CapabilityAvailability::Unavailable(reason)
-            | CapabilityAvailability::Misconfigured(reason) => {
-                Err(CapabilityError::Unavailable(reason))
-            }
-        }
+        self.validate_capability_request(&CapabilityRequest::new(id, capability.clone()))
+            .await
     }
 
     /// Injects an executor, independent of the model provider.
@@ -465,6 +548,10 @@ impl Agent {
     }
 
     pub async fn turn(&self, turn: Turn) -> Result<TurnResult, AgentError> {
+        self.run_turn(turn).await.map(|(result, _)| result)
+    }
+
+    async fn run_turn(&self, turn: Turn) -> Result<(TurnResult, ModelResponse), AgentError> {
         if turn.user_message.trim().is_empty() {
             return Err(AgentError::InvalidTurn(
                 "turn message cannot be empty".to_string(),
@@ -500,10 +587,13 @@ impl Agent {
             },
         ];
 
-        Ok(TurnResult {
-            response: response.output,
-            events,
-        })
+        Ok((
+            TurnResult {
+                response: response.output.clone(),
+                events,
+            },
+            response,
+        ))
     }
 }
 

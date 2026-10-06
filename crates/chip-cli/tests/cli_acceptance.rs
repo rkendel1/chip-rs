@@ -52,3 +52,18 @@ fn cli_test_execution_mode_uses_test_executor() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("test execution completed"), "{stdout}");
 }
+
+#[test]
+fn cli_test_decision_mode_runs_the_decision_path() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "chip-cli", "--quiet", "--", "--test-decision"])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Decision: request capability test.operation"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("test execution completed"), "{stdout}");
+}
