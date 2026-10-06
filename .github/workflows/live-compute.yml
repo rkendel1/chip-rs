@@ -21,3 +21,4 @@ jobs:
           if [ -z "$COMPUTE_BIN" ]; then unset COMPUTE_BIN; fi
           cargo test -p chip-compute --test live_compute -- --nocapture
           cargo run -p chip-cli -- --compute-test
+          cargo run -p chip-cli -- --test-real-cycle

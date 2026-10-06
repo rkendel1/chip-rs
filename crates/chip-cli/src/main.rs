@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chip_core::{
     Agent, AgentDecision, Capability, CapabilityAvailability, CapabilityDescriptor,
     CapabilityError, CapabilityId, CapabilityProvider, DecisionBoundary, DecisionError,
-    DecisionInput, ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult,
-    ScriptedDecision, TestExecutor, Turn,
+    DecisionInput, ExecutionError, ExecutionId, ExecutionObserver, ExecutionRequest,
+    ExecutionResult, Executor, ScriptedDecision, TestExecutor, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -48,7 +48,7 @@ impl ModelProvider for CycleModel {
 }
 
 /// First decision requests a capability; the second responds.
-struct CycleDecisions(std::sync::atomic::AtomicUsize);
+struct CycleDecisions(std::sync::atomic::AtomicUsize, &'static str);
 
 impl DecisionBoundary for CycleDecisions {
     fn decide(
@@ -59,7 +59,7 @@ impl DecisionBoundary for CycleDecisions {
         let input = if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
             DecisionInput::RequestCapability {
                 execution_id: ExecutionId::new("cycle-1"),
-                capability_id: "test.operation".into(),
+                capability_id: self.1.into(),
                 inputs: Default::default(),
             }
         } else {
@@ -69,14 +69,162 @@ impl DecisionBoundary for CycleDecisions {
     }
 }
 
+/// Deterministic model for the workload proof: counts calls and reports only
+/// what the observation in its request says.
+struct ProofModel(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait::async_trait]
+impl ModelProvider for ProofModel {
+    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let has = |needle: &str| request.messages.iter().any(|m| m.content.contains(needle));
+        let output = if has("kind: execution.completed") {
+            "observed the execution result"
+        } else if has("kind: execution.failed") {
+            "observed that the execution failed"
+        } else {
+            "request the self-test capability"
+        };
+        Ok(ModelResponse::new(
+            "proof-response",
+            output,
+            Usage::new(1, 1),
+        ))
+    }
+}
+
+/// Counts calls to any executor.
+struct CountingExecutor {
+    inner: Arc<dyn Executor>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Executor for CountingExecutor {
+    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.execute(request).await
+    }
+}
+
+enum ProofOutcome {
+    Completed,
+    Skipped(String),
+    Failed(String),
+}
+
+/// The bounded workload proof: every step is an explicit call by this function,
+/// which is the caller. Used with a test executor and with real Compute.
+async fn run_workload_proof(
+    title: &str,
+    capability: &'static str,
+    capabilities: Arc<dyn CapabilityProvider>,
+    executor: Arc<dyn Executor>,
+    skippable: bool,
+) -> ProofOutcome {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let agent = Agent::new(Arc::new(ProofModel(model_calls.clone())))
+        .with_decision_boundary(Arc::new(CycleDecisions(Default::default(), capability)))
+        .with_capabilities(capabilities)
+        .with_executor(Arc::new(CountingExecutor {
+            inner: executor,
+            calls: executions.clone(),
+        }))
+        .with_observer(Arc::new(ExecutionObserver));
+    let fail = |e: &dyn std::fmt::Display| ProofOutcome::Failed(e.to_string());
+
+    // Availability is read from the capability contract; nothing executes here.
+    if skippable {
+        if let Ok(found) = agent.discover_capabilities().await.result {
+            for capability in found {
+                if let CapabilityAvailability::Unavailable(reason)
+                | CapabilityAvailability::Misconfigured(reason) = capability.availability
+                {
+                    return ProofOutcome::Skipped(reason);
+                }
+            }
+        }
+    }
+
+    println!("{title}\n");
+    let first = match agent
+        .decide(Turn::new(
+            "Perform a bounded self-test and report what happened",
+        ))
+        .await
+    {
+        Ok(report) => report,
+        Err(e) => return fail(&e),
+    };
+    let Ok(AgentDecision::RequestCapability(request)) = first.decision else {
+        return ProofOutcome::Failed("turn 1 did not request a capability".into());
+    };
+    println!("Turn 1:\n  Decision: request {}\n", request.capability_id);
+
+    let result = match agent.execute_capability(&request).await {
+        Ok(report) => match report.result {
+            Ok(result) => result,
+            Err(ExecutionError::ExecutorUnavailable(reason)) if skippable => {
+                return ProofOutcome::Skipped(reason);
+            }
+            Err(e) => return fail(&e),
+        },
+        Err(e) => return fail(&e),
+    };
+    println!(
+        "Execution:\n  Status: {}\n  Receipt: {}\n",
+        format!("{:?}", result.status).to_lowercase(),
+        result.receipt_id.as_deref().unwrap_or("none")
+    );
+
+    let observation = match agent.observe(&result) {
+        Ok(o) => o,
+        Err(e) => return fail(&e),
+    };
+    println!(
+        "Observation:\n  Kind: {}\n  Status: {}\n",
+        observation.kind.as_str(),
+        format!("{:?}", observation.status).to_lowercase()
+    );
+
+    let second = match agent
+        .decide_with_observations(
+            Turn::new("What actually happened?"),
+            std::slice::from_ref(&observation),
+        )
+        .await
+    {
+        Ok(report) => report,
+        Err(e) => return fail(&e),
+    };
+    match second.decision {
+        Ok(AgentDecision::Respond(response)) => {
+            println!("Turn 2:\n  Response: {}\n", response.output)
+        }
+        Ok(AgentDecision::RequestCapability(_)) => {
+            println!("Turn 2:\n  Capability requested (not executed)\n")
+        }
+        Err(e) => return fail(&e),
+    }
+
+    println!(
+        "Proof:\n  Model calls: {}\n  Executions: {}\n  Observations: 1\n  Automatic follow-ups: 0\n",
+        model_calls.load(Ordering::SeqCst),
+        executions.load(Ordering::SeqCst)
+    );
+    ProofOutcome::Completed
+}
+
 /// Declares one deterministic capability for the decision demonstration.
-struct DemoCapabilities;
+struct DemoCapabilities(&'static str);
 
 #[async_trait::async_trait]
 impl CapabilityProvider for DemoCapabilities {
     async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
         Ok(vec![CapabilityDescriptor::new(
-            CapabilityId::new("test.operation")?,
+            CapabilityId::new(self.0)?,
             "Test Operation",
             "Deterministic test capability",
         )])
@@ -174,7 +322,7 @@ async fn main() {
                     inputs: Default::default(),
                 },
             )))
-            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_capabilities(Arc::new(DemoCapabilities("test.operation")))
             .with_executor(Arc::new(TestExecutor));
         let report = agent
             .decide(Turn::new("Hello"))
@@ -218,7 +366,7 @@ async fn main() {
                     inputs: Default::default(),
                 },
             )))
-            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_capabilities(Arc::new(DemoCapabilities("test.operation")))
             .with_executor(Arc::new(TestExecutor));
         match agent.run_turn(Turn::new("Hello")).await {
             Ok(outcome) => {
@@ -274,8 +422,11 @@ async fn main() {
     if args.len() > 1 && args[1] == "--test-cycle" {
         // Caller-driven bounded cycle; every step below is an explicit call.
         let agent = Agent::new(Arc::new(CycleModel))
-            .with_decision_boundary(Arc::new(CycleDecisions(Default::default())))
-            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_decision_boundary(Arc::new(CycleDecisions(
+                Default::default(),
+                "test.operation",
+            )))
+            .with_capabilities(Arc::new(DemoCapabilities("test.operation")))
             .with_executor(Arc::new(TestExecutor))
             .with_observer(Arc::new(ExecutionObserver));
         println!("Chip bounded cycle (caller-driven, not autonomous)");
@@ -322,6 +473,52 @@ async fn main() {
             Ok(()) => println!("Cycle completed"),
             Err(error) => {
                 eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-workload" {
+        // Deterministic: the test executor stands in for Compute.
+        let outcome = run_workload_proof(
+            "Bounded Workload Proof (deterministic, test executor)",
+            "compute.selftest",
+            Arc::new(DemoCapabilities("compute.selftest")),
+            Arc::new(TestExecutor),
+            false,
+        )
+        .await;
+        match outcome {
+            ProofOutcome::Completed => println!("Bounded workload completed."),
+            ProofOutcome::Skipped(reason) | ProofOutcome::Failed(reason) => {
+                eprintln!("error: {reason}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-real-cycle" {
+        // Live: real Compute via COMPUTE_BIN (default `compute`). Never falls
+        // back to the test executor; exit status 3 means SKIPPED.
+        let compute = Arc::new(chip_compute::ComputeExecutor::new());
+        let outcome = run_workload_proof(
+            "Bounded Workload Proof (real Compute)",
+            chip_compute::SELFTEST_INTENT,
+            compute.clone(),
+            compute,
+            true,
+        )
+        .await;
+        match outcome {
+            ProofOutcome::Completed => println!("Bounded workload completed."),
+            ProofOutcome::Skipped(reason) => {
+                println!("SKIPPED — Compute unavailable ({reason})");
+                std::process::exit(3);
+            }
+            ProofOutcome::Failed(reason) => {
+                eprintln!("error: {reason}");
                 std::process::exit(1);
             }
         }

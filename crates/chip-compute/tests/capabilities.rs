@@ -234,3 +234,97 @@ async fn a_compute_observation_informs_the_next_deterministic_turn() {
     assert!(requests[0].messages[0].content.contains("sha256:fake"));
     assert!(requests[0].messages[0].content.contains("n1"));
 }
+
+/// The same bounded cycle through the real `ComputeExecutor` adapter, with a
+/// stand-in `compute` so it runs offline. Real Compute: see `live_compute.rs`.
+#[tokio::test]
+async fn bounded_cycle_through_the_compute_adapter() {
+    use chip_core::{
+        AgentDecision, DecisionInput, ExecutionObserver, ObservationKind, ScriptedDecision, Turn,
+    };
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<ModelRequest>>);
+    #[async_trait::async_trait]
+    impl ModelProvider for Recording {
+        async fn complete(&self, r: ModelRequest) -> Result<ModelResponse, FxError> {
+            self.0.lock().unwrap().push(r);
+            Ok(ModelResponse::new("r", "ok", fx_core::Usage::new(1, 1)))
+        }
+    }
+
+    let (script, marker) = fake_compute("cycle");
+    let compute = Arc::new(ComputeExecutor::with_binary(&script));
+    let model = Arc::new(Recording::default());
+    let agent = Agent::new(model.clone())
+        .with_capabilities(compute.clone())
+        .with_executor(compute)
+        .with_decision_boundary(Arc::new(ScriptedDecision::new(
+            DecisionInput::RequestCapability {
+                execution_id: ExecutionId::new("real-1"),
+                capability_id: SELFTEST_INTENT.into(),
+                inputs: Default::default(),
+            },
+        )))
+        .with_observer(Arc::new(ExecutionObserver));
+
+    let first = agent.decide(Turn::new("self-test")).await.unwrap();
+    let AgentDecision::RequestCapability(request) = first.decision.unwrap() else {
+        panic!()
+    };
+    assert!(!marker.exists(), "nothing runs before the caller executes");
+
+    let result = agent
+        .execute_capability(&request)
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    assert!(marker.exists());
+    let observation = agent.observe(&result).unwrap();
+    assert_eq!(observation.kind, ObservationKind::ExecutionCompleted);
+    assert_eq!(observation.receipt_id.as_deref(), Some("sha256:fake"));
+
+    agent
+        .turn_with_observations(Turn::new("what happened?"), &[observation])
+        .await
+        .unwrap();
+    let requests = model.0.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].messages[0]
+            .content
+            .contains("execution_id: \"real-1\"")
+    );
+    assert!(
+        requests[1].messages[0]
+            .content
+            .contains("receipt_id: \"sha256:fake\"")
+    );
+}
+
+#[tokio::test]
+async fn compute_nonzero_exit_is_observed_as_failed_reality() {
+    use chip_core::{ExecutionObserver, ObservationKind, Observer};
+    let dir = std::env::temp_dir().join(format!("chip-compute-fail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-compute");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ncat <<'EOF'\n{\"status\":\"completed\",\"exit_code\":3,\"stdout\":{\"text\":\"selftest ok\\n\"},\"stderr\":{\"text\":\"\"},\"receipt\":{\"receipt_hash\":\"sha256:bad\"}}\nEOF\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let result = chip_core::Executor::execute(
+        &ComputeExecutor::with_binary(&script),
+        chip_core::ExecutionRequest::new(ExecutionId::new("f1"), SELFTEST_INTENT),
+    )
+    .await
+    .unwrap();
+    // Compute's exit code decides; the "ok" text does not.
+    let observation = ExecutionObserver.observe(&result).unwrap();
+    assert_eq!(observation.kind, ObservationKind::ExecutionFailed);
+    assert_eq!(observation.receipt_id.as_deref(), Some("sha256:bad"));
+    let _ = std::fs::remove_dir_all(dir);
+}

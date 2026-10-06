@@ -139,3 +139,61 @@ fn cli_test_cycle_mode_runs_the_bounded_cycle() {
         );
     }
 }
+
+#[test]
+fn cli_test_workload_proves_the_bounded_cycle_offline() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "chip-cli", "--quiet", "--", "--test-workload"])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Decision: request compute.selftest",
+        "Kind: execution.completed",
+        "Response: observed the execution result",
+        "Model calls: 2",
+        "Executions: 1",
+        "Observations: 1",
+        "Automatic follow-ups: 0",
+        "Bounded workload completed.",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}
+
+/// Live path: either really ran on Compute (with a receipt) or explicitly skipped.
+/// It must never claim completion when skipped, nor fall back to a test executor.
+#[test]
+fn cli_test_real_cycle_is_real_or_explicitly_skipped() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-real-cycle",
+        ])
+        .output()
+        .expect("CLI should execute");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.contains("SKIPPED — Compute unavailable") {
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "skip has its own exit status"
+        );
+        assert!(!stdout.contains("Bounded workload completed."), "{stdout}");
+        eprintln!("SKIPPED — Compute unavailable");
+    } else {
+        assert!(output.status.success(), "{stdout}");
+        assert!(stdout.contains("(real Compute)"), "{stdout}");
+        assert!(stdout.contains("Receipt: sha256:"), "{stdout}");
+        assert!(stdout.contains("Bounded workload completed."), "{stdout}");
+        eprintln!("PASSED — real Compute execution");
+    }
+}
