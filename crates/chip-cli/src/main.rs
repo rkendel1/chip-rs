@@ -1,4 +1,5 @@
 mod benchmark;
+mod live_benchmark;
 
 use std::sync::Arc;
 
@@ -846,8 +847,13 @@ async fn main() {
                 std::process::exit(3);
             }
         };
-        let calls: usize = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(5);
-        let model = config.model.to_string();
+        let count: usize = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(5);
+        let meta = live_benchmark::Meta::new(
+            &config.provider,
+            &config.model.to_string(),
+            &config.endpoint,
+        );
+        let secret = config.api_key.as_ref().map(|k| k.expose().to_string());
         let provider = match HttpProvider::new(config) {
             Ok(provider) => provider,
             Err(error) => {
@@ -855,25 +861,23 @@ async fn main() {
                 std::process::exit(1);
             }
         };
-        let agent = Agent::with_model(Arc::new(provider), model);
-        let mut samples = Vec::new();
-        for _ in 0..calls.max(1) {
-            let started = std::time::Instant::now();
-            if let Err(error) = agent.turn(Turn::new("Reply with one word: ready")).await {
-                eprintln!("error: {error}");
-                std::process::exit(1);
-            }
-            samples.push(started.elapsed());
-        }
-        samples.sort();
-        println!("Live model latency over {} real calls", samples.len());
-        println!(
-            "  min: {:?}\n  median: {:?}\n  max: {:?}",
-            samples[0],
-            samples[samples.len() / 2],
-            samples[samples.len() - 1]
+        let report = live_benchmark::run(Arc::new(provider), meta, count).await;
+        // Local reference, measured now so nothing is hard-coded.
+        let local = benchmark::run(200)
+            .await
+            .ok()
+            .map(|r| live_benchmark::LocalReference {
+                evidence_hit: r.evidence_hit.stats.median,
+                rust: r.rust.stats.median,
+                wasm: r.wasm.stats.median,
+            });
+        print!(
+            "{}",
+            live_benchmark::render(&report, local.as_ref(), secret.as_deref())
         );
-        println!("Compare with the local figures from --benchmark-local-reasoner.");
+        if report.errors() > 0 {
+            std::process::exit(1);
+        }
         return;
     }
 

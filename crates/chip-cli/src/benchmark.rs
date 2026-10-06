@@ -30,7 +30,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn from(samples: &[Duration]) -> Stats {
+    pub(crate) fn from(samples: &[Duration]) -> Stats {
         let percentile = |sorted: &[Duration], p: f64| -> Duration {
             let rank = ((sorted.len() as f64) * p).ceil() as usize;
             sorted[rank.clamp(1, sorted.len()) - 1]
@@ -344,7 +344,7 @@ pub async fn run(per_state: usize) -> Result<Report, String> {
     })
 }
 
-fn fmt(d: Duration) -> String {
+pub(crate) fn fmt(d: Duration) -> String {
     let ns = d.as_nanos();
     if ns >= 1_000_000 {
         format!("{:.2} ms", ns as f64 / 1e6)
