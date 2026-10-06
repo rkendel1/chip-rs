@@ -25,13 +25,30 @@ impl Turn {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
-    TurnReceived { message: String },
-    RequestBuilt { model: String },
-    ModelInvoked { model: String },
-    ModelResponded { output: String },
-    TurnCompleted { response: String },
+    TurnReceived {
+        message: String,
+    },
+    RequestBuilt {
+        model: String,
+    },
+    ModelInvoked {
+        model: String,
+    },
+    ModelResponded {
+        output: String,
+    },
+    TurnCompleted {
+        response: String,
+    },
     Execution(ExecutionEvent),
     Capability(CapabilityEvent),
+    TurnStarted {
+        message: String,
+    },
+    /// `capability` is `None` for a plain response.
+    DecisionMade {
+        capability: Option<CapabilityId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +61,9 @@ pub struct TurnResult {
 pub enum AgentError {
     InvalidTurn(String),
     Provider(String),
+    Decision(DecisionError),
+    Capability(CapabilityError),
+    Execution(ExecutionError),
 }
 
 /// Stable, opaque name of a declared ability (for example `vendor.operation`).
@@ -305,6 +325,24 @@ pub struct ExecutionReport {
     pub events: Vec<ExecutionEvent>,
 }
 
+struct DecideStep {
+    turn: TurnResult,
+    response: ModelResponse,
+    decision: Result<AgentDecision, DecisionError>,
+    capability_events: Vec<CapabilityEvent>,
+}
+
+/// In-memory result of one complete `Agent::run_turn`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOutcome {
+    pub turn: Turn,
+    pub response: ModelResponse,
+    pub decision: AgentDecision,
+    /// `None` for a response; `Some` when a capability was executed.
+    pub execution: Option<ExecutionResult>,
+    pub events: Vec<AgentEvent>,
+}
+
 /// The outcome of `Agent::decide`: the model turn and the decision about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionReport {
@@ -323,6 +361,9 @@ impl fmt::Display for AgentError {
         match self {
             Self::InvalidTurn(message) => write!(f, "invalid turn: {message}"),
             Self::Provider(message) => write!(f, "provider error: {message}"),
+            Self::Decision(error) => write!(f, "{error}"),
+            Self::Capability(error) => write!(f, "{error}"),
+            Self::Execution(error) => write!(f, "{error}"),
         }
     }
 }
@@ -363,7 +404,17 @@ impl Agent {
     /// One model turn, then one decision about its response. Decides only;
     /// nothing is validated against the executor or executed.
     pub async fn decide(&self, turn: Turn) -> Result<DecisionReport, AgentError> {
-        let (turn, response) = self.run_turn(turn).await?;
+        let step = self.decide_step(turn).await?;
+        Ok(DecisionReport {
+            turn: step.turn,
+            decision: step.decision,
+        })
+    }
+
+    /// Shared by `decide` and `run_turn`: one model turn, one decision.
+    async fn decide_step(&self, turn: Turn) -> Result<DecideStep, AgentError> {
+        let (turn, response) = self.model_turn(turn).await?;
+        let mut capability_events = Vec::new();
         let decision = match &self.decision {
             None => Err(DecisionError::InvalidDecision(
                 "no decision boundary injected".to_string(),
@@ -371,7 +422,11 @@ impl Agent {
             Some(boundary) => {
                 let capabilities = match &self.capabilities {
                     None => Ok(Vec::new()),
-                    Some(_) => self.discover_capabilities().await.result,
+                    Some(_) => {
+                        let report = self.discover_capabilities().await;
+                        capability_events = report.events;
+                        report.result
+                    }
                 };
                 match capabilities {
                     Ok(capabilities) => boundary.decide(&response, &capabilities),
@@ -379,7 +434,61 @@ impl Agent {
                 }
             }
         };
-        Ok(DecisionReport { turn, decision })
+        Ok(DecideStep {
+            turn,
+            response,
+            decision,
+            capability_events,
+        })
+    }
+
+    /// The complete single-turn lifecycle: one model call, one decision, and at
+    /// most one execution. It never loops, retries, or feeds results back to
+    /// the model. A capability that validates but whose execution reports
+    /// failure still yields an outcome; `AgentError::Execution` is reserved for
+    /// the executor being unable to perform the operation at all.
+    pub async fn run_turn(&self, turn: Turn) -> Result<TurnOutcome, AgentError> {
+        let message = turn.user_message.clone();
+        let step = self.decide_step(turn.clone()).await?;
+
+        let mut events = vec![AgentEvent::TurnStarted { message }];
+        events.extend(
+            step.capability_events
+                .into_iter()
+                .map(AgentEvent::Capability),
+        );
+
+        let decision = step.decision.map_err(AgentError::Decision)?;
+        events.push(AgentEvent::DecisionMade {
+            capability: match &decision {
+                AgentDecision::Respond(_) => None,
+                AgentDecision::RequestCapability(request) => Some(request.capability_id.clone()),
+            },
+        });
+
+        let execution = match &decision {
+            AgentDecision::Respond(_) => None,
+            AgentDecision::RequestCapability(request) => {
+                let execution_request = self
+                    .validate_capability_request(request)
+                    .await
+                    .map_err(AgentError::Capability)?;
+                let report = self.execute(execution_request).await;
+                events.extend(report.events.into_iter().map(AgentEvent::Execution));
+                Some(report.result.map_err(AgentError::Execution)?)
+            }
+        };
+
+        events.push(AgentEvent::TurnCompleted {
+            response: step.response.output.clone(),
+        });
+        Ok(TurnOutcome {
+            turn,
+            response: step.response,
+            decision,
+            execution,
+            events,
+        })
     }
 
     /// Validates a capability request: declared, available, valid inputs, in that
@@ -548,10 +657,10 @@ impl Agent {
     }
 
     pub async fn turn(&self, turn: Turn) -> Result<TurnResult, AgentError> {
-        self.run_turn(turn).await.map(|(result, _)| result)
+        self.model_turn(turn).await.map(|(result, _)| result)
     }
 
-    async fn run_turn(&self, turn: Turn) -> Result<(TurnResult, ModelResponse), AgentError> {
+    async fn model_turn(&self, turn: Turn) -> Result<(TurnResult, ModelResponse), AgentError> {
         if turn.user_message.trim().is_empty() {
             return Err(AgentError::InvalidTurn(
                 "turn message cannot be empty".to_string(),

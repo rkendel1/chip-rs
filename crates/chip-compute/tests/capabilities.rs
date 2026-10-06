@@ -150,3 +150,37 @@ async fn unknown_capability_fails_before_execution() {
     assert_eq!(err, CapabilityError::Unknown("compute.nope".into()));
     assert!(!marker.exists());
 }
+
+#[tokio::test]
+async fn run_turn_executes_a_capability_through_compute_with_receipt() {
+    use chip_core::{AgentDecision, DecisionInput, ScriptedDecision, Turn};
+    struct Model;
+    #[async_trait::async_trait]
+    impl ModelProvider for Model {
+        async fn complete(&self, _r: ModelRequest) -> Result<ModelResponse, FxError> {
+            Ok(ModelResponse::new("r", "ok", fx_core::Usage::new(1, 1)))
+        }
+    }
+    let (script, marker) = fake_compute("run-turn");
+    let executor = Arc::new(ComputeExecutor::with_binary(&script));
+    let agent = Agent::new(Arc::new(Model))
+        .with_decision_boundary(Arc::new(ScriptedDecision::new(
+            DecisionInput::RequestCapability {
+                execution_id: ExecutionId::new("turn-1"),
+                capability_id: SELFTEST_INTENT.into(),
+                inputs: Default::default(),
+            },
+        )))
+        .with_capabilities(executor.clone())
+        .with_executor(executor);
+
+    let outcome = agent.run_turn(Turn::new("hi")).await.unwrap();
+    assert!(matches!(
+        outcome.decision,
+        AgentDecision::RequestCapability(_)
+    ));
+    let result = outcome.execution.unwrap();
+    assert_eq!(result.id, ExecutionId::new("turn-1"));
+    assert_eq!(result.receipt_id.as_deref(), Some("sha256:fake"));
+    assert!(marker.exists());
+}

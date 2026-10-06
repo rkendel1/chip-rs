@@ -67,3 +67,24 @@ fn cli_test_decision_mode_runs_the_decision_path() {
     );
     assert!(stdout.contains("test execution completed"), "{stdout}");
 }
+
+#[test]
+fn cli_test_turn_mode_runs_the_full_lifecycle() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "chip-cli", "--quiet", "--", "--test-turn"])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Decision: request capability test.operation",
+        "Execution Success: test execution completed",
+        "Events: 8",
+        "Turn completed",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}

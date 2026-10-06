@@ -161,6 +161,43 @@ async fn main() {
         return;
     }
 
+    if args.len() > 1 && args[1] == "--test-turn" {
+        // Deterministic lifecycle demonstration: no network, keys, or Compute.
+        let agent = Agent::new(Arc::new(TestModelProvider))
+            .with_decision_boundary(Arc::new(ScriptedDecision::new(
+                DecisionInput::RequestCapability {
+                    execution_id: ExecutionId::new("turn-1"),
+                    capability_id: "test.operation".into(),
+                    inputs: Default::default(),
+                },
+            )))
+            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_executor(Arc::new(TestExecutor));
+        match agent.run_turn(Turn::new("Hello")).await {
+            Ok(outcome) => {
+                println!("Chip");
+                println!("Model response: {}", outcome.response.output);
+                match &outcome.decision {
+                    AgentDecision::RequestCapability(request) => {
+                        println!("Decision: request capability {}", request.capability_id)
+                    }
+                    AgentDecision::Respond(_) => println!("Decision: respond"),
+                }
+                match &outcome.execution {
+                    Some(result) => println!("Execution {:?}: {}", result.status, result.output),
+                    None => println!("Execution: none"),
+                }
+                println!("Events: {}", outcome.events.len());
+                println!("Turn completed");
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     if args.len() > 1 && args[1] == "--compute-test" {
         // Explicit, opt-in: runs one real Compute execution. Never a fallback.
         let agent = Agent::new(Arc::new(TestModelProvider))
