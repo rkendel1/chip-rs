@@ -27,7 +27,9 @@ fn deps(manifest: &str) -> Vec<String> {
 #[test]
 fn the_host_depends_only_on_chip_core_and_the_wasm_engine() {
     let names = deps(&read("Cargo.toml"));
-    assert_eq!(names, ["chip-core", "wasmi"]);
+    assert_eq!(names, ["chip-core", "wasmi", "wat"]);
+    // `wat` is only the optional fixture compiler, never part of the reasoner itself.
+    assert!(read("Cargo.toml").contains("wat = { version = \"1\", optional = true }"));
 }
 
 #[test]

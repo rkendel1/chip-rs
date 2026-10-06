@@ -306,3 +306,66 @@ fn cli_test_local_reasoner_orders_evidence_reasoning_and_escalation() {
         );
     }
 }
+
+/// Correctness and accounting only; timings are never asserted.
+#[test]
+fn cli_benchmark_local_reasoner_is_correct_and_accounted_for() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--benchmark-local-reasoner",
+            "60",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Local Reasoning Benchmark",
+        "Cases: 180",
+        "Rust:",
+        "WASM:",
+        "FX:",
+        "Evidence (hit):",
+        "Evidence (stale) + WASM:",
+        "model calls: 180",
+        "executions: 0",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+    assert!(!stdout.contains("executions: 1"), "{stdout}");
+}
+
+#[test]
+fn cli_benchmark_live_reasoner_skips_without_configuration() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--benchmark-live-reasoner",
+        ])
+        .env_remove("CHIP_MODEL")
+        .env_remove("CHIP_ENDPOINT")
+        .output()
+        .expect("CLI should execute");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("SKIPPED — live provider not configured"),
+        "{stdout}"
+    );
+    assert_eq!(output.status.code(), Some(3));
+}

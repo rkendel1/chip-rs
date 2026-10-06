@@ -153,3 +153,30 @@ impl LocalReasoner for WasmLocalReasoner {
         decode_verdict(&bytes)
     }
 }
+
+/// Benchmark fixture: the same policy as `TestLocalReasoner::default()`
+/// (valid continues; stale and unknown escalate), with identical texts.
+#[cfg(feature = "fixture")]
+pub const BENCHMARK_FIXTURE_WAT: &str = r#"
+(module
+  (memory (export "memory") 1)
+  (data (i32.const 1024) "\00\11\00evidence is valid")
+  (data (i32.const 1536) "\01\11\00evidence is stale")
+  (data (i32.const 2048) "\01\0b\00no evidence")
+  (data (i32.const 2560) "\01\0b\00bad version")
+  (func (export "input_offset") (result i32) (i32.const 4096))
+  (func (export "reason") (param $len i32) (result i32)
+    (if (i32.ne (i32.load8_u (i32.const 4096)) (i32.const 1))
+      (then (return (i32.const 2560))))
+    (if (i32.eq (i32.load8_u (i32.const 4097)) (i32.const 0))
+      (then (return (i32.const 1024))))
+    (if (result i32) (i32.eq (i32.load8_u (i32.const 4097)) (i32.const 1))
+      (then (i32.const 1536))
+      (else (i32.const 2048)))))
+"#;
+
+/// The compiled benchmark fixture.
+#[cfg(feature = "fixture")]
+pub fn benchmark_fixture() -> Vec<u8> {
+    wat::parse_str(BENCHMARK_FIXTURE_WAT).expect("benchmark fixture is valid WAT")
+}

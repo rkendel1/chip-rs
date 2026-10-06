@@ -1,3 +1,5 @@
+mod benchmark;
+
 use std::sync::Arc;
 
 use chip_core::{
@@ -816,6 +818,62 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--benchmark-local-reasoner" {
+        // Informational timings; correctness and call counts are asserted inside.
+        let per_state = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(10_000);
+        match benchmark::run(per_state).await {
+            Ok(report) => print!("{}", benchmark::render(&report)),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--benchmark-live-reasoner" {
+        // Optional: needs the same CHIP_* configuration as a live model request.
+        // Exit status 3 means SKIPPED. Never part of the deterministic acceptance path.
+        let config = match config_from_env(|name| std::env::var(name).ok()) {
+            Ok(config) => config,
+            Err(_) => {
+                println!(
+                    "SKIPPED — live provider not configured (set CHIP_MODEL and CHIP_ENDPOINT)"
+                );
+                std::process::exit(3);
+            }
+        };
+        let calls: usize = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(5);
+        let model = config.model.to_string();
+        let provider = match HttpProvider::new(config) {
+            Ok(provider) => provider,
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        };
+        let agent = Agent::with_model(Arc::new(provider), model);
+        let mut samples = Vec::new();
+        for _ in 0..calls.max(1) {
+            let started = std::time::Instant::now();
+            if let Err(error) = agent.turn(Turn::new("Reply with one word: ready")).await {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+            samples.push(started.elapsed());
+        }
+        samples.sort();
+        println!("Live model latency over {} real calls", samples.len());
+        println!(
+            "  min: {:?}\n  median: {:?}\n  max: {:?}",
+            samples[0],
+            samples[samples.len() / 2],
+            samples[samples.len() - 1]
+        );
+        println!("Compare with the local figures from --benchmark-local-reasoner.");
         return;
     }
 

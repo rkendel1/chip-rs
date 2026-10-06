@@ -89,6 +89,7 @@ dependencies = [
  "async-trait",
  "chip-compute",
  "chip-core",
+ "chip-wasm-reasoner",
  "fx-core",
  "fx-provider-http",
  "serde_json",
