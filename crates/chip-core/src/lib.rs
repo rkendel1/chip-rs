@@ -83,6 +83,9 @@ pub struct ExecutionResult {
     pub id: ExecutionId,
     pub status: ExecutionStatus,
     pub output: String,
+    /// Stable identifier of the executor's evidence for this execution, if it
+    /// provides one. Chip preserves it and does not interpret it.
+    pub receipt_id: Option<String>,
 }
 
 impl ExecutionResult {
@@ -91,6 +94,7 @@ impl ExecutionResult {
             id,
             status: ExecutionStatus::Success,
             output: output.into(),
+            receipt_id: None,
         }
     }
 
@@ -99,7 +103,13 @@ impl ExecutionResult {
             id,
             status: ExecutionStatus::Failure,
             output: output.into(),
+            receipt_id: None,
         }
+    }
+
+    pub fn with_receipt_id(mut self, receipt_id: impl Into<String>) -> Self {
+        self.receipt_id = Some(receipt_id.into());
+        self
     }
 }
 

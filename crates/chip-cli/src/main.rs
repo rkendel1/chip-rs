@@ -95,6 +95,33 @@ async fn main() {
         return;
     }
 
+    if args.len() > 1 && args[1] == "--compute-test" {
+        // Explicit, opt-in: runs one real Compute execution. Never a fallback.
+        let agent = Agent::new(Arc::new(TestModelProvider))
+            .with_executor(Arc::new(chip_compute::ComputeExecutor::new()));
+        let request = ExecutionRequest::new(
+            ExecutionId::new("compute-test-1"),
+            chip_compute::SELFTEST_INTENT,
+        );
+        match agent.execute(request).await.result {
+            Ok(result) => {
+                println!("Chip");
+                println!("Compute execution {:?}: {}", result.status, result.output);
+                if let Some(receipt) = result.receipt_id {
+                    println!("Receipt: {receipt}");
+                }
+                if result.status != chip_core::ExecutionStatus::Success {
+                    std::process::exit(1);
+                }
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     if args.len() > 1 {
         if let Err(message) = run_configured(args[1..].join(" ")).await {
             eprintln!("error: {message}");

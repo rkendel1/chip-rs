@@ -51,10 +51,13 @@ fn chip_core_owns_the_executor_trait() {
 }
 
 #[test]
-fn no_workspace_crate_is_an_execution_adapter() {
+fn only_chip_compute_is_an_execution_adapter() {
     let crates = chip_core().parent().unwrap().to_path_buf();
     for entry in fs::read_dir(crates).unwrap() {
         let name = norm(&entry.unwrap().file_name().to_string_lossy());
-        assert!(!name.contains("compute"), "unexpected adapter crate {name}");
+        assert!(
+            !name.contains("compute") || name == "chip-compute",
+            "unexpected adapter crate {name}"
+        );
     }
 }
