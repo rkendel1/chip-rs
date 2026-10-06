@@ -70,6 +70,16 @@ impl EvaluationResult {
             .count()
     }
 
+    /// How many fewer needless escalations this evaluation has than `baseline`,
+    /// counted only when it makes no false continue: `None` otherwise. A candidate
+    /// that is more accurate but unsafe is not an improvement for Chip.
+    pub fn safe_improvement_over(&self, baseline: &EvaluationResult) -> Option<isize> {
+        if self.false_continues() > 0 {
+            return None;
+        }
+        Some(baseline.needless_escalations() as isize - self.needless_escalations() as isize)
+    }
+
     pub fn median_latency(&self) -> Duration {
         let mut all: Vec<Duration> = self.cases.iter().map(|c| c.latency).collect();
         all.sort();

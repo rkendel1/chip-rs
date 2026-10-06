@@ -410,3 +410,54 @@ fn cli_test_reasoning_corpus_replays_rust_and_wasm_offline() {
         "baseline mismatches must be surfaced: {stdout}"
     );
 }
+
+/// Optional infrastructure: either the real model is available (and the demo runs) or the
+/// command reports SKIPPED with its own exit status. Never a false pass.
+#[test]
+fn cli_local_model_reasoner_is_real_or_explicitly_skipped() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-local-model-reasoner",
+        ])
+        .output()
+        .expect("CLI should execute");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.contains("SKIPPED — local model unavailable") {
+        assert_eq!(output.status.code(), Some(3));
+        assert!(!stdout.contains("Native Local Model Reasoner"), "{stdout}");
+    } else {
+        assert!(output.status.success(), "{stdout}");
+        assert!(
+            stdout.contains("KnownValid: evidence reused, local model calls: 0"),
+            "{stdout}"
+        );
+        assert!(stdout.contains("Executions: 0") && stdout.contains("Remote model calls: 0"));
+    }
+}
+
+#[test]
+fn cli_corpus_reports_the_native_model_as_evaluated_or_skipped() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-reasoning-corpus",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Native model: skipped — ") || stdout.contains("Native model:\n  Correct:"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Rust/WASM agreement: 32/32"));
+}

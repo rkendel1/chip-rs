@@ -13,7 +13,20 @@ use chip_wasm_reasoner::{WasmLocalReasoner, benchmark_fixture};
 
 use crate::benchmark::fmt;
 
+/// The native local model's part of the report. Unavailable infrastructure is
+/// "skipped", never a model failure.
+pub enum NativeOutcome {
+    Skipped(String),
+    Evaluated {
+        result: EvaluationResult,
+        description: String,
+        init: std::time::Duration,
+        samples: Vec<crate::native::Sample>,
+    },
+}
+
 pub struct CorpusReport {
+    pub native: NativeOutcome,
     pub cases: Vec<ReasoningCase>,
     pub rust: EvaluationResult,
     pub wasm: EvaluationResult,
@@ -61,7 +74,21 @@ pub fn run() -> Result<CorpusReport, String> {
         }
     }
     let disagreements = agreement(&rust, &wasm);
+    // The same evaluator and the same corpus; the model is just another reasoner.
+    let native = match crate::native::load() {
+        Err(reason) => NativeOutcome::Skipped(reason),
+        Ok(model) => {
+            let result = evaluate(&*model.reasoner, &cases);
+            NativeOutcome::Evaluated {
+                result,
+                description: model.description.clone(),
+                init: model.init,
+                samples: model.take_samples(),
+            }
+        }
+    };
     Ok(CorpusReport {
+        native,
         cases,
         rust,
         wasm,
@@ -83,6 +110,38 @@ fn block(name: &str, r: &EvaluationResult) -> String {
     )
 }
 
+fn native_block(report: &CorpusReport) -> String {
+    match &report.native {
+        NativeOutcome::Skipped(reason) => format!("Native model: skipped — {reason}\n\n"),
+        NativeOutcome::Evaluated {
+            result,
+            description,
+            init,
+            samples,
+        } => {
+            let mut out = block("Native model", result);
+            out += &format!("  Model: {description}\n  Initialization: {}\n", fmt(*init));
+            let improvement = result.safe_improvement_over(&report.rust);
+            out += &match improvement {
+                Some(n) => format!(
+                    "  Safe improvement over Rust baseline: {n} needless escalation(s) recovered, 0 false continues\n"
+                ),
+                None => format!(
+                    "  Safe improvement over Rust baseline: none ({} false continue(s))\n",
+                    result.false_continues()
+                ),
+            };
+            if !samples.is_empty() {
+                let mean = samples.iter().map(|s| s.confidence).sum::<f64>() / samples.len() as f64;
+                out += &format!("  Mean confidence (observational only): {mean:.3}\n");
+            }
+            out += "\n";
+            out += &mismatches(result);
+            out
+        }
+    }
+}
+
 fn mismatches(r: &EvaluationResult) -> String {
     let mut out = String::new();
     for c in r.mismatches() {
@@ -101,6 +160,7 @@ pub fn render(report: &CorpusReport) -> String {
     let mut out = format!("Reasoning Corpus\n\nCases: {}\n\n", report.cases.len());
     out += &block("Rust", &report.rust);
     out += &block("WASM", &report.wasm);
+    out += &native_block(report);
     out += &format!(
         "Rust/WASM agreement: {}/{}\n\n",
         report.cases.len() - report.disagreements.len(),
@@ -183,6 +243,83 @@ mod tests {
         );
         assert!(text.contains("False continues: 0") && text.contains("Model calls: 0"));
         assert!(!text.contains("DISAGREEMENT"));
+    }
+
+    /// A candidate local model, as a plain reasoner: continues exactly where the corpus
+    /// says it should (the best possible safe model).
+    struct Oracle;
+
+    impl LocalReasoner for Oracle {
+        fn reason(&self, input: &ReasoningInput) -> Result<LocalReasoningResult, ReasoningError> {
+            let expected = corpus()
+                .into_iter()
+                .find(|c| c.input == *input)
+                .map(|c| c.expected);
+            Ok(match expected {
+                Some(Verdict::Continue) => LocalReasoningResult::Continue {
+                    rationale: "o".into(),
+                },
+                _ => LocalReasoningResult::Escalate { reason: "o".into() },
+            })
+        }
+    }
+
+    struct AlwaysContinue;
+
+    impl LocalReasoner for AlwaysContinue {
+        fn reason(&self, _i: &ReasoningInput) -> Result<LocalReasoningResult, ReasoningError> {
+            Ok(LocalReasoningResult::Continue {
+                rationale: "c".into(),
+            })
+        }
+    }
+
+    fn with_native(reasoner: &dyn LocalReasoner) -> String {
+        let mut report = run().unwrap();
+        let result = evaluate(reasoner, &report.cases);
+        report.native = NativeOutcome::Evaluated {
+            result,
+            description: "test/model (revision r), backend onnx, target Cpu".into(),
+            init: std::time::Duration::from_millis(5),
+            samples: vec![crate::native::Sample { confidence: 0.9 }],
+        };
+        render(&report)
+    }
+
+    #[test]
+    fn a_safe_native_model_shows_its_improvement_over_the_baseline() {
+        let text = with_native(&Oracle);
+        assert!(
+            text.contains("Native model:") && text.contains("False continues: 0"),
+            "{text}"
+        );
+        assert!(text.contains("Safe improvement over Rust baseline: 4 needless escalation(s) recovered, 0 false continues"), "{text}");
+        assert!(
+            text.contains("Model: test/model")
+                && text.contains("Mean confidence (observational only)")
+        );
+    }
+
+    #[test]
+    fn an_unsafe_native_model_is_not_credited_even_if_more_accurate_overall() {
+        let text = with_native(&AlwaysContinue);
+        assert!(
+            text.contains("Safe improvement over Rust baseline: none"),
+            "{text}"
+        );
+        assert!(!text.contains("recovered, 0 false continues"));
+    }
+
+    #[test]
+    fn an_unavailable_native_model_is_skipped_not_failed() {
+        let mut report = run().unwrap();
+        report.native = NativeOutcome::Skipped("model unavailable".into());
+        let text = render(&report);
+        assert!(
+            text.contains("Native model: skipped — model unavailable"),
+            "{text}"
+        );
+        assert!(text.contains("Rust:") && text.contains("WASM:"));
     }
 
     #[derive(Default)]

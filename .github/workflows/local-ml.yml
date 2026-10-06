@@ -1,0 +1,25 @@
+name: Local ML (optional)
+
+# Builds and tests the native local-model reasoner. The runtime's build script downloads
+# ONNX Runtime, so this is separate from normal PR validation.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/chip-local-ml/**"
+      - ".github/workflows/local-ml.yml"
+
+jobs:
+  local-ml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Adapter tests (real runtime API, test-double models)
+        run: cargo test -p chip-local-ml --features runtime
+      - name: CLI with the local-ml feature
+        run: cargo test -p chip-cli --features local-ml
+      - name: Real model (only if Laya is installed and READY)
+        run: |
+          cargo run -p chip-cli --features local-ml -- --test-local-model-reasoner || [ $? -eq 3 ]
+          cargo run -p chip-cli --features local-ml -- --test-reasoning-corpus

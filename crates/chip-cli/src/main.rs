@@ -1,6 +1,7 @@
 mod benchmark;
 mod corpus_eval;
 mod live_benchmark;
+mod native;
 
 use std::sync::Arc;
 
@@ -838,6 +839,29 @@ async fn main() {
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-local-model-reasoner" {
+        // Optional infrastructure: exit 3 (SKIPPED) when the local model is not available.
+        match native::load() {
+            Err(reason) => {
+                println!("SKIPPED — local model unavailable ({reason})");
+                std::process::exit(3);
+            }
+            Ok(model) => {
+                #[cfg(feature = "local-ml")]
+                match native::demo(&model) {
+                    Ok(text) => print!("{text}"),
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        std::process::exit(1);
+                    }
+                }
+                #[cfg(not(feature = "local-ml"))]
+                let _ = model;
             }
         }
         return;

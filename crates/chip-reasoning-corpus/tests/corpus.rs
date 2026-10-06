@@ -242,3 +242,31 @@ fn evaluation_is_repeatable_and_agreement_is_checked_case_by_case() {
     }
     assert_eq!(agreement(&a, &evaluate(&Flip, &cases)).len(), cases.len());
 }
+
+#[test]
+fn safe_improvement_requires_zero_false_continues() {
+    use chip_core::LocalReasoningResult;
+    struct Fixed(bool);
+    impl LocalReasoner for Fixed {
+        fn reason(&self, input: &ReasoningInput) -> Result<LocalReasoningResult, ReasoningError> {
+            // Correct everywhere the corpus expects Continue (unsafe elsewhere) or never continues.
+            if self.0 {
+                Ok(LocalReasoningResult::Continue {
+                    rationale: "yes".into(),
+                })
+            } else {
+                TestLocalReasoner::default().reason(input)
+            }
+        }
+    }
+    let cases = corpus();
+    let baseline = evaluate(&TestLocalReasoner::default(), &cases);
+    assert_eq!(
+        evaluate(&Fixed(false), &cases).safe_improvement_over(&baseline),
+        Some(0)
+    );
+    // Always continuing removes every needless escalation but is unsafe: no credit.
+    let unsafe_result = evaluate(&Fixed(true), &cases);
+    assert!(unsafe_result.accuracy() < 1.0 && unsafe_result.needless_escalations() == 0);
+    assert_eq!(unsafe_result.safe_improvement_over(&baseline), None);
+}

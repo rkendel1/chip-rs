@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+# `local-ml` adds the native local-model reasoner. It needs ONNX Runtime at build time
+# (downloaded by the runtime's build script, or supplied via ORT_LIB_LOCATION), so it is off by default.
+[features]
+local-ml = ["dep:chip-local-ml", "chip-local-ml/runtime"]
+
 [dependencies]
 chip-core = { path = "../chip-core" }
 fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+chip-local-ml = { path = "../chip-local-ml", optional = true }
 chip-wasm-reasoner = { path = "../chip-wasm-reasoner", features = ["fixture"] }
 fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"

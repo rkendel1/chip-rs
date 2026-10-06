@@ -20,6 +20,7 @@ use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 /// Latency summary over one measured path.
 #[derive(Debug, Clone)]
 pub struct Stats {
+    pub samples: usize,
     pub first: Duration,
     pub min: Duration,
     pub median: Duration,
@@ -40,6 +41,7 @@ impl Stats {
         let mut rest = samples[1..].to_vec();
         rest.sort();
         Stats {
+            samples: samples.len(),
             first: samples[0],
             min: sorted[0],
             median: percentile(&sorted, 0.5),
@@ -74,6 +76,19 @@ pub struct Report {
     pub fx: Measured,
     pub evidence_hit: Measured,
     pub evidence_stale_wasm: Measured,
+    pub native: NativeTiming,
+}
+
+/// Timing of the optional native local model, with initialization kept apart from inference.
+#[derive(Debug, Clone)]
+pub enum NativeTiming {
+    Skipped(String),
+    Measured {
+        description: String,
+        init: Duration,
+        inference: Stats,
+        errors: usize,
+    },
 }
 
 struct Case {
@@ -332,6 +347,33 @@ pub async fn run(per_state: usize) -> Result<Report, String> {
         );
     }
 
+    // Native local model (optional). Initialization is never mixed into inference timing,
+    // and only a small sample is taken because a real model is slower than the others.
+    let native = match crate::native::load() {
+        Err(reason) => NativeTiming::Skipped(reason),
+        Ok(model) => {
+            let mut samples = Vec::new();
+            let mut errors = 0;
+            for case in cases.iter().take(per_state.min(20) * 3) {
+                let started = Instant::now();
+                match model.reasoner.reason(&case.input) {
+                    Ok(_) => samples.push(started.elapsed()),
+                    Err(_) => errors += 1,
+                }
+            }
+            if samples.is_empty() {
+                NativeTiming::Skipped("the model produced no verdicts".to_string())
+            } else {
+                NativeTiming::Measured {
+                    description: model.description.clone(),
+                    init: model.init,
+                    inference: Stats::from(&samples),
+                    errors,
+                }
+            }
+        }
+    };
+
     Ok(Report {
         cases: n,
         per_state,
@@ -341,6 +383,7 @@ pub async fn run(per_state: usize) -> Result<Report, String> {
         fx,
         evidence_hit,
         evidence_stale_wasm,
+        native,
     })
 }
 
@@ -390,6 +433,27 @@ pub fn render(report: &Report) -> String {
     ] {
         out += &section(m);
         out.push('\n');
+    }
+    match &report.native {
+        NativeTiming::Skipped(reason) => out += &format!("Native model: skipped — {reason}\n\n"),
+        NativeTiming::Measured {
+            description,
+            init,
+            inference,
+            errors,
+        } => {
+            out += &format!(
+                "Native model ({description}):\n  initialization (runtime + load): {}\n  first inference: {}\n  subsequent median: {}\n  min: {}\n  median: {}\n  p95: {}\n  max: {}\n  samples: {} (errors: {errors})\n\n",
+                fmt(*init),
+                fmt(inference.first),
+                fmt(inference.repeated_median),
+                fmt(inference.min),
+                fmt(inference.median),
+                fmt(inference.p95),
+                fmt(inference.max),
+                inference.samples
+            );
+        }
     }
     out += &format!(
         "Ratios of medians (informational):\n  WASM / Rust: {:.1}x\n  FX / WASM: {:.2}x (FX here is an instant deterministic provider: structural overhead only)\n  Evidence stale+WASM / Evidence hit: {:.1}x\n\n",
