@@ -95,5 +95,8 @@ async fn provider_error_propagates_to_agent_error() {
     let agent = Agent::new(provider);
 
     let result = agent.turn(Turn::new("Will fail")).await;
-    assert!(result.is_err(), "provider error should propagate to agent error");
+    assert!(
+        result.is_err(),
+        "provider error should propagate to agent error"
+    );
 }
