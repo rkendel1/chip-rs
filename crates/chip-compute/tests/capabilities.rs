@@ -203,3 +203,34 @@ async fn a_compute_result_passes_through_the_generic_observer() {
     );
     assert_eq!(observation.receipt_id.as_deref(), Some("sha256:fake"));
 }
+
+#[tokio::test]
+async fn a_compute_observation_informs_the_next_deterministic_turn() {
+    use chip_core::{ExecutionObserver, Observer, Turn};
+    use std::sync::Mutex;
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<ModelRequest>>);
+    #[async_trait::async_trait]
+    impl ModelProvider for Recording {
+        async fn complete(&self, r: ModelRequest) -> Result<ModelResponse, FxError> {
+            self.0.lock().unwrap().push(r);
+            Ok(ModelResponse::new("r", "ok", fx_core::Usage::new(1, 1)))
+        }
+    }
+    let (script, _) = fake_compute("next-turn");
+    let result = chip_core::Executor::execute(
+        &ComputeExecutor::with_binary(&script),
+        chip_core::ExecutionRequest::new(ExecutionId::new("n1"), SELFTEST_INTENT),
+    )
+    .await
+    .unwrap();
+    let observation = ExecutionObserver.observe(&result).unwrap();
+    let model = Arc::new(Recording::default());
+    Agent::new(model.clone())
+        .turn_with_observations(Turn::new("next"), &[observation])
+        .await
+        .unwrap();
+    let requests = model.0.lock().unwrap();
+    assert!(requests[0].messages[0].content.contains("sha256:fake"));
+    assert!(requests[0].messages[0].content.contains("n1"));
+}

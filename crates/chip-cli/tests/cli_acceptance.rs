@@ -116,3 +116,26 @@ fn cli_test_observation_mode_prints_the_observation() {
         );
     }
 }
+
+#[test]
+fn cli_test_cycle_mode_runs_the_bounded_cycle() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "chip-cli", "--quiet", "--", "--test-cycle"])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "bounded cycle",
+        "Turn 1: capability requested (test.operation)",
+        "Execution: success",
+        "Observation: execution.completed",
+        "Turn 2: response (I was told the execution completed.)",
+        "Cycle completed",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}

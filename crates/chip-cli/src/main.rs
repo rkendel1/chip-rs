@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use chip_core::{
-    Agent, AgentDecision, CapabilityAvailability, CapabilityDescriptor, CapabilityError,
-    CapabilityId, CapabilityProvider, DecisionInput, ExecutionId, ExecutionObserver,
-    ExecutionRequest, ExecutionResult, ScriptedDecision, TestExecutor, Turn,
+    Agent, AgentDecision, Capability, CapabilityAvailability, CapabilityDescriptor,
+    CapabilityError, CapabilityId, CapabilityProvider, DecisionBoundary, DecisionError,
+    DecisionInput, ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult,
+    ScriptedDecision, TestExecutor, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -19,6 +20,52 @@ impl ModelProvider for TestModelProvider {
             "Hello from the test provider.",
             Usage::new(4, 6),
         ))
+    }
+}
+
+/// Deterministic model for the bounded-cycle demo: it reports whether its request
+/// carried an observation.
+struct CycleModel;
+
+#[async_trait::async_trait]
+impl ModelProvider for CycleModel {
+    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
+        let saw_completion = request
+            .messages
+            .iter()
+            .any(|m| m.content.contains("kind: execution.completed"));
+        let output = if saw_completion {
+            "I was told the execution completed."
+        } else {
+            "I would like to run the capability."
+        };
+        Ok(ModelResponse::new(
+            "cycle-response",
+            output,
+            Usage::new(1, 1),
+        ))
+    }
+}
+
+/// First decision requests a capability; the second responds.
+struct CycleDecisions(std::sync::atomic::AtomicUsize);
+
+impl DecisionBoundary for CycleDecisions {
+    fn decide(
+        &self,
+        response: &ModelResponse,
+        capabilities: &[Capability],
+    ) -> Result<AgentDecision, DecisionError> {
+        let input = if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            DecisionInput::RequestCapability {
+                execution_id: ExecutionId::new("cycle-1"),
+                capability_id: "test.operation".into(),
+                inputs: Default::default(),
+            }
+        } else {
+            DecisionInput::Respond
+        };
+        ScriptedDecision::new(input).decide(response, capabilities)
     }
 }
 
@@ -216,6 +263,63 @@ async fn main() {
                     observation.receipt_id.as_deref().unwrap_or("none")
                 );
             }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-cycle" {
+        // Caller-driven bounded cycle; every step below is an explicit call.
+        let agent = Agent::new(Arc::new(CycleModel))
+            .with_decision_boundary(Arc::new(CycleDecisions(Default::default())))
+            .with_capabilities(Arc::new(DemoCapabilities))
+            .with_executor(Arc::new(TestExecutor))
+            .with_observer(Arc::new(ExecutionObserver));
+        println!("Chip bounded cycle (caller-driven, not autonomous)");
+        let outcome: Result<(), String> = async {
+            let first = agent
+                .decide(Turn::new("Run the test operation"))
+                .await
+                .map_err(|e| e.to_string())?;
+            let Ok(AgentDecision::RequestCapability(request)) = first.decision else {
+                return Err("turn 1 did not request a capability".into());
+            };
+            println!("Turn 1: capability requested ({})", request.capability_id);
+            let report = agent
+                .execute_capability(&request)
+                .await
+                .map_err(|e| e.to_string())?;
+            let result = report.result.map_err(|e| e.to_string())?;
+            println!(
+                "Execution: {}",
+                format!("{:?}", result.status).to_lowercase()
+            );
+            let observation = agent.observe(&result).map_err(|e| e.to_string())?;
+            println!("Observation: {}", observation.kind.as_str());
+            let second = agent
+                .decide_with_observations(
+                    Turn::new("What happened?"),
+                    std::slice::from_ref(&observation),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            match second.decision {
+                Ok(AgentDecision::Respond(response)) => {
+                    println!("Turn 2: response ({})", response.output)
+                }
+                Ok(AgentDecision::RequestCapability(_)) => {
+                    println!("Turn 2: capability requested (not executed)")
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+            Ok(())
+        }
+        .await;
+        match outcome {
+            Ok(()) => println!("Cycle completed"),
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);

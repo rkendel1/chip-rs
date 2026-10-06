@@ -38,6 +38,49 @@ pub struct Observation {
     pub receipt_id: Option<String>,
 }
 
+impl Observation {
+    /// Deterministic, provider-neutral text form handed to the model. Every
+    /// field is carried; string values are quoted and escaped, and the output
+    /// comes last, so output text cannot alter the kind, status or identifiers.
+    pub fn render(&self) -> String {
+        let status = match self.status {
+            ExecutionStatus::Success => "success",
+            ExecutionStatus::Failure => "failure",
+            ExecutionStatus::Cancelled => "cancelled",
+        };
+        let quoted = |value: &Option<String>| match value {
+            Some(text) => quote(text),
+            None => "none".to_string(),
+        };
+        format!(
+            "Observation:\nkind: {}\nexecution_id: {}\nstatus: {}\nreceipt_id: {}\noutput: {}",
+            self.kind.as_str(),
+            quote(&self.execution_id.0),
+            status,
+            quoted(&self.receipt_id),
+            quoted(&self.output),
+        )
+    }
+}
+
+fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:04x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationError {
     /// A valid observation cannot be built from this result.

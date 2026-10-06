@@ -429,7 +429,18 @@ impl Agent {
     /// One model turn, then one decision about its response. Decides only;
     /// nothing is validated against the executor or executed.
     pub async fn decide(&self, turn: Turn) -> Result<DecisionReport, AgentError> {
-        let step = self.decide_step(turn).await?;
+        self.decide_with_observations(turn, &[]).await
+    }
+
+    /// Like `decide`, with caller-supplied observations given to the model for
+    /// this one turn. Decides only; a returned capability request is the
+    /// caller's to validate and execute.
+    pub async fn decide_with_observations(
+        &self,
+        turn: Turn,
+        observations: &[Observation],
+    ) -> Result<DecisionReport, AgentError> {
+        let step = self.decide_step(turn, observations).await?;
         Ok(DecisionReport {
             turn: step.turn,
             decision: step.decision,
@@ -437,8 +448,12 @@ impl Agent {
     }
 
     /// Shared by `decide` and `run_turn`: one model turn, one decision.
-    async fn decide_step(&self, turn: Turn) -> Result<DecideStep, AgentError> {
-        let (turn, response) = self.model_turn(turn).await?;
+    async fn decide_step(
+        &self,
+        turn: Turn,
+        observations: &[Observation],
+    ) -> Result<DecideStep, AgentError> {
+        let (turn, response) = self.model_turn(turn, observations).await?;
         let mut capability_events = Vec::new();
         let decision = match &self.decision {
             None => Err(DecisionError::InvalidDecision(
@@ -474,7 +489,7 @@ impl Agent {
     /// the executor being unable to perform the operation at all.
     pub async fn run_turn(&self, turn: Turn) -> Result<TurnOutcome, AgentError> {
         let message = turn.user_message.clone();
-        let step = self.decide_step(turn.clone()).await?;
+        let step = self.decide_step(turn.clone(), &[]).await?;
 
         let mut events = vec![AgentEvent::TurnStarted { message }];
         events.extend(
@@ -682,20 +697,39 @@ impl Agent {
     }
 
     pub async fn turn(&self, turn: Turn) -> Result<TurnResult, AgentError> {
-        self.model_turn(turn).await.map(|(result, _)| result)
+        self.model_turn(turn, &[]).await.map(|(result, _)| result)
     }
 
-    async fn model_turn(&self, turn: Turn) -> Result<(TurnResult, ModelResponse), AgentError> {
+    /// One model turn that is explicitly given observations of earlier
+    /// executions. Exactly one model call; nothing is executed or observed here.
+    pub async fn turn_with_observations(
+        &self,
+        turn: Turn,
+        observations: &[Observation],
+    ) -> Result<TurnResult, AgentError> {
+        self.model_turn(turn, observations)
+            .await
+            .map(|(result, _)| result)
+    }
+
+    async fn model_turn(
+        &self,
+        turn: Turn,
+        observations: &[Observation],
+    ) -> Result<(TurnResult, ModelResponse), AgentError> {
         if turn.user_message.trim().is_empty() {
             return Err(AgentError::InvalidTurn(
                 "turn message cannot be empty".to_string(),
             ));
         }
 
-        let request = ModelRequest::new(
-            self.model.clone(),
-            vec![Message::new(MessageRole::User, turn.user_message.clone())],
-        );
+        // Observations first, in the order given, then the user message.
+        let mut messages: Vec<Message> = observations
+            .iter()
+            .map(|observation| Message::new(MessageRole::System, observation.render()))
+            .collect();
+        messages.push(Message::new(MessageRole::User, turn.user_message.clone()));
+        let request = ModelRequest::new(self.model.clone(), messages);
 
         let response = self
             .provider

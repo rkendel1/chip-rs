@@ -21,8 +21,7 @@ use std::time::Duration;
 
 use chip_core::{
     CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
-    CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, Executor,
+    CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult, Executor,
 };
 use serde_json::Value;
 use tokio::process::Command;
@@ -223,10 +222,6 @@ pub fn translate_result(id: ExecutionId, stdout: &[u8]) -> Result<ExecutionResul
     if let Some(receipt) = receipt {
         result = result.with_receipt_id(receipt);
     }
-    debug_assert!(matches!(
-        result.status,
-        ExecutionStatus::Success | ExecutionStatus::Failure
-    ));
     Ok(result)
 }
 
