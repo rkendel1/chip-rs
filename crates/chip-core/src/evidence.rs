@@ -13,6 +13,15 @@
 //! the condition, is escalation needed), then escalation to the model. Only the
 //! first stage exists today.
 //!
+//! Validity: evidence can carry the `StateToken` under which it was established.
+//! The token is explicit data supplied by the caller; Chip only stores and
+//! compares it for equality and never inspects the environment or interprets it.
+//! The capability owns what its token means, so tokens for different capabilities
+//! are unrelated. Evidence is stale only when its stored token differs from the
+//! current one: no clocks, counters or heuristics are involved.
+//! The Compute adapter exposes no state identity yet, so Compute state
+//! invalidation is not modeled; real-Compute evidence is recorded without a token.
+//!
 //! Known limit: inputs are part of the key, but are not yet forwarded to
 //! executions, so distinct inputs are conservatively treated as distinct operations.
 
@@ -39,10 +48,28 @@ impl EvidenceKey {
     }
 }
 
-/// `NotFound` means no knowledge. A found failure is knowledge that it failed.
+/// Opaque identity of the state a piece of evidence was established under.
+/// Compared for equality only.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StateToken(String);
+
+impl StateToken {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `NotFound` means no knowledge. `Stale` means evidence exists but was
+/// established under different state, so it is not current. A found failure is
+/// knowledge that it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvidenceLookup {
     Found(Observation),
+    Stale,
     NotFound,
 }
 
@@ -51,6 +78,7 @@ pub struct EvidenceStats {
     pub lookups: usize,
     pub hits: usize,
     pub misses: usize,
+    pub stale: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,23 +97,48 @@ impl fmt::Display for EvidenceError {
 
 impl Error for EvidenceError {}
 
+/// The observation and the state it was established under (if any).
+#[derive(Debug)]
+struct StoredEvidence {
+    observation: Observation,
+    state: Option<StateToken>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct EvidenceStore {
-    entries: BTreeMap<EvidenceKey, Observation>,
+    entries: BTreeMap<EvidenceKey, StoredEvidence>,
     stats: EvidenceStats,
 }
 
 impl EvidenceStore {
-    pub(crate) fn record(&mut self, key: EvidenceKey, observation: Observation) {
-        self.entries.insert(key, observation);
+    /// Replaces any earlier evidence for the same operation.
+    pub(crate) fn record(
+        &mut self,
+        key: EvidenceKey,
+        observation: Observation,
+        state: Option<StateToken>,
+    ) {
+        self.entries
+            .insert(key, StoredEvidence { observation, state });
     }
 
-    pub(crate) fn lookup(&mut self, key: &EvidenceKey) -> EvidenceLookup {
+    /// Evidence is valid only when its stored state equals `current`; evidence
+    /// recorded without state matches only a lookup without state. Looking up
+    /// never changes or removes an entry.
+    pub(crate) fn lookup(
+        &mut self,
+        key: &EvidenceKey,
+        current: Option<&StateToken>,
+    ) -> EvidenceLookup {
         self.stats.lookups += 1;
         match self.entries.get(key) {
-            Some(observation) => {
+            Some(stored) if stored.state.as_ref() == current => {
                 self.stats.hits += 1;
-                EvidenceLookup::Found(observation.clone())
+                EvidenceLookup::Found(stored.observation.clone())
+            }
+            Some(_) => {
+                self.stats.stale += 1;
+                EvidenceLookup::Stale
             }
             None => {
                 self.stats.misses += 1;

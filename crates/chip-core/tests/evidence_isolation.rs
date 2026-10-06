@@ -51,7 +51,7 @@ fn evidence_module_is_in_memory_and_system_free() {
 #[test]
 fn obtain_evidence_has_one_execution_site_and_no_model_call() {
     let lib = read("src/lib.rs");
-    let start = lib.find("pub async fn obtain_evidence(").unwrap();
+    let start = lib.find("async fn obtain_with_state(").unwrap();
     let body = lib[start..start + lib[start..].find("\n    }\n").unwrap()].to_lowercase();
     assert_eq!(body.matches("self.execute(").count(), 1);
     for forbidden in [
@@ -65,7 +65,7 @@ fn obtain_evidence_has_one_execution_site_and_no_model_call() {
     ] {
         assert!(
             !body.contains(forbidden),
-            "obtain_evidence must not contain {forbidden}"
+            "obtain_with_state must not contain {forbidden}"
         );
     }
     assert!(

@@ -10,7 +10,7 @@ pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
 };
-pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats};
+pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
@@ -427,14 +427,34 @@ impl Agent {
         self.evidence.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Retains the observation of `request`'s execution as reusable evidence.
-    /// Only an observation of the execution this request produced is accepted,
-    /// so a request alone can never become evidence. Cancelled executions
-    /// did not establish an outcome and are not retained (returns `false`).
+    /// Retains the observation of `request`'s execution as evidence that carries
+    /// no state token. Only an observation of the execution this request
+    /// produced is accepted, so a request alone can never become evidence.
+    /// Cancelled executions did not establish an outcome and are not retained
+    /// (returns `false`).
     pub fn record_evidence(
         &self,
         request: &CapabilityRequest,
         observation: &Observation,
+    ) -> Result<bool, EvidenceError> {
+        self.record_with_state(request, observation, None)
+    }
+
+    /// Like `record_evidence`, remembering the state it was established under.
+    pub fn record_evidence_under(
+        &self,
+        request: &CapabilityRequest,
+        observation: &Observation,
+        state: &StateToken,
+    ) -> Result<bool, EvidenceError> {
+        self.record_with_state(request, observation, Some(state.clone()))
+    }
+
+    fn record_with_state(
+        &self,
+        request: &CapabilityRequest,
+        observation: &Observation,
+        state: Option<StateToken>,
     ) -> Result<bool, EvidenceError> {
         if observation.execution_id != request.execution_id {
             return Err(EvidenceError::ExecutionMismatch(format!(
@@ -445,16 +465,31 @@ impl Agent {
         if observation.kind == ObservationKind::ExecutionCancelled {
             return Ok(false);
         }
-        self.evidence_store()
-            .record(EvidenceKey::from_request(request), observation.clone());
+        self.evidence_store().record(
+            EvidenceKey::from_request(request),
+            observation.clone(),
+            state,
+        );
         Ok(true)
     }
 
-    /// Deterministic lookup of evidence for the same operation. No model, no
-    /// execution; the stored observation is returned unchanged.
+    /// Deterministic lookup of evidence that carries no state token. Evidence
+    /// recorded under a state is `Stale` here: without a current state it cannot
+    /// be shown to be current. No model, no execution.
     pub fn lookup_evidence(&self, request: &CapabilityRequest) -> EvidenceLookup {
         self.evidence_store()
-            .lookup(&EvidenceKey::from_request(request))
+            .lookup(&EvidenceKey::from_request(request), None)
+    }
+
+    /// Lookup against the caller-supplied current state. Evidence established
+    /// under a different state is `Stale`, never returned as current.
+    pub fn lookup_valid_evidence(
+        &self,
+        request: &CapabilityRequest,
+        current: &StateToken,
+    ) -> EvidenceLookup {
+        self.evidence_store()
+            .lookup(&EvidenceKey::from_request(request), Some(current))
     }
 
     /// Explicitly discards all evidence for a capability. Returns how many
@@ -467,14 +502,36 @@ impl Agent {
         self.evidence_store().stats()
     }
 
-    /// The fast path: reuse existing evidence for this operation, otherwise
-    /// validate, execute once, observe, and record. A hit performs no model
-    /// call, no validation round trip and no execution.
+    /// The fast path: reuse existing stateless evidence for this operation,
+    /// otherwise validate, execute once, observe, and record.
     pub async fn obtain_evidence(
         &self,
         request: &CapabilityRequest,
     ) -> Result<EvidenceOutcome, AgentError> {
-        if let EvidenceLookup::Found(observation) = self.lookup_evidence(request) {
+        self.obtain_with_state(request, None).await
+    }
+
+    /// The fast path under an explicit current state. Evidence established under
+    /// the same state is reused with no model call and no execution; missing or
+    /// stale evidence causes one execution whose observation replaces it.
+    pub async fn obtain_evidence_under(
+        &self,
+        request: &CapabilityRequest,
+        state: &StateToken,
+    ) -> Result<EvidenceOutcome, AgentError> {
+        self.obtain_with_state(request, Some(state)).await
+    }
+
+    async fn obtain_with_state(
+        &self,
+        request: &CapabilityRequest,
+        state: Option<&StateToken>,
+    ) -> Result<EvidenceOutcome, AgentError> {
+        let lookup = match state {
+            Some(state) => self.lookup_valid_evidence(request, state),
+            None => self.lookup_evidence(request),
+        };
+        if let EvidenceLookup::Found(observation) = lookup {
             return Ok(EvidenceOutcome::Reused(observation));
         }
         let execution = self
@@ -484,7 +541,7 @@ impl Agent {
         let report = self.execute(execution).await;
         let result = report.result.map_err(AgentError::Execution)?;
         let observation = self.observe(&result).map_err(AgentError::Observation)?;
-        self.record_evidence(request, &observation)
+        self.record_with_state(request, &observation, state.cloned())
             .map_err(AgentError::Evidence)?;
         Ok(EvidenceOutcome::Performed {
             result,

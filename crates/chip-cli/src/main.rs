@@ -4,7 +4,7 @@ use chip_core::{
     Agent, AgentDecision, AgentError, Capability, CapabilityAvailability, CapabilityDescriptor,
     CapabilityError, CapabilityId, CapabilityProvider, CapabilityRequest, DecisionBoundary,
     DecisionError, DecisionInput, EvidenceOutcome, ExecutionError, ExecutionId, ExecutionObserver,
-    ExecutionRequest, ExecutionResult, Executor, ScriptedDecision, TestExecutor, Turn,
+    ExecutionRequest, ExecutionResult, Executor, ScriptedDecision, StateToken, TestExecutor, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -317,6 +317,91 @@ async fn run_evidence_demo(
     ProofOutcome::Completed
 }
 
+/// Evidence validity demo: the same operation under an explicit state token that
+/// the caller changes. Chip only compares the tokens.
+async fn run_validity_demo() -> Result<(), String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let executions = Arc::new(AtomicUsize::new(0));
+    let agent = Agent::new(Arc::new(ProofModel(Arc::new(AtomicUsize::new(0)))))
+        .with_capabilities(Arc::new(DemoCapabilities("compute.selftest")))
+        .with_executor(Arc::new(CountingExecutor {
+            inner: Arc::new(TestExecutor),
+            calls: executions.clone(),
+        }))
+        .with_observer(Arc::new(ExecutionObserver));
+    let request = |n: u32| {
+        CapabilityId::new("compute.selftest")
+            .map(|id| CapabilityRequest::new(ExecutionId::new(format!("validity-{n}")), id))
+            .map_err(|e| e.to_string())
+    };
+    let step = |label: &str, outcome: &EvidenceOutcome| {
+        println!(
+            "{label}:\n  Execution: {}\n  Evidence: {}\n",
+            if matches!(outcome, EvidenceOutcome::Performed { .. }) {
+                "performed"
+            } else {
+                "skipped"
+            },
+            if matches!(outcome, EvidenceOutcome::Performed { .. }) {
+                "recorded"
+            } else {
+                "reused"
+            },
+        )
+    };
+    let (f1, f2) = (StateToken::new("F1"), StateToken::new("F2"));
+
+    println!("Evidence Validity\n\nState: F1\n");
+    let first = agent
+        .obtain_evidence_under(&request(1)?, &f1)
+        .await
+        .map_err(|e| e.to_string())?;
+    step("First request", &first);
+    let repeat = agent
+        .obtain_evidence_under(&request(2)?, &f1)
+        .await
+        .map_err(|e| e.to_string())?;
+    step("Repeat with F1", &repeat);
+
+    println!("State changed: F2\n");
+    let stale_before = agent.evidence_stats().stale;
+    let performed = agent
+        .obtain_evidence_under(&request(3)?, &f2)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!(
+        "Request with F2:\n  Evidence: {}\n  Execution: {}\n",
+        if agent.evidence_stats().stale == stale_before + 1 {
+            "stale"
+        } else {
+            "unexpected"
+        },
+        if matches!(performed, EvidenceOutcome::Performed { .. }) {
+            "performed"
+        } else {
+            "skipped"
+        },
+    );
+    let repeat = agent
+        .obtain_evidence_under(&request(4)?, &f2)
+        .await
+        .map_err(|e| e.to_string())?;
+    step("Repeat with F2", &repeat);
+
+    let stats = agent.evidence_stats();
+    println!(
+        "Proof:\n  Executions: {}\n  Evidence reuses: {}\n  Stale: {}\n",
+        executions.load(Ordering::SeqCst),
+        stats.hits,
+        stats.stale
+    );
+    if executions.load(Ordering::SeqCst) == 2 && stats.hits == 2 && stats.stale == 1 {
+        Ok(())
+    } else {
+        Err("unexpected evidence counts".into())
+    }
+}
+
 /// Declares one deterministic capability for the decision demonstration.
 struct DemoCapabilities(&'static str);
 
@@ -612,6 +697,17 @@ async fn main() {
             ProofOutcome::Completed => println!("Local fast path completed."),
             ProofOutcome::Skipped(reason) | ProofOutcome::Failed(reason) => {
                 eprintln!("error: {reason}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-evidence-validity" {
+        match run_validity_demo().await {
+            Ok(()) => println!("Evidence validity completed."),
+            Err(error) => {
+                eprintln!("error: {error}");
                 std::process::exit(1);
             }
         }

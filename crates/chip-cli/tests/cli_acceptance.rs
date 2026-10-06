@@ -246,3 +246,33 @@ fn cli_test_real_evidence_is_real_or_explicitly_skipped() {
         assert!(stdout.contains("Executions: 1"), "{stdout}");
     }
 }
+
+#[test]
+fn cli_test_evidence_validity_detects_a_state_change() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-evidence-validity",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "State: F1",
+        "State changed: F2",
+        "Evidence: stale",
+        "Executions: 2",
+        "Evidence reuses: 2",
+        "Stale: 1",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}
