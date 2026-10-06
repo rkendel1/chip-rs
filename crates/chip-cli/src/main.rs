@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chip_core::{Agent, Turn};
+use chip_core::{Agent, ExecutionId, ExecutionRequest, TestExecutor, Turn};
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
@@ -70,6 +70,28 @@ async fn main() {
         println!("FX provider: test");
         println!("Turn completed");
         println!("{}", result.response);
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-execution" {
+        let agent = Agent::new(Arc::new(TestModelProvider)).with_executor(Arc::new(TestExecutor));
+        let request = ExecutionRequest::new(ExecutionId::new("exec-1"), "test operation");
+        let result = agent
+            .turn_and_execute(Turn::new("Hello"), request)
+            .await
+            .expect("turn should succeed");
+
+        println!("Chip");
+        println!("FX provider: test");
+        println!("Turn completed");
+        println!("{}", result.turn.response);
+        match result.execution.result {
+            Ok(execution) => println!("Execution {:?}: {}", execution.status, execution.output),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
 

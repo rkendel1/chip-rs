@@ -24,6 +24,7 @@ pub enum AgentEvent {
     ModelInvoked { model: String },
     ModelResponded { output: String },
     TurnCompleted { response: String },
+    Execution(ExecutionEvent),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,134 @@ pub struct TurnResult {
 pub enum AgentError {
     InvalidTurn(String),
     Provider(String),
+}
+
+/// Identifier correlating an execution request, its events and its result.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExecutionId(pub String);
+
+impl ExecutionId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+}
+
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A semantic request to perform work. `intent` names the operation; it is
+/// not a command line and implies nothing about how it is carried out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionRequest {
+    pub id: ExecutionId,
+    pub intent: String,
+}
+
+impl ExecutionRequest {
+    pub fn new(id: ExecutionId, intent: impl Into<String>) -> Self {
+        Self {
+            id,
+            intent: intent.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionStatus {
+    Success,
+    Failure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionResult {
+    pub id: ExecutionId,
+    pub status: ExecutionStatus,
+    pub output: String,
+}
+
+impl ExecutionResult {
+    pub fn success(id: ExecutionId, output: impl Into<String>) -> Self {
+        Self {
+            id,
+            status: ExecutionStatus::Success,
+            output: output.into(),
+        }
+    }
+
+    pub fn failure(id: ExecutionId, output: impl Into<String>) -> Self {
+        Self {
+            id,
+            status: ExecutionStatus::Failure,
+            output: output.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionError {
+    InvalidRequest(String),
+    ExecutorUnavailable(String),
+    ExecutionFailed(String),
+    Cancelled,
+}
+
+impl fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(message) => write!(f, "invalid execution request: {message}"),
+            Self::ExecutorUnavailable(message) => write!(f, "executor unavailable: {message}"),
+            Self::ExecutionFailed(message) => write!(f, "execution failed: {message}"),
+            Self::Cancelled => write!(f, "execution cancelled"),
+        }
+    }
+}
+
+impl Error for ExecutionError {}
+
+/// Semantic execution events: identifiers and descriptions only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionEvent {
+    ExecutionRequested { id: ExecutionId, intent: String },
+    ExecutionStarted { id: ExecutionId },
+    ExecutionCompleted { id: ExecutionId, output: String },
+    ExecutionFailed { id: ExecutionId, reason: String },
+}
+
+/// Performs work on behalf of Chip. Implementations are injected; dropping the
+/// returned future stops waiting for the result.
+#[async_trait::async_trait]
+pub trait Executor: Send + Sync {
+    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError>;
+}
+
+/// Deterministic executor for tests and demos. Performs no real work.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TestExecutor;
+
+#[async_trait::async_trait]
+impl Executor for TestExecutor {
+    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError> {
+        Ok(ExecutionResult::success(
+            request.id,
+            "test execution completed",
+        ))
+    }
+}
+
+/// Outcome of one execution request, with the events it produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionReport {
+    pub result: Result<ExecutionResult, ExecutionError>,
+    pub events: Vec<ExecutionEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentResult {
+    pub turn: TurnResult,
+    pub execution: ExecutionReport,
 }
 
 impl fmt::Display for AgentError {
@@ -54,6 +183,7 @@ const DEFAULT_MODEL: &str = "chip-test-model";
 pub struct Agent {
     provider: Arc<dyn ModelProvider>,
     model: String,
+    executor: Option<Arc<dyn Executor>>,
 }
 
 impl Agent {
@@ -65,7 +195,71 @@ impl Agent {
         Self {
             provider,
             model: model.into(),
+            executor: None,
         }
+    }
+
+    /// Injects an executor, independent of the model provider.
+    pub fn with_executor(mut self, executor: Arc<dyn Executor>) -> Self {
+        self.executor = Some(executor);
+        self
+    }
+
+    /// Asks the injected executor to perform `request`. Failures stay
+    /// execution errors; they are reported, not converted to model errors.
+    pub async fn execute(&self, request: ExecutionRequest) -> ExecutionReport {
+        let id = request.id.clone();
+        let mut events = vec![ExecutionEvent::ExecutionRequested {
+            id: id.clone(),
+            intent: request.intent.clone(),
+        }];
+
+        let outcome = if request.intent.trim().is_empty() {
+            Err(ExecutionError::InvalidRequest(
+                "intent cannot be empty".to_string(),
+            ))
+        } else if let Some(executor) = &self.executor {
+            events.push(ExecutionEvent::ExecutionStarted { id: id.clone() });
+            executor.execute(request).await
+        } else {
+            Err(ExecutionError::ExecutorUnavailable(
+                "no executor injected".to_string(),
+            ))
+        };
+
+        match &outcome {
+            Ok(result) if result.status == ExecutionStatus::Success => {
+                events.push(ExecutionEvent::ExecutionCompleted {
+                    id,
+                    output: result.output.clone(),
+                });
+            }
+            Ok(result) => events.push(ExecutionEvent::ExecutionFailed {
+                id,
+                reason: result.output.clone(),
+            }),
+            Err(error) => events.push(ExecutionEvent::ExecutionFailed {
+                id,
+                reason: error.to_string(),
+            }),
+        }
+
+        ExecutionReport {
+            result: outcome,
+            events,
+        }
+    }
+
+    /// Runs a model turn, then the explicitly supplied execution request.
+    /// The caller decides what to execute; the model output is not parsed.
+    pub async fn turn_and_execute(
+        &self,
+        turn: Turn,
+        request: ExecutionRequest,
+    ) -> Result<AgentResult, AgentError> {
+        let turn = self.turn(turn).await?;
+        let execution = self.execute(request).await;
+        Ok(AgentResult { turn, execution })
     }
 
     pub async fn turn(&self, turn: Turn) -> Result<TurnResult, AgentError> {
