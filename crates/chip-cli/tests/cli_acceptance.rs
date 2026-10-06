@@ -276,3 +276,33 @@ fn cli_test_evidence_validity_detects_a_state_change() {
         );
     }
 }
+
+#[test]
+fn cli_test_local_reasoner_orders_evidence_reasoning_and_escalation() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-local-reasoner",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Evidence: valid\nLocal reasoning: skipped\nFX calls: 0\nExecution: 0",
+        "Evidence: stale\nLocal reasoning: continue",
+        "FX calls: 0\nExecution: 0",
+        "Evidence: unknown\nLocal reasoning: escalate",
+        "FX escalation: explicit",
+        "Local reasoner proof completed.",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+}

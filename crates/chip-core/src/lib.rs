@@ -1,6 +1,7 @@
 mod decision;
 mod evidence;
 mod observation;
+mod reasoning;
 
 use std::error::Error;
 use std::fmt;
@@ -14,6 +15,10 @@ pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, St
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
+};
+pub use reasoning::{
+    EvidenceState, LocalReasoner, LocalReasoningResult, ReasoningError, ReasoningInput,
+    TestLocalReasoner,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +77,7 @@ pub enum AgentError {
     Execution(ExecutionError),
     Observation(ObservationError),
     Evidence(EvidenceError),
+    Reasoning(ReasoningError),
 }
 
 /// Stable, opaque name of a declared ability (for example `vendor.operation`).
@@ -335,6 +341,17 @@ pub struct ExecutionReport {
     pub events: Vec<ExecutionEvent>,
 }
 
+/// The outcome of `Agent::assess_evidence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Assessment {
+    /// Valid evidence exists; the reasoner was not consulted.
+    Reuse(Observation),
+    /// The local reasoner is confident the caller may proceed.
+    Continue { rationale: String },
+    /// The local reasoner is not confident; escalating is the caller's call.
+    Escalate { reason: String },
+}
+
 /// How `Agent::obtain_evidence` satisfied a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvidenceOutcome {
@@ -388,6 +405,7 @@ impl fmt::Display for AgentError {
             Self::Execution(error) => write!(f, "{error}"),
             Self::Observation(error) => write!(f, "{error}"),
             Self::Evidence(error) => write!(f, "{error}"),
+            Self::Reasoning(error) => write!(f, "{error}"),
         }
     }
 }
@@ -404,6 +422,7 @@ pub struct Agent {
     decision: Option<Arc<dyn DecisionBoundary>>,
     observer: Option<Arc<dyn Observer>>,
     evidence: Mutex<evidence::EvidenceStore>,
+    reasoner: Option<Arc<dyn LocalReasoner>>,
 }
 
 impl Agent {
@@ -420,7 +439,51 @@ impl Agent {
             decision: None,
             observer: None,
             evidence: Mutex::new(evidence::EvidenceStore::default()),
+            reasoner: None,
         }
+    }
+
+    /// Optionally injects a local reasoner for cheap judgments.
+    pub fn with_local_reasoner(mut self, reasoner: Arc<dyn LocalReasoner>) -> Self {
+        self.reasoner = Some(reasoner);
+        self
+    }
+
+    /// Evidence first, local reasoning second. Valid evidence is returned without
+    /// consulting the reasoner. Otherwise the reasoner is given the evidence
+    /// state (stale or unknown) and returns a verdict. This only advises: it
+    /// does not execute, call the model, or record evidence, and `Escalate` leaves
+    /// the explicit call to the model with the caller.
+    pub fn assess_evidence(
+        &self,
+        request: &CapabilityRequest,
+        state: Option<&StateToken>,
+    ) -> Result<Assessment, AgentError> {
+        let lookup = match state {
+            Some(state) => self.lookup_valid_evidence(request, state),
+            None => self.lookup_evidence(request),
+        };
+        let evidence = match lookup {
+            EvidenceLookup::Found(observation) => return Ok(Assessment::Reuse(observation)),
+            EvidenceLookup::Stale => EvidenceState::KnownStale,
+            EvidenceLookup::NotFound => EvidenceState::Unknown,
+        };
+        let reasoner = self.reasoner.as_ref().ok_or_else(|| {
+            AgentError::Reasoning(ReasoningError::Unavailable(
+                "no local reasoner injected".to_string(),
+            ))
+        })?;
+        let verdict = reasoner
+            .reason(&ReasoningInput {
+                capability: request.capability_id.clone(),
+                inputs: request.inputs.clone(),
+                evidence,
+            })
+            .map_err(AgentError::Reasoning)?;
+        Ok(match verdict {
+            LocalReasoningResult::Continue { rationale } => Assessment::Continue { rationale },
+            LocalReasoningResult::Escalate { reason } => Assessment::Escalate { reason },
+        })
     }
 
     fn evidence_store(&self) -> std::sync::MutexGuard<'_, evidence::EvidenceStore> {

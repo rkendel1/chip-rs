@@ -302,19 +302,34 @@ impl Executor for ComputeExecutor {
         std::fs::write(&entrypoint, &op.source)
             .map_err(|_| ExecutionError::ExecutionFailed("cannot write entrypoint".into()))?;
 
-        let output = Command::new(&self.binary)
-            .args(build_arguments(op, &entrypoint, self.timeout))
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::NotFound => ExecutionError::ExecutorUnavailable(format!(
-                    "compute executable '{}' not found",
-                    self.binary.display()
-                )),
-                _ => ExecutionError::ExecutorUnavailable("cannot start compute".into()),
-            })?;
+        // The kernel reports "text file busy" when an executable is exec'd while
+        // another process still holds it open for writing. Nothing has started
+        // yet, so waiting briefly and spawning again cannot repeat any work.
+        let mut attempts = 0;
+        let output = loop {
+            let spawned = Command::new(&self.binary)
+                .args(build_arguments(op, &entrypoint, self.timeout))
+                .stdin(Stdio::null())
+                .kill_on_drop(true)
+                .output()
+                .await;
+            match spawned {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 5 =>
+                {
+                    attempts += 1;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                other => break other,
+            }
+        }
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ExecutionError::ExecutorUnavailable(format!(
+                "compute executable '{}' not found",
+                self.binary.display()
+            )),
+            _ => ExecutionError::ExecutorUnavailable("cannot start compute".into()),
+        })?;
 
         if output.stdout.is_empty() {
             return Err(translate_failure(&String::from_utf8_lossy(&output.stderr)));

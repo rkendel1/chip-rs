@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use chip_core::{
-    Agent, AgentDecision, AgentError, Capability, CapabilityAvailability, CapabilityDescriptor,
-    CapabilityError, CapabilityId, CapabilityProvider, CapabilityRequest, DecisionBoundary,
-    DecisionError, DecisionInput, EvidenceOutcome, ExecutionError, ExecutionId, ExecutionObserver,
-    ExecutionRequest, ExecutionResult, Executor, ScriptedDecision, StateToken, TestExecutor, Turn,
+    Agent, AgentDecision, AgentError, Assessment, Capability, CapabilityAvailability,
+    CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityProvider, CapabilityRequest,
+    DecisionBoundary, DecisionError, DecisionInput, EvidenceOutcome, EvidenceState, ExecutionError,
+    ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult, Executor,
+    LocalReasoningResult, ScriptedDecision, StateToken, TestExecutor, TestLocalReasoner, Turn,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
 use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
@@ -402,6 +403,99 @@ async fn run_validity_demo() -> Result<(), String> {
     }
 }
 
+/// Local reasoner proof: evidence first, local reasoning second, the model only
+/// when the caller explicitly escalates. Deterministic; no live model.
+async fn run_local_reasoner_demo() -> Result<(), String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (models, executions) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    // Stale evidence is acceptable to this policy; unknown evidence is not.
+    let policy = TestLocalReasoner::default().on(
+        EvidenceState::KnownStale,
+        LocalReasoningResult::Continue {
+            rationale: "stale evidence is acceptable here".into(),
+        },
+    );
+    let agent = Agent::new(Arc::new(ProofModel(models.clone())))
+        .with_capabilities(Arc::new(DemoCapabilities("compute.selftest")))
+        .with_executor(Arc::new(CountingExecutor {
+            inner: Arc::new(TestExecutor),
+            calls: executions.clone(),
+        }))
+        .with_observer(Arc::new(ExecutionObserver))
+        .with_local_reasoner(Arc::new(policy));
+    let request = |n: u32| {
+        CapabilityId::new("compute.selftest")
+            .map(|id| CapabilityRequest::new(ExecutionId::new(format!("reasoner-{n}")), id))
+            .map_err(|e| e.to_string())
+    };
+    let (f1, f2) = (StateToken::new("F1"), StateToken::new("F2"));
+    let counts = || {
+        (
+            models.load(Ordering::SeqCst),
+            executions.load(Ordering::SeqCst),
+        )
+    };
+    let fail = |e: AgentError| e.to_string();
+
+    println!("Local Reasoner Proof\n");
+
+    // Establish evidence under F1 (one explicit execution, not part of the cases).
+    agent
+        .obtain_evidence_under(&request(1)?, &f1)
+        .await
+        .map_err(fail)?;
+    let (m0, e0) = counts();
+
+    match agent
+        .assess_evidence(&request(2)?, Some(&f1))
+        .map_err(fail)?
+    {
+        Assessment::Reuse(_) => println!(
+            "CASE 1\nEvidence: valid\nLocal reasoning: skipped\nFX calls: {}\nExecution: {}\n",
+            counts().0 - m0,
+            counts().1 - e0
+        ),
+        other => return Err(format!("case 1 unexpected: {other:?}")),
+    }
+
+    match agent
+        .assess_evidence(&request(3)?, Some(&f2))
+        .map_err(fail)?
+    {
+        Assessment::Continue { rationale } => println!(
+            "CASE 2\nEvidence: stale\nLocal reasoning: continue ({rationale})\nFX calls: {}\nExecution: {}\n",
+            counts().0 - m0,
+            counts().1 - e0
+        ),
+        other => return Err(format!("case 2 unexpected: {other:?}")),
+    }
+
+    // A different operation has no evidence at all.
+    let unknown = CapabilityId::new("compute.other")
+        .map(|id| CapabilityRequest::new(ExecutionId::new("reasoner-4"), id))
+        .map_err(|e| e.to_string())?;
+    match agent.assess_evidence(&unknown, Some(&f1)).map_err(fail)? {
+        Assessment::Escalate { reason } => {
+            println!("CASE 3\nEvidence: unknown\nLocal reasoning: escalate ({reason})");
+            println!("FX calls so far: {}", counts().0 - m0);
+            // Escalation is the caller's explicit decision.
+            agent
+                .turn(Turn::new(
+                    "Local reasoning was not confident; please decide",
+                ))
+                .await
+                .map_err(fail)?;
+            println!("FX escalation: explicit (1 model call made by the caller)");
+            println!("Execution: {}\n", counts().1 - e0);
+        }
+        other => return Err(format!("case 3 unexpected: {other:?}")),
+    }
+    if counts() != (m0 + 1, e0) {
+        return Err("unexpected model or execution counts".into());
+    }
+    Ok(())
+}
+
 /// Declares one deterministic capability for the decision demonstration.
 struct DemoCapabilities(&'static str);
 
@@ -706,6 +800,17 @@ async fn main() {
     if args.len() > 1 && args[1] == "--test-evidence-validity" {
         match run_validity_demo().await {
             Ok(()) => println!("Evidence validity completed."),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-local-reasoner" {
+        match run_local_reasoner_demo().await {
+            Ok(()) => println!("Local reasoner proof completed."),
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);
