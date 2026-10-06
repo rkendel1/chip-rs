@@ -1,0 +1,9 @@
+[package]
+name = "chip-reasoning-corpus"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic corpus and replay harness for Chip's local reasoning boundary"
+license = "MIT"
+
+[dependencies]
+chip-core = { path = "../chip-core" }

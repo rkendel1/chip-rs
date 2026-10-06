@@ -369,3 +369,44 @@ fn cli_benchmark_live_reasoner_skips_without_configuration() {
     );
     assert_eq!(output.status.code(), Some(3));
 }
+
+#[test]
+fn cli_test_reasoning_corpus_replays_rust_and_wasm_offline() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "chip-cli",
+            "--quiet",
+            "--",
+            "--test-reasoning-corpus",
+        ])
+        .output()
+        .expect("CLI should execute");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Reasoning Corpus",
+        "Cases: 32",
+        "Rust:",
+        "WASM:",
+        "Rust/WASM agreement: 32/32",
+        "False continues: 0",
+        "Model calls: 0",
+        "Executions: 0",
+        "Evidence writes: 0",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in {stdout}"
+        );
+    }
+    assert!(
+        stdout.contains("Case: lj-01"),
+        "baseline mismatches must be surfaced: {stdout}"
+    );
+}

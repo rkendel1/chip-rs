@@ -1,4 +1,5 @@
 mod benchmark;
+mod corpus_eval;
 mod live_benchmark;
 
 use std::sync::Arc;
@@ -814,6 +815,26 @@ async fn main() {
     if args.len() > 1 && args[1] == "--test-local-reasoner" {
         match run_local_reasoner_demo().await {
             Ok(()) => println!("Local reasoner proof completed."),
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "--test-reasoning-corpus" {
+        // Offline replay. Mismatches against the corpus are reported, not fatal;
+        // a Rust/WASM disagreement or a WASM failure is.
+        match corpus_eval::run() {
+            Ok(report) => {
+                print!("{}", corpus_eval::render(&report));
+                if !report.disagreements.is_empty()
+                    || report.wasm.cases.iter().any(|c| c.error.is_some())
+                {
+                    std::process::exit(1);
+                }
+            }
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);

@@ -8,6 +8,7 @@ license = "MIT"
 chip-core = { path = "../chip-core" }
 fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-wasm-reasoner = { path = "../chip-wasm-reasoner", features = ["fixture"] }
 fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"

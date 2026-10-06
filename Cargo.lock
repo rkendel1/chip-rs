@@ -89,6 +89,7 @@ dependencies = [
  "async-trait",
  "chip-compute",
  "chip-core",
+ "chip-reasoning-corpus",
  "chip-wasm-reasoner",
  "fx-core",
  "fx-provider-http",
@@ -114,6 +115,13 @@ dependencies = [
  "async-trait",
  "fx-core",
  "tokio",
+]
+
+[[package]]
+name = "chip-reasoning-corpus"
+version = "0.1.0"
+dependencies = [
+ "chip-core",
 ]
 
 [[package]]
