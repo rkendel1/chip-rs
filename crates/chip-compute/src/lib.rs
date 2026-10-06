@@ -20,7 +20,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chip_core::{
-    ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor,
+    CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
+    CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, Executor,
 };
 use serde_json::Value;
 use tokio::process::Command;
@@ -39,6 +41,10 @@ pub struct ComputeOperation {
     pub runtime: String,
     pub source: String,
     pub args: Vec<String>,
+    /// Human-facing description shown as a capability. Implementation details
+    /// (runtime, source) are never part of it.
+    pub name: String,
+    pub description: String,
 }
 
 impl ComputeOperation {
@@ -47,7 +53,15 @@ impl ComputeOperation {
             runtime: "python".into(),
             source: source.into(),
             args: Vec::new(),
+            name: String::new(),
+            description: String::new(),
         }
+    }
+
+    pub fn described(mut self, name: impl Into<String>, description: impl Into<String>) -> Self {
+        self.name = name.into();
+        self.description = description.into();
+        self
     }
 
     fn extension(&self) -> &'static str {
@@ -88,14 +102,33 @@ impl ComputeExecutor {
         };
         executor.operations.insert(
             SELFTEST_INTENT.to_string(),
-            ComputeOperation::python(format!("print(\"{SELFTEST_OUTPUT}\")\n")),
+            ComputeOperation::python(format!("print(\"{SELFTEST_OUTPUT}\")\n"))
+                .described("Compute Self Test", "Deterministic Compute execution test"),
         );
         executor
     }
 
-    pub fn with_operation(mut self, intent: impl Into<String>, op: ComputeOperation) -> Self {
-        self.operations.insert(intent.into(), op);
-        self
+    /// Registers an operation under a capability id. The id must be a valid
+    /// `CapabilityId`; arbitrary strings are rejected.
+    pub fn with_operation(
+        mut self,
+        capability: impl Into<String>,
+        op: ComputeOperation,
+    ) -> Result<Self, CapabilityError> {
+        let id = CapabilityId::new(capability)?;
+        self.operations.insert(id.as_str().to_string(), op);
+        Ok(self)
+    }
+
+    /// Whether the `compute` executable can be found, without running it.
+    fn binary_present(&self) -> bool {
+        let is_file = |p: &Path| p.is_file();
+        if self.binary.components().count() > 1 || self.binary.is_absolute() {
+            return is_file(&self.binary);
+        }
+        std::env::var_os("PATH")
+            .map(|paths| std::env::split_paths(&paths).any(|dir| is_file(&dir.join(&self.binary))))
+            .unwrap_or(false)
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -107,6 +140,43 @@ impl ComputeExecutor {
 impl Default for ComputeExecutor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl CapabilityProvider for ComputeExecutor {
+    /// Describes the configured operations. Runs nothing and touches no files.
+    async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
+        self.operations
+            .iter()
+            .map(|(id, op)| {
+                let name = if op.name.is_empty() {
+                    id.clone()
+                } else {
+                    op.name.clone()
+                };
+                Ok(CapabilityDescriptor::new(
+                    CapabilityId::new(id.clone())?,
+                    name,
+                    op.description.clone(),
+                ))
+            })
+            .collect()
+    }
+
+    async fn availability(&self, id: &CapabilityId) -> CapabilityAvailability {
+        let Some(op) = self.operations.get(id.as_str()) else {
+            return CapabilityAvailability::Unavailable("capability is not provided".into());
+        };
+        if op.runtime.trim().is_empty() || op.source.trim().is_empty() {
+            return CapabilityAvailability::Misconfigured(
+                "capability has no runnable definition".into(),
+            );
+        }
+        if !self.binary_present() {
+            return CapabilityAvailability::Unavailable("Compute is not installed".into());
+        }
+        CapabilityAvailability::Available
     }
 }
 
