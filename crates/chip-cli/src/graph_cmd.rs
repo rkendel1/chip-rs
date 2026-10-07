@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chip_graph::{
-    ArchitectureGraph, GraphEdgeKind, GraphNodeKind, StoreError, analyze_with_stats,
-    find_repository_root, read_latest, write_snapshot,
+    ArchitectureGraph, CapabilityCatalog, GraphEdgeKind, GraphNodeKind, StoreError, analyze_impact,
+    analyze_with_stats, find_repository_root, read_latest, write_snapshot,
 };
 
 fn parse_root(args: &[String]) -> Result<PathBuf, String> {
@@ -159,5 +159,74 @@ pub fn graph(args: &[String]) -> i32 {
     println!("  Implements: {}", edge(GraphEdgeKind::Implements));
     println!("  Tests: {}", edge(GraphEdgeKind::Tests));
     println!("  Targets: {}", edge(GraphEdgeKind::Targets));
+    0
+}
+
+/// `chip-cli impact --capabilities FILE [--root PATH] <path>...`
+///
+/// Reads the stored snapshot and an external capability catalog; never runs `init`, never
+/// infers or invents a catalog. Returns the process exit code.
+pub fn impact(args: &[String]) -> i32 {
+    let mut catalog_path: Option<String> = None;
+    let mut paths = Vec::new();
+    let mut rest = Vec::new();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--capabilities" => catalog_path = iter.next().cloned(),
+            "--root" => {
+                rest.push(arg.clone());
+                rest.extend(iter.next().cloned());
+            }
+            _ => paths.push(arg.clone()),
+        }
+    }
+    let Some(catalog_path) = catalog_path else {
+        eprintln!("usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...");
+        return 2;
+    };
+    if paths.is_empty() {
+        eprintln!("usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...");
+        return 2;
+    }
+    let root = match parse_root(&rest) {
+        Ok(root) => root,
+        Err(message) => {
+            eprintln!("{message}");
+            return 1;
+        }
+    };
+    let graph = match read_latest(&root) {
+        Ok(graph) => graph,
+        Err(StoreError::NotFound) => {
+            println!("No architecture snapshot found.");
+            println!("Run `chip init`.");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let text = match std::fs::read_to_string(&catalog_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!("Capability catalog not found:");
+            println!("  {catalog_path}");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("cannot read {catalog_path}: {e}");
+            return 1;
+        }
+    };
+    let catalog = match CapabilityCatalog::from_json(&text, &graph) {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            eprintln!("{catalog_path}: {e}");
+            return 1;
+        }
+    };
+    print!("{}", analyze_impact(&graph, &catalog, &paths).render());
     0
 }

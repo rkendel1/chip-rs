@@ -591,4 +591,112 @@ mod graph_snapshot {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn impact_fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-graph/tests/impact_fixture")
+    }
+
+    fn copy_impact_fixture(name: &str) -> PathBuf {
+        let dest = std::env::temp_dir().join(format!("chip-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let status = Command::new("cp")
+            .arg("-r")
+            .arg(impact_fixture())
+            .arg(&dest)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        dest
+    }
+
+    #[test]
+    fn impact_reads_the_stored_snapshot_and_a_catalog() {
+        let dir = copy_impact_fixture("impact");
+        let root = dir.to_str().unwrap();
+        let catalog = dir.join("capabilities.json");
+        let catalog = catalog.to_str().unwrap();
+
+        // No snapshot: impact must not run init for us.
+        let none = run(&[
+            "impact",
+            "--capabilities",
+            catalog,
+            "--root",
+            root,
+            "a/src/one.rs",
+        ]);
+        assert!(!none.status.success());
+        assert!(text(&none).contains("Run `chip init`."));
+        assert!(!dir.join(".chip").exists());
+
+        assert!(run(&["init", "--root", root]).status.success());
+        let out = run(&[
+            "impact",
+            "--capabilities",
+            catalog,
+            "--root",
+            root,
+            "a/src/one.rs",
+            "does/not/exist.rs",
+            "a/src/one.rs",
+        ]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let shown = text(&out);
+        assert_eq!(
+            shown,
+            "Changed:\n  crate:a\n  file:a/src/one.rs\n  module:a:crate::one\n\n\
+             Impacted capabilities:\n  cap.a\n    matched:\n      crate:a\n\n  \
+             cap.a.file\n    matched:\n      file:a/src/one.rs\n\n  cap.shared\n    matched:\n      \
+             crate:a\n\nUnresolved:\n  does/not/exist.rs\n"
+        );
+
+        // A missing catalog is an error; nothing is inferred.
+        let missing = run(&[
+            "impact",
+            "--capabilities",
+            ".chip/nope.json",
+            "--root",
+            root,
+            "a/src/one.rs",
+        ]);
+        assert!(!missing.status.success());
+        assert!(text(&missing).contains("Capability catalog not found:\n  .chip/nope.json"));
+
+        // An invalid catalog is an error, not a misleading report.
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, r#"{"schema":"appport.capabilities.v1"}"#).unwrap();
+        let invalid = run(&[
+            "impact",
+            "--capabilities",
+            bad.to_str().unwrap(),
+            "--root",
+            root,
+            "a/src/one.rs",
+        ]);
+        assert!(!invalid.status.success());
+        assert!(text(&invalid).is_empty());
+
+        // A tampered snapshot is refused.
+        let latest = std::fs::read_to_string(dir.join(".chip/graph/latest")).unwrap();
+        let snap = dir.join(format!(".chip/graph/{}.json", latest.trim()));
+        let body = std::fs::read_to_string(&snap)
+            .unwrap()
+            .replace("crate:b", "crate:q");
+        std::fs::write(&snap, body).unwrap();
+        let tampered = run(&[
+            "impact",
+            "--capabilities",
+            catalog,
+            "--root",
+            root,
+            "a/src/one.rs",
+        ]);
+        assert!(!tampered.status.success());
+        assert!(text(&tampered).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

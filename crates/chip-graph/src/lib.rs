@@ -5,14 +5,22 @@
 //! tests, Compute receipts or evidence, those win. Nothing here edits source, executes it,
 //! runs Cargo or Git, reads the environment, or reaches the network.
 //!
+//! Capability identity may cross the Chip boundary; capability implementation does not.
+//! Chip consumes capability ids and graph-node bindings (`chip.capabilities.v1`) and nothing else.
+//!
 //! The same repository content always yields the same graph, the same canonical bytes and
 //! the same snapshot id, regardless of machine, filesystem ordering, absolute path or time.
 
 mod analyze;
+mod impact;
 mod model;
 mod store;
 
 pub use analyze::{AnalysisStats, AnalyzeError, analyze, analyze_with_stats, find_repository_root};
+pub use impact::{
+    CATALOG_SCHEMA, CapabilityBinding, CapabilityCatalog, CatalogError, ImpactReport,
+    ImpactedCapability, analyze_impact,
+};
 pub use model::{
     ArchitectureGraph, GraphEdge, GraphEdgeKind, GraphNode, GraphNodeKind, SCHEMA_VERSION,
     SnapshotId,

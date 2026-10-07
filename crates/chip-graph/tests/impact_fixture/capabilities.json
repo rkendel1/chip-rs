@@ -1,0 +1,9 @@
+{
+  "schema": "chip.capabilities.v1",
+  "capabilities": [
+    { "id": "cap.shared", "graph_nodes": ["crate:b", "crate:a"] },
+    { "id": "cap.b", "graph_nodes": ["crate:b"] },
+    { "id": "cap.a.file", "graph_nodes": ["file:a/src/one.rs"] },
+    { "id": "cap.a", "graph_nodes": ["crate:a", "crate:a"] }
+  ]
+}

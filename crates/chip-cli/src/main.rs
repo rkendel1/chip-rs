@@ -566,6 +566,10 @@ async fn main() {
         std::process::exit(graph_cmd::init(&args[2..]));
     }
 
+    if args.len() > 1 && args[1] == "impact" {
+        std::process::exit(graph_cmd::impact(&args[2..]));
+    }
+
     if args.len() > 1 && args[1] == "graph" {
         std::process::exit(graph_cmd::graph(&args[2..]));
     }
