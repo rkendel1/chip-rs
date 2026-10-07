@@ -1,3 +1,6 @@
+// The work report is one large `json!` literal.
+#![recursion_limit = "256"]
+
 mod benchmark;
 mod corpus_eval;
 mod decision_state_cmd;

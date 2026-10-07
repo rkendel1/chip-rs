@@ -729,7 +729,7 @@ fn real_model_codes_real_tasks() {
         }
         let m = &j["measurement"];
         eprintln!(
-            "LIVE task={name} provider={} model={} endpoint={} terminal={} verified={verified} turns={} calls={} executions={} lists={} searches={} reads={} writes={} tests={} failed_obs={} recoveries={} useful_per_call={} useful_per_exec={} tokens={} latency_total_ms={} model_ms={} exec_ms={} independent_pax={} outcome={}",
+            "LIVE task={name} provider={} model={} endpoint={} terminal={} verified={verified} turns={} calls={} executions={} lists={} searches={} reads={} writes={} tests={} failed_obs={} recoveries={} requests={} invalid_decisions={} invalid_inputs={} useful_per_call={} useful_per_exec={} tokens={} latency_total_ms={} model_ms={} exec_ms={} independent_pax={} outcome={}",
             j["provider"],
             j["model"],
             j["endpoint"],
@@ -744,6 +744,9 @@ fn real_model_codes_real_tasks() {
             j["tests"],
             j["failed_observations"],
             j["recoveries"],
+            j["capability_requests"],
+            j["invalid_decisions"],
+            j["invalid_inputs"],
             j["useful_work_per_model_call"],
             j["useful_work_per_execution"],
             m["model_tokens"],

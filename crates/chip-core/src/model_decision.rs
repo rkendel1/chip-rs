@@ -285,6 +285,77 @@ fn identifier(provider_id: &str) -> String {
     }
 }
 
+/// The exact way to request each available capability, written from its declared inputs and from
+/// nothing else, so that what the model is told cannot differ from what the runtime accepts:
+///
+/// * a capability that declares no inputs is requested with no `inputs` field at all, and an
+///   `inputs` field, even `{}`, is invalid;
+/// * one that declares inputs is requested with an `inputs` object holding only those fields.
+fn invocation_forms(capabilities: &[Capability]) -> String {
+    let available: Vec<&Capability> = capabilities
+        .iter()
+        .filter(|c| c.availability == CapabilityAvailability::Available)
+        .collect();
+    if available.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("How to request each capability, exactly: ");
+    let mut first_without_inputs: Option<String> = None;
+    let entries: Vec<String> = available
+        .iter()
+        .map(|c| {
+            let id = c.descriptor.id.to_string();
+            let request = |inputs: &str| {
+                format!("{{\"decision\":\"request_capability\",\"capability\":\"{id}\"{inputs}}}")
+            };
+            if c.descriptor.inputs.is_empty() {
+                first_without_inputs.get_or_insert_with(|| id.clone());
+                format!(
+                    "{id} takes no inputs: {} (no \"inputs\" field)",
+                    request("")
+                )
+            } else {
+                let fields: Vec<String> = c
+                    .descriptor
+                    .inputs
+                    .iter()
+                    .map(|i| format!("\"{}\":<string|integer|boolean>", i.name))
+                    .collect();
+                let needs: Vec<String> = c
+                    .descriptor
+                    .inputs
+                    .iter()
+                    .map(|i| {
+                        format!(
+                            "{} {}",
+                            i.name,
+                            if i.required { "required" } else { "optional" }
+                        )
+                    })
+                    .collect();
+                let omit = if c.descriptor.inputs.iter().any(|i| i.required) {
+                    ""
+                } else {
+                    "; with no inputs to give, omit the \"inputs\" field"
+                };
+                format!(
+                    "{id} takes inputs ({}): {}{omit}",
+                    needs.join(", "),
+                    request(&format!(",\"inputs\":{{{}}}", fields.join(",")))
+                )
+            }
+        })
+        .collect();
+    out.push_str(&entries.join("; "));
+    out.push_str(". ");
+    if let Some(id) = first_without_inputs {
+        out.push_str(&format!(
+            "A capability that takes no inputs must not carry an \"inputs\" field at all, not even an empty one: {{\"decision\":\"request_capability\",\"capability\":\"{id}\",\"inputs\":{{}}}} is invalid. "
+        ));
+    }
+    out
+}
+
 impl WorkDecisionBoundary for ModelDecisionBoundary {
     fn interpret(
         &self,
@@ -417,10 +488,11 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
                 }
             })
             .collect();
+        let forms = invocation_forms(capabilities);
         format!(
             "Decide the next step. Reply with exactly one JSON object and nothing else; it is read as data and never run. Every object carries \"schema\":\"{WORK_DECISION_SCHEMA}\" (optional) and one of: \
-{{\"decision\":\"request_capability\",\"capability\":\"<id>\",\"inputs\":{{\"<name>\":<string|integer|boolean>}}}} (inputs optional), \
-{{\"decision\":\"complete\",\"summary\":\"<text>\"}}, {{\"decision\":\"escalate\",\"reason\":\"<text>\"}} or {{\"decision\":\"block\",\"reason\":\"<text>\"}}. \
+a request for one capability, in the exact form its entry below gives, {{\"decision\":\"complete\",\"summary\":\"<text>\"}}, {{\"decision\":\"escalate\",\"reason\":\"<text>\"}} or {{\"decision\":\"block\",\"reason\":\"<text>\"}}. \
+{forms}\
 Available capabilities: {}.",
             if available.is_empty() {
                 "none".to_string()

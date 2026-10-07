@@ -158,6 +158,24 @@ pub struct SoftwareWork {
 }
 
 impl SoftwareWork {
+    /// How many capabilities the model asked for (valid requests; a refused one never became one).
+    pub fn capability_requests(&self) -> usize {
+        self.report
+            .events
+            .iter()
+            .filter(|e| matches!(e, WorkEvent::CapabilityRequested { .. }))
+            .count()
+    }
+
+    /// The work ended on a request whose inputs did not match the capability's declaration (an
+    /// `inputs` field on a capability that takes none, a missing or undeclared input).
+    pub fn invalid_inputs(&self) -> usize {
+        usize::from(matches!(
+            &self.report.outcome,
+            WorkOutcome::Blocked { reason } if reason.starts_with("invalid capability input")
+        ))
+    }
+
     pub fn lists(&self) -> usize {
         self.count(PROJECT_LIST)
     }
@@ -430,6 +448,9 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
         "paths_written": w.paths_written,
         "failed_observations": u.failed_observations,
         "recoveries": u.recoveries,
+        "capability_requests": w.capability_requests(),
+        "invalid_decisions": u.invalid_decisions,
+        "invalid_inputs": w.invalid_inputs(),
         "useful_work_per_model_call": u.work_per_model_call(),
         "useful_work_per_execution": u.work_per_execution(),
         "pax": {
@@ -1697,6 +1718,60 @@ mod tests {
             );
         }
         assert_eq!((w.searches(), w.lists()), (2, 1));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_real_capability_set_is_shown_to_the_model_exactly_as_it_is_enforced() {
+        let fx = fixture("contract");
+        let set = CapabilitySet::new()
+            .with(Arc::new(ProjectExecutor::new(&fx.root)))
+            .with(Arc::new(PaxExecutor::new(&fx.root)));
+        let descriptors = set.capabilities().await.unwrap();
+        let offered: Vec<chip_core::Capability> = descriptors
+            .iter()
+            .cloned()
+            .map(|descriptor| chip_core::Capability {
+                descriptor,
+                availability: chip_core::CapabilityAvailability::Available,
+            })
+            .collect();
+        let q = chip_core::WorkDecisionBoundary::question(&ModelDecisionBoundary, &offered);
+        assert_eq!(
+            q,
+            chip_core::WorkDecisionBoundary::question(&ModelDecisionBoundary, &offered),
+            "deterministic"
+        );
+        // pax.test declares no inputs: it is shown as taking none, with no `inputs` field in its form.
+        assert!(q.contains(r#"pax.test takes no inputs: {"decision":"request_capability","capability":"pax.test"} (no "inputs" field)"#), "{q}");
+        assert!(q.contains(r#"{"decision":"request_capability","capability":"pax.test","inputs":{}} is invalid"#), "{q}");
+        // project.read declares a required path; project.list only an optional one.
+        assert!(q.contains(r#"project.read takes inputs (path required): {"decision":"request_capability","capability":"project.read","inputs":{"path":<string|integer|boolean>}}"#), "{q}");
+        assert!(
+            q.contains(r#"project.write takes inputs (path required, content required)"#),
+            "{q}"
+        );
+        assert!(
+            q.contains(r#"project.search takes inputs (query required, path optional)"#),
+            "{q}"
+        );
+        assert!(
+            q.contains(r#"project.list takes inputs (path optional)"#),
+            "{q}"
+        );
+        // And every capability is described as its descriptor declares it.
+        for d in &descriptors {
+            let id = d.id.as_str();
+            let takes_none = q.contains(&format!("{id} takes no inputs"));
+            let takes_some = q.contains(&format!("{id} takes inputs ("));
+            assert_eq!(
+                (takes_none, takes_some),
+                (d.inputs.is_empty(), !d.inputs.is_empty()),
+                "{id}"
+            );
+        }
+        // The task prompts are untouched by any of this: the goal text carries no protocol advice.
+        let goal = goal_text(GOAL);
+        assert!(!goal.contains("inputs") && !goal.contains("{}"), "{goal}");
     }
 
     #[test]
