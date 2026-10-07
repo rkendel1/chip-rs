@@ -240,3 +240,29 @@ providing an environment implementation.
   `crates/chip-core/tests/environment.rs` state what it is held to. Chip contains no Compute client,
   configuration or types, and discovers, starts and provisions nothing.
 - The model boundary (FX) is independent of the environment: neither implies the other.
+
+## Running in an external environment (`chip-remote-env`)
+
+*Rust Chip* is this repository's agent runtime. It is not the npm-based Chip/Eve agent that some
+distributions ship; the two share nothing. Rust Chip stays standalone: `chip-core` and `chip-cli`
+build, test and run on the local machine with nothing else.
+
+`chip-remote-env` lets Rust Chip's capabilities run in an environment it does not own, through the
+smallest possible transport: **`exec(argv, env)`** with captured output and no stdin
+(`CommandRunner`). It does not know what provides that, and names no product.
+
+- `RemoteEnvironment` implements the environment contract (`WorkEnvironment`) over a `CommandRunner`.
+- `RemoteCapabilityBackend` is an ordinary capability backend. Rust Chip validates a request as
+  always, then asks the environment to run **Rust Chip's own executor** for it:
+  `chip-cli capability-exec --root <project>` with the request in `CHIP_CAPABILITY_REQUEST`. The
+  environment performs the process; what `project.write` means, the shape of its observation, how
+  `pax.test`'s `pax.execution-result.v1` is read and whether the goal is met stay Rust Chip's. Tests
+  show every capability is byte-identical to the local one, against real Git and real PAX/Cargo.
+- A command receipt the environment records proves the environment ran something. It is never a
+  Rust Chip receipt and never settles a goal.
+- A request that does not fit in one environment variable (120 KiB) is refused whole, never truncated.
+
+Another program embeds Rust Chip by implementing `EnvironmentProvider` (acquire / release /
+isolation capacity) and calling `chip_cli::service::serve_in` with its `Environments`. Rust Chip
+never depends on that program. The first such provider, over Compute sessions, lives in the Compute
+repository (`crates/compute-rust-chip`, `docs/rust-chip.md`).
