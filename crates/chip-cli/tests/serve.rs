@@ -1,4 +1,4 @@
-//! `chip-cli serve`, the binary run as a local application would run it, driven over real TCP.
+//! `chip serve`, the binary run as a local application would run it, driven over real TCP.
 //!
 //! The model is a local mock HTTP server with one fixed reply (a request that escapes the project,
 //! which Chip refuses: a deterministic, bounded run) and PAX is a shim that only identifies itself,
@@ -59,7 +59,7 @@ fn completion(content: &str) -> String {
 }
 
 fn command(dir: &PathBuf, model_url: &str, shim: &PathBuf) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_chip"));
     c.arg("serve")
         .current_dir(dir)
         .env("CHIP_PROVIDER", "openai-compatible")
@@ -332,7 +332,7 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
     let url = model.url.clone();
     let d = dir.clone();
     tokio::task::spawn_blocking(move || {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+        let mut c = Command::new(env!("CARGO_BIN_EXE_chip"));
         c.arg("serve")
             .current_dir(&d)
             .env_remove("PAX_BIN")

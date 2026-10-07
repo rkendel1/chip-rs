@@ -1,9 +1,9 @@
-//! `chip-cli --test-work` and `--test-real-work`: the autonomous loop through the real binary.
+//! `chip --test-work` and `--test-real-work`: the autonomous loop through the real binary.
 
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .args(args)
         .output()
         .unwrap()
@@ -168,7 +168,7 @@ fn an_unknown_scenario_is_a_usage_error() {
 
 #[test]
 fn real_compute_work_is_skipped_not_faked_when_compute_is_unavailable() {
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-real-work")
         .env("COMPUTE_BIN", "/nonexistent/compute")
         .output()
@@ -470,7 +470,7 @@ fn the_trace_shows_structure_and_no_prompt_text() {
 
 #[test]
 fn real_compute_work_skips_cleanly_in_json_mode_too() {
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .args(["--test-real-work", "--json"])
         .env("COMPUTE_BIN", "/nonexistent/compute")
         .output()

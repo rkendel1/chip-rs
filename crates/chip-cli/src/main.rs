@@ -546,7 +546,7 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
-        println!("chip-cli {}", env!("CARGO_PKG_VERSION"));
+        println!("chip {}", env!("CARGO_PKG_VERSION"));
         return;
     }
 
@@ -564,7 +564,7 @@ async fn main() {
         let root = match (args.get(2).map(String::as_str), args.get(3)) {
             (Some("--root"), Some(root)) if args.len() == 4 => root.clone(),
             _ => {
-                eprintln!("usage: chip-cli capability-exec --root <project directory>");
+                eprintln!("usage: chip capability-exec --root <project directory>");
                 std::process::exit(2);
             }
         };

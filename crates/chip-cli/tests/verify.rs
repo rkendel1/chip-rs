@@ -1,4 +1,4 @@
-//! PR44: `chip-cli verify`, the standalone software-verification agent.
+//! PR44: `chip verify`, the standalone software-verification agent.
 //!
 //! The binary is run as a user would run it: from the project directory. The model provider is a
 //! mock HTTP server (the real `HttpProvider` talks to it) except in the opt-in live test
@@ -66,7 +66,7 @@ const REQUEST: &str =
     r#"{"schema":"chip.work-decision.v1","decision":"request_capability","capability":"pax.test"}"#;
 
 fn run(url: &str, dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_chip"));
     command
         .arg("verify")
         .args(args)
@@ -583,7 +583,7 @@ fn unexpected_arguments_are_a_usage_error_and_no_path_can_be_chosen() {
         &["--dir", "/"],
         &["test"],
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        let out = Command::new(env!("CARGO_BIN_EXE_chip"))
             .arg("verify")
             .args(args)
             .env("CHIP_PROVIDER", "openai-compatible")
@@ -592,14 +592,14 @@ fn unexpected_arguments_are_a_usage_error_and_no_path_can_be_chosen() {
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", text(&out));
-        assert!(text(&out).contains("usage: chip-cli verify"));
+        assert!(text(&out).contains("usage: chip verify"));
     }
 }
 
 #[test]
 fn without_a_provider_nothing_runs_and_the_status_says_so() {
     let dir = passing("noprovider");
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("verify")
         .current_dir(&dir)
         .env_remove("CHIP_MODEL")
@@ -615,13 +615,13 @@ fn without_a_provider_nothing_runs_and_the_status_says_so() {
 
 #[test]
 fn version_is_chip_s_own_and_does_not_mention_pax() {
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--version")
         .output()
         .unwrap();
     assert!(out.status.success());
     let t = text(&out);
-    assert_eq!(t.trim(), format!("chip-cli {}", env!("CARGO_PKG_VERSION")));
+    assert_eq!(t.trim(), format!("chip {}", env!("CARGO_PKG_VERSION")));
     assert!(!t.to_lowercase().contains("pax"));
 }
 
@@ -664,7 +664,7 @@ fn real_model_verifies_passing_failing_and_zero_test_projects() {
             0,
         ),
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        let out = Command::new(env!("CARGO_BIN_EXE_chip"))
             .arg("verify")
             .arg("--json")
             .arg("--print-reply")

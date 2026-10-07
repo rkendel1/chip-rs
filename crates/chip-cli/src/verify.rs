@@ -1,4 +1,4 @@
-//! `chip-cli verify [--json] [--print-reply]`: the software-verification agent.
+//! `chip verify [--json] [--print-reply]`: the software-verification agent.
 //!
 //! The goal is fixed: "Verify that the project's tests pass." The project is the current working
 //! directory; neither the model nor a flag can name another. The model may select `pax.test` (and
@@ -285,7 +285,7 @@ pub async fn verify(args: &[String]) -> i32 {
             "--print-reply" => print_reply = true,
             other => {
                 eprintln!("error: unexpected argument `{other}`");
-                eprintln!("usage: chip-cli verify [--json] [--print-reply]");
+                eprintln!("usage: chip verify [--json] [--print-reply]");
                 eprintln!("       verifies the project in the current directory");
                 return EXIT_USAGE;
             }

@@ -1,9 +1,9 @@
-//! `chip-cli --benchmark-local-model` and `--evaluate-local-model` on the embedded model.
+//! `chip --benchmark-local-model` and `--evaluate-local-model` on the embedded model.
 
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .args(args)
         .output()
         .unwrap()

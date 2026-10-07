@@ -6,6 +6,12 @@ license = "MIT"
 
 # `local-ml` adds the native local-model reasoner. It needs ONNX Runtime at build time
 # (downloaded by the runtime's build script, or supplied via ORT_LIB_LOCATION), so it is off by default.
+# The one Rust executable is `chip`. The package keeps its name (`chip-cli`) so the library other
+# programs embed keeps its path; there is no second command-line program.
+[[bin]]
+name = "chip"
+path = "src/main.rs"
+
 [features]
 local-ml = ["dep:chip-local-ml", "chip-local-ml/runtime"]
 # Experimental native Laya (candle) reasoner; needs a local checkpoint directory, never downloads.

@@ -1,0 +1,64 @@
+name: Release Rust Chip
+
+# Publishes the canonical Rust Chip artifact for a tag `chip-v<version>`, where <version> is the
+# chip-cli package version. Rust FX keeps its own versions; they are recorded in the artifact's
+# manifest, not synchronised with this one. A consumer pins the tag (and the artifact's sha256),
+# never a moving branch.
+
+on:
+  push:
+    tags: ["chip-v*"]
+
+permissions:
+  contents: write
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: The tag names the version being released
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps --locked | python3 -I -c '
+          import json, sys
+          print({p["name"]: p["version"] for p in json.load(sys.stdin)["packages"]}["chip-cli"])')
+          test "$GITHUB_REF_NAME" = "chip-v$version"
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Wasm checks
+        run: |
+          cargo check -p chip-core --target wasm32-unknown-unknown
+          cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
+
+      - name: Full test suite
+        run: cargo test --workspace --locked
+
+      - name: Dependency direction
+        run: scripts/audit-dependencies.sh
+
+      - name: Build the artifact
+        run: scripts/package-release.sh dist
+
+      - name: Packaged local smoke test
+        run: scripts/smoke-test.sh dist/chip-*.tar.gz
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/chip-*.tar.gz dist/chip-*.tar.gz.sha256 \
+            --title "Rust Chip ${GITHUB_REF_NAME#chip-v}" \
+            --notes "The Rust Chip agent runtime (executable: chip). Its manifest.json records the exact Chip and Rust FX crate versions. Not the npm Chip/Eve agent."

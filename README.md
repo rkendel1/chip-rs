@@ -1,14 +1,84 @@
-# chip-rs
+# Chip
 
-A small Rust workspace that proves a clean model boundary between the Chip agent runtime and provider execution.
+**Chip is the base agent. Compute is the computer.** **Rust FX supplies the model/provider boundary; Compute does not.**
+
+Chip is an autonomous agent runtime. It uses **Rust FX** for intelligence and an **Environment** for
+execution:
+
+```text
+                 Chip   (this repository)
+                  |
+        +---------+-----------+
+        |                     |
+     Rust FX             Environment
+  (model/provider)      (where work runs)
+        |                 |         |
+      model            Local      Compute
+                      machine    (hosted by an embedder)
+```
+
+Chip owns the agency: it validates every capability request, runs the work lifecycle, interprets
+observations as evidence, decides whether the goal was met, and recovers within bounds. A model
+supplies judgment and nothing more: its words are never an execution, an observation, evidence, a
+receipt, success or completion. The environment supplies execution reality and nothing more.
+
+## Two agent stacks, kept apart
+
+The Compute-configured distribution already ships an npm agent. This repository is a different one:
+
+| | Existing | This repository |
+| --- | --- | --- |
+| Agent | **Chip/Eve** (npm) | **Rust Chip** (`chip`) |
+| Model/provider boundary | **FX/Zig** (npm/Zig) | **Rust FX** (`fx-core`, `fx-provider-http`) |
+| Launched by | `compute-configured-chip` | `chip`, or `compute-configured-rust-chip` when hosted |
+
+They are independent implementations and can coexist in one Compute-configured distribution. Neither
+replaces, wraps, renames or calls the other, and Rust Chip never falls back to FX/Zig (nor the other
+way round). In this document, "Chip" means Rust Chip; the npm agent is always written Chip/Eve.
+
+## Compute is an environment, not part of Chip
+
+```text
+Rust Chip  ------->  environment contract (chip-core)  <-------  Compute (implemented by an embedder)
+```
+
+Rust Chip has no dependency on Compute and no notion of it: not in `chip-core`, not in the Rust FX
+crates, not in `chip-remote-env`, not in the work/serve path. A program that wants to give Chip an
+environment implements `EnvironmentProvider` and passes it to `chip_cli::service::serve_in`; Compute's
+implementation lives in the Compute repository. Running Chip locally or on Compute changes where
+execution happens, never what a capability means (tests show every capability byte-identical across
+the two). `scripts/audit-dependencies.sh` and `crates/chip-remote-env/tests/architecture.rs` pin this.
+
+## The executable
+
+There is one Rust executable, `chip`:
+
+```bash
+chip --version                       # chip <version>
+chip work "<goal>"                   # one bounded piece of work, on this machine
+chip serve [--host H] [--port P]     # the runtime service (see below)
+```
+
+`chip work` and `chip serve` run on the local machine with no other service. A release is one
+archive (`chip-<version>-<target>.tar.gz`) holding `chip` and a `manifest.json` that records the exact
+Chip and Rust FX crate versions it was built from. Chip and Rust FX are versioned independently; a
+consumer pins the release tag and the archive's sha256, never a moving branch.
+
+```bash
+scripts/package-release.sh dist                 # build the artifact
+scripts/smoke-test.sh dist/chip-*.tar.gz        # extract it, chip --version, chip serve, a real capability, clean stop
+scripts/audit-dependencies.sh                   # Rust Chip -> Rust FX; no environment provider
+```
 
 ## Workspace
 
-- `crates/fx-core`: provider-neutral model boundary
-- `crates/chip-core`: agent runtime
-- `crates/chip-cli`: minimal command-line demo
+- `crates/fx-core`, `crates/fx-provider-http`: **Rust FX**, the provider-neutral model boundary and its HTTP provider
+- `crates/chip-core`: the agent runtime, including the generic environment contract
+- `crates/chip-remote-env`: a generic transport for running Chip's capabilities in an external environment
+- `crates/chip-project`, `crates/chip-pax`: the project and test capabilities
+- `crates/chip-cli`: the `chip` executable and the library that `serve_in` embeds
 
-## Usage
+## Development
 
 ```bash
 cargo check --workspace
@@ -16,14 +86,14 @@ cargo test --workspace
 cargo run -p chip-cli -- --test
 ```
 
-The CLI uses a deterministic in-memory provider and completes a single turn without external credentials or services.
+The `--test` command uses a deterministic in-memory provider and completes a single turn without external credentials or services.
 
-## Software verification agent (`chip-cli verify`)
+## Software verification agent (`chip verify`)
 
 ```sh
 cd ~/src/project
-chip-cli verify            # human-readable
-chip-cli verify --json     # machine-readable (extends the existing work measurement JSON)
+chip verify            # human-readable
+chip verify --json     # machine-readable (extends the existing work measurement JSON)
 ```
 
 Chip is the agent. PAX is an **external** project capability. Cargo, npm and the like are the native
@@ -51,7 +121,7 @@ model ──judgment──▶ Chip ──pax.test──▶ pax --dir <cwd> --jso
 
 ### Requirements
 
-* A model provider behind FX, configured as for the rest of `chip-cli`: `CHIP_PROVIDER`,
+* A model provider behind FX, configured as for the rest of `chip`: `CHIP_PROVIDER`,
   `CHIP_MODEL`, and `CHIP_ENDPOINT` / `CHIP_API_KEY` where the provider needs them.
 * PAX **0.3.0 or later** (`pax.execution-result.v1`), found as `$PAX_BIN` if set, otherwise as the
   first `pax` on `PATH`. The candidate must identify itself via `pax --version`; the POSIX `pax`
@@ -60,15 +130,15 @@ model ──judgment──▶ Chip ──pax.test──▶ pax --dir <cwd> --jso
 * The native tooling PAX needs for your project (for example `cargo`).
 * Not required: Compute, Attn or any other part of the wider stack.
 
-`chip-cli --version` prints Chip's own version only.
+`chip --version` prints Chip's own version only.
 
-## Software work agent (`chip-cli work`)
+## Software work agent (`chip work`)
 
 ```sh
 cd ~/src/project
-chip-cli work "Fix the failing tests in this project"                       # model from the environment
-chip-cli work --provider ollama --model qwen3-coder "Fix the failing tests"  # fully local
-chip-cli work --provider anthropic --model claude-haiku-4-5-20251001 --json "<goal>"
+chip work "Fix the failing tests in this project"                       # model from the environment
+chip work --provider ollama --model qwen3-coder "Fix the failing tests"  # fully local
+chip work --provider anthropic --model claude-haiku-4-5-20251001 --json "<goal>"
 ```
 
 **Choose the model. Chip controls the work.** Chip is a bounded autonomous work runtime; file
@@ -139,11 +209,11 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   select it); Compute is not required. PAX's own test diagnostics are shown to the model as PAX
   wrote them and can include host paths.
 
-## Runtime service (`chip-cli serve`)
+## Runtime service (`chip serve`)
 
-`chip-cli serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]`
+`chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]`
 (default `127.0.0.1:8765`; as many works at once as the environment can isolate, at most 2 by default, so 1 on the local machine; 32 queued) exposes the same work runtime that
-`chip-cli work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
+`chip work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
 `WorkRuntime` (model, PAX, project root) and call `WorkRuntime::run`. The model comes from
 `CHIP_PROVIDER` / `CHIP_MODEL` / `CHIP_ENDPOINT` as for `work`; the project is the current directory.
 If no model is selected or PAX is unusable, nothing listens (exit 3).
@@ -254,7 +324,7 @@ smallest possible transport: **`exec(argv, env)`** with captured output and no s
 - `RemoteEnvironment` implements the environment contract (`WorkEnvironment`) over a `CommandRunner`.
 - `RemoteCapabilityBackend` is an ordinary capability backend. Rust Chip validates a request as
   always, then asks the environment to run **Rust Chip's own executor** for it:
-  `chip-cli capability-exec --root <project>` with the request in `CHIP_CAPABILITY_REQUEST`. The
+  `chip capability-exec --root <project>` with the request in `CHIP_CAPABILITY_REQUEST`. The
   environment performs the process; what `project.write` means, the shape of its observation, how
   `pax.test`'s `pax.execution-result.v1` is read and whether the goal is met stay Rust Chip's. Tests
   show every capability is byte-identical to the local one, against real Git and real PAX/Cargo.

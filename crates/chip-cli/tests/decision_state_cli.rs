@@ -1,4 +1,4 @@
-//! `chip-cli decision-state` is an inspection command over values passed in. It reads no
+//! `chip decision-state` is an inspection command over values passed in. It reads no
 //! repository, initializes no graph, executes nothing and calls no model.
 
 use std::fs;
@@ -13,7 +13,7 @@ use chip_graph::{CapabilityCatalog, analyze, capability_slice};
 const GRAPH: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn run_in(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .current_dir(dir)
         .args(args)
         .output()

@@ -46,7 +46,7 @@ use tokio::process::Command;
 /// The one capability this adapter provides.
 pub const PAX_TEST_CAPABILITY: &str = "pax.test";
 
-/// Environment variable naming the PAX executable explicitly (like `COMPUTE_BIN` for Compute).
+/// Environment variable naming the PAX executable explicitly.
 /// It is Chip's own configuration; no model output can set it.
 pub const PAX_BIN_ENV: &str = "PAX_BIN";
 

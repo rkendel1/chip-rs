@@ -1,4 +1,4 @@
-//! `chip-cli --test-pax-work --workdir <directory>`: a real model asks for `pax.test`; Chip
+//! `chip --test-pax-work --workdir <directory>`: a real model asks for `pax.test`; Chip
 //! validates the request; the installed PAX is run against the work directory; the real process
 //! observation is recorded.
 //!

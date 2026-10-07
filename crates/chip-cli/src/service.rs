@@ -1,4 +1,4 @@
-//! `chip-cli serve [--host H] [--port P]`: the Chip Runtime Service.
+//! `chip serve [--host H] [--port P]`: the Chip Runtime Service.
 //!
 //! A thin HTTP surface over the one work runtime ([`WorkRuntime`]) that `chip work` also uses. It
 //! contains no agent logic: it accepts a goal, allocates a Chip-owned work id, starts the existing
@@ -934,7 +934,7 @@ pub async fn run(listener: TcpListener, service: Arc<Service>) {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip-cli serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]"
+        "usage: chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]"
     );
     eprintln!(
         "       defaults: {DEFAULT_HOST}:{DEFAULT_PORT}, {DEFAULT_MAX_CONCURRENT_WORK} work at once (1 to {MAX_CONCURRENT_CEILING}), {DEFAULT_MAX_QUEUED_WORK} queued (0 to {MAX_QUEUED_CEILING}). The model comes from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, as for `work`; works on the project in the current directory"

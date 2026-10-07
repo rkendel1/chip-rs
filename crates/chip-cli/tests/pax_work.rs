@@ -48,7 +48,7 @@ const REQUEST: &str =
     r#"{"schema":"chip.work-decision.v1","decision":"request_capability","capability":"pax.test"}"#;
 
 fn run(url: &str, workdir: &Path, extra: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_chip"));
     command
         .arg("--test-pax-work")
         .arg("--workdir")
@@ -279,7 +279,7 @@ async fn no_pax_at_all_fails_closed() {
 
 #[test]
 fn the_work_directory_is_required_and_never_comes_from_a_model() {
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-pax-work")
         .env("CHIP_PROVIDER", "openai-compatible")
         .env("CHIP_MODEL", "m")
@@ -303,7 +303,7 @@ fn real_model_requests_pax_and_real_pax_runs() {
         ("live-fail", "assert_eq!(2 + 2, 5);", false),
     ] {
         let dir = project(tag, body);
-        let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        let out = Command::new(env!("CARGO_BIN_EXE_chip"))
             .arg("--test-pax-work")
             .arg("--workdir")
             .arg(&dir)

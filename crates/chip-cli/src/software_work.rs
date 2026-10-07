@@ -1,4 +1,4 @@
-//! `chip-cli work "<goal>" [--json] [--print-reply] [--max-turns N] [--max-executions N]`:
+//! `chip work "<goal>" [--json] [--print-reply] [--max-turns N] [--max-executions N]`:
 //! bounded autonomous software work in the project in the current directory.
 //!
 //! The model can inspect and change the project and verify it, only through three declared
@@ -603,7 +603,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip-cli work \"<goal>\" [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
+        "usage: chip work \"<goal>\" [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
     );
     eprintln!(
         "       provider/model/endpoint: command line, then CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, then the provider's default endpoint; a model is always required"

@@ -2,13 +2,13 @@
 //!
 //! This crate knows one thing about the outside world: it can run a command there, given an argv
 //! and an environment, and get back its exit status and captured output ([`CommandRunner`]). There
-//! is no stdin. It does not know what provides that (a container, a hosted computer, a remote
+//! is no stdin. It does not know what provides that (a container, a hosted machine, a remote
 //! machine), and it knows nothing about any particular product.
 //!
 //! Rust Chip keeps every decision about what a capability means. [`RemoteCapabilityBackend`] is a
 //! `CapabilityBackend` like any other: Chip validates the request, then the backend asks the
 //! environment to run **Rust Chip's own executor** for that capability (the [`worker`], shipped as
-//! `chip-cli capability-exec`) against the project in that environment. The environment performs
+//! `chip capability-exec`) against the project in that environment. The environment performs
 //! the process; the meaning of `project.write`, the shape of its observation, the validation of its
 //! inputs and the interpretation of `pax.test` stay exactly what they are locally, by construction.
 //!

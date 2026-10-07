@@ -1,6 +1,6 @@
 //! The worker: Rust Chip's own executors, run in the environment against the project there.
 //!
-//! `chip-cli capability-exec --root <dir>` reads one request from `CHIP_CAPABILITY_REQUEST`, runs
+//! `chip capability-exec --root <dir>` reads one request from `CHIP_CAPABILITY_REQUEST`, runs
 //! it with the same `ProjectExecutor` and `PaxExecutor` that `chip work` uses locally, and prints
 //! one response. It decides nothing: Chip has already validated and authorized the request, and
 //! the executors re-check their own inputs exactly as they do locally.

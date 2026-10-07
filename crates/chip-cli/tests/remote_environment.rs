@@ -103,7 +103,7 @@ impl CommandRunner for ProcessRunner {
 
 fn worker() -> WorkerCommand {
     WorkerCommand {
-        program: env!("CARGO_BIN_EXE_chip-cli").to_string(),
+        program: env!("CARGO_BIN_EXE_chip").to_string(),
         root: "project".to_string(),
     }
 }
