@@ -558,6 +558,19 @@ async fn main() {
         std::process::exit(service::serve(&args[2..]).await);
     }
 
+    // The worker Rust Chip runs inside an external environment (see `chip-remote-env`). It is not
+    // an agent: it executes one already-validated capability request with Chip's own executors.
+    if args.len() > 1 && args[1] == chip_remote_env::WORKER_SUBCOMMAND {
+        let root = match (args.get(2).map(String::as_str), args.get(3)) {
+            (Some("--root"), Some(root)) if args.len() == 4 => root.clone(),
+            _ => {
+                eprintln!("usage: chip-cli capability-exec --root <project directory>");
+                std::process::exit(2);
+            }
+        };
+        std::process::exit(chip_remote_env::worker::run(std::path::Path::new(&root)).await);
+    }
+
     if args.len() > 1 && args[1] == "verify" {
         std::process::exit(verify::verify(&args[2..]).await);
     }

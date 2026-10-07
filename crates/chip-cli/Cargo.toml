@@ -20,6 +20,7 @@ fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
 chip-pax = { path = "../chip-pax" }
 chip-project = { path = "../chip-project" }
+chip-remote-env = { path = "../chip-remote-env" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-local-ml = { path = "../chip-local-ml", optional = true }
 chip-laya-reasoner = { path = "../chip-laya-reasoner", optional = true }

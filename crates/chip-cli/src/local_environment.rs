@@ -18,11 +18,7 @@ use chip_core::{
     ObservationInvariant, WorkEnvironment, WorkId,
 };
 use chip_pax::{PaxExecutor, ResolvedPax};
-use chip_project::{
-    PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor,
-    git_observation_invariant, git_scope_invariant, host_path_leak_invariant,
-    navigation_mismatch_invariant, out_of_root_write_invariant, path_escape_invariant,
-};
+use chip_project::{PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor};
 use sha2::{Digest, Sha256};
 
 /// One project directory and the capabilities that operate on it.
@@ -40,9 +36,7 @@ impl LocalEnvironment {
         pax: PaxExecutor,
         description: EnvironmentDescription,
     ) -> Self {
-        let set = CapabilitySet::new()
-            .with(Arc::new(ProjectExecutor::new(root)))
-            .with(Arc::new(pax));
+        let set = chip_remote_env::project_capability_set(root, pax);
         Self {
             id,
             root: root.to_path_buf(),
@@ -62,15 +56,7 @@ impl WorkEnvironment for LocalEnvironment {
     }
 
     fn observation_invariants(&self) -> Vec<Arc<dyn ObservationInvariant>> {
-        let root = &self.root;
-        vec![
-            path_escape_invariant(root),
-            out_of_root_write_invariant(root),
-            host_path_leak_invariant(root),
-            navigation_mismatch_invariant(root),
-            git_scope_invariant(),
-            git_observation_invariant(root),
-        ]
+        chip_remote_env::project_invariants(&self.root)
     }
 
     fn description(&self) -> EnvironmentDescription {

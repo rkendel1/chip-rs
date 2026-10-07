@@ -270,6 +270,7 @@ dependencies = [
  "chip-pax",
  "chip-project",
  "chip-reasoning-corpus",
+ "chip-remote-env",
  "chip-wasm-decision",
  "chip-wasm-decision-host",
  "chip-wasm-reasoner",
@@ -401,6 +402,18 @@ name = "chip-reasoning-corpus"
 version = "0.1.0"
 dependencies = [
  "chip-core",
+]
+
+[[package]]
+name = "chip-remote-env"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "chip-pax",
+ "chip-project",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
