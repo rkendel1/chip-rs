@@ -209,6 +209,9 @@ fn chip_graph_knows_nothing_about_any_capability_provider() {
             "fx-core",
             "chip-local-ml",
             "chip-laya-reasoner",
+            "laya",
+            "candle",
+            "wasm",
         ] {
             assert!(
                 !lower.contains(banned),

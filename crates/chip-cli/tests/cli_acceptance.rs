@@ -699,4 +699,98 @@ mod graph_snapshot {
         assert!(text(&tampered).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn copy_slice_fixture(name: &str) -> PathBuf {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-graph/tests/slice_fixture");
+        let dest = std::env::temp_dir().join(format!("chip-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        assert!(
+            Command::new("cp")
+                .arg("-r")
+                .arg(src)
+                .arg(&dest)
+                .status()
+                .unwrap()
+                .success()
+        );
+        dest
+    }
+
+    #[test]
+    fn slice_reads_the_stored_snapshot_and_reports_a_state_token() {
+        let dir = copy_slice_fixture("slice");
+        let root = dir.to_str().unwrap();
+        let catalog = dir.join("capabilities.json");
+        let catalog = catalog.to_str().unwrap();
+        let base = ["slice", "--capabilities", catalog, "--root", root];
+        let with = |extra: &[&str]| {
+            let mut args = base.to_vec();
+            args.extend_from_slice(extra);
+            run(&args)
+        };
+
+        // No snapshot: slice must not run init for us.
+        let none = with(&["cap.slice"]);
+        assert!(!none.status.success());
+        assert!(text(&none).contains("Run `chip init`."));
+        assert!(!dir.join(".chip").exists());
+
+        assert!(run(&["init", "--root", root]).status.success());
+        let out = with(&["cap.slice"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let shown = text(&out);
+        for needle in [
+            "Capability:\n  cap.slice\n",
+            "Nodes:\n  crate:a\n  file:a/src/one.rs\n  module:a:crate::one\n  module:a:crate::two\n",
+            "Edges:\n  crate:a contains file:a/src/one.rs\n",
+            "StateToken:\n  sha256:",
+        ] {
+            assert!(shown.contains(needle), "missing {needle:?} in {shown}");
+        }
+        assert!(!shown.contains("Impact:"));
+
+        let impacted = text(&with(&["--changed", "a/src/one.rs", "cap.slice"]));
+        assert!(impacted.contains("Impact:\n  impacted\n"), "{impacted}");
+        let unchanged = text(&with(&["--changed", "a/src/one.rs", "cap.other"]));
+        assert!(unchanged.contains("Impact:\n  unchanged\n"), "{unchanged}");
+        let unresolved = text(&with(&["--changed", "nope.rs", "cap.slice"]));
+        assert!(
+            unresolved.contains("Impact:\n  unchanged\n")
+                && unresolved.contains("Unresolved:\n  nope.rs")
+        );
+
+        let unknown = with(&["cap.nope"]);
+        assert!(!unknown.status.success() && text(&unknown).is_empty());
+
+        // An unrelated change plus a rebuilt snapshot: the token is unchanged.
+        let token = |s: &str| {
+            s.lines()
+                .skip_while(|l| *l != "StateToken:")
+                .nth(1)
+                .unwrap()
+                .to_string()
+        };
+        std::fs::write(
+            dir.join("a/src/three.rs"),
+            "pub fn other() {}\npub fn more() {}\n",
+        )
+        .unwrap();
+        assert!(run(&["init", "--root", root]).status.success());
+        assert_eq!(token(&text(&with(&["cap.slice"]))), token(&shown));
+
+        // A tampered snapshot is refused.
+        let latest = std::fs::read_to_string(dir.join(".chip/graph/latest")).unwrap();
+        let snap = dir.join(format!(".chip/graph/{}.json", latest.trim()));
+        let body = std::fs::read_to_string(&snap)
+            .unwrap()
+            .replace("crate:a", "crate:q");
+        std::fs::write(&snap, body).unwrap();
+        let tampered = with(&["cap.slice"]);
+        assert!(!tampered.status.success() && text(&tampered).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

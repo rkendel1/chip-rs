@@ -14,6 +14,7 @@
 mod analyze;
 mod impact;
 mod model;
+mod slice;
 mod store;
 
 pub use analyze::{AnalysisStats, AnalyzeError, analyze, analyze_with_stats, find_repository_root};
@@ -24,5 +25,9 @@ pub use impact::{
 pub use model::{
     ArchitectureGraph, GraphEdge, GraphEdgeKind, GraphNode, GraphNodeKind, SCHEMA_VERSION,
     SnapshotId,
+};
+pub use slice::{
+    GraphSlice, GraphStateToken, SLICE_SCHEMA, SliceError, SliceSelection, capability_slice,
+    capability_slice_for_impact,
 };
 pub use store::{StoreError, read_latest, write_snapshot};

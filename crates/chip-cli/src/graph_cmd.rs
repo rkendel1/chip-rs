@@ -8,7 +8,8 @@ use std::time::Instant;
 
 use chip_graph::{
     ArchitectureGraph, CapabilityCatalog, GraphEdgeKind, GraphNodeKind, StoreError, analyze_impact,
-    analyze_with_stats, find_repository_root, read_latest, write_snapshot,
+    analyze_with_stats, capability_slice, capability_slice_for_impact, find_repository_root,
+    read_latest, write_snapshot,
 };
 
 fn parse_root(args: &[String]) -> Result<PathBuf, String> {
@@ -162,71 +163,149 @@ pub fn graph(args: &[String]) -> i32 {
     0
 }
 
-/// `chip-cli impact --capabilities FILE [--root PATH] <path>...`
-///
-/// Reads the stored snapshot and an external capability catalog; never runs `init`, never
-/// infers or invents a catalog. Returns the process exit code.
-pub fn impact(args: &[String]) -> i32 {
-    let mut catalog_path: Option<String> = None;
-    let mut paths = Vec::new();
-    let mut rest = Vec::new();
+/// Options shared by the commands that read a stored snapshot plus a capability catalog.
+struct CatalogArgs {
+    catalog: Option<String>,
+    root_args: Vec<String>,
+    changed: Vec<String>,
+    positional: Vec<String>,
+}
+
+fn parse_catalog_args(args: &[String], allow_changed: bool) -> CatalogArgs {
+    let mut parsed = CatalogArgs {
+        catalog: None,
+        root_args: Vec::new(),
+        changed: Vec::new(),
+        positional: Vec::new(),
+    };
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--capabilities" => catalog_path = iter.next().cloned(),
+            "--capabilities" => parsed.catalog = iter.next().cloned(),
             "--root" => {
-                rest.push(arg.clone());
-                rest.extend(iter.next().cloned());
+                parsed.root_args.push(arg.clone());
+                parsed.root_args.extend(iter.next().cloned());
             }
-            _ => paths.push(arg.clone()),
+            "--changed" if allow_changed => parsed.changed.extend(iter.next().cloned()),
+            _ => parsed.positional.push(arg.clone()),
         }
     }
-    let Some(catalog_path) = catalog_path else {
-        eprintln!("usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...");
-        return 2;
-    };
-    if paths.is_empty() {
-        eprintln!("usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...");
-        return 2;
-    }
-    let root = match parse_root(&rest) {
-        Ok(root) => root,
-        Err(message) => {
-            eprintln!("{message}");
-            return 1;
-        }
-    };
+    parsed
+}
+
+/// Reads the stored snapshot and the catalog, validated against it. Never runs `init`, never
+/// infers or invents a catalog. On failure the message is printed and the exit code returned.
+fn load_inputs(parsed: &CatalogArgs) -> Result<(ArchitectureGraph, CapabilityCatalog), i32> {
+    let catalog_path = parsed.catalog.as_deref().unwrap_or_default();
+    let root = parse_root(&parsed.root_args).map_err(|message| {
+        eprintln!("{message}");
+        1
+    })?;
     let graph = match read_latest(&root) {
         Ok(graph) => graph,
         Err(StoreError::NotFound) => {
             println!("No architecture snapshot found.");
             println!("Run `chip init`.");
-            return 1;
+            return Err(1);
         }
         Err(e) => {
             eprintln!("{e}");
-            return 1;
+            return Err(1);
         }
     };
-    let text = match std::fs::read_to_string(&catalog_path) {
+    let text = match std::fs::read_to_string(catalog_path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             println!("Capability catalog not found:");
             println!("  {catalog_path}");
-            return 1;
+            return Err(1);
         }
         Err(e) => {
             eprintln!("cannot read {catalog_path}: {e}");
-            return 1;
+            return Err(1);
         }
     };
-    let catalog = match CapabilityCatalog::from_json(&text, &graph) {
-        Ok(catalog) => catalog,
+    match CapabilityCatalog::from_json(&text, &graph) {
+        Ok(catalog) => Ok((graph, catalog)),
         Err(e) => {
             eprintln!("{catalog_path}: {e}");
-            return 1;
+            Err(1)
+        }
+    }
+}
+
+/// `chip-cli impact --capabilities FILE [--root PATH] <path>...`
+///
+/// Reads the stored snapshot and an external capability catalog; never runs `init`, never
+/// infers or invents a catalog. Returns the process exit code.
+pub fn impact(args: &[String]) -> i32 {
+    let usage = "usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...";
+    let parsed = parse_catalog_args(args, false);
+    if parsed.catalog.is_none() || parsed.positional.is_empty() {
+        eprintln!("{usage}");
+        return 2;
+    }
+    let (graph, catalog) = match load_inputs(&parsed) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
+    print!(
+        "{}",
+        analyze_impact(&graph, &catalog, &parsed.positional).render()
+    );
+    0
+}
+
+/// `chip-cli slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>`
+///
+/// Prints the capability's relevant graph slice and its StateToken, from the stored snapshot.
+/// Returns the process exit code.
+pub fn slice(args: &[String]) -> i32 {
+    let usage = "usage: chip-cli slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>";
+    let parsed = parse_catalog_args(args, true);
+    if parsed.catalog.is_none() || parsed.positional.len() != 1 {
+        eprintln!("{usage}");
+        return 2;
+    }
+    let (graph, catalog) = match load_inputs(&parsed) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
+    let id = &parsed.positional[0];
+    let (slice, impact) = if parsed.changed.is_empty() {
+        match capability_slice(&graph, &catalog, id) {
+            Ok(slice) => (slice, None),
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
+        }
+    } else {
+        match capability_slice_for_impact(&graph, &catalog, id, &parsed.changed) {
+            Ok(selection) => {
+                let label = if selection.is_impacted() {
+                    "impacted"
+                } else {
+                    "unchanged"
+                };
+                (selection.slice().clone(), Some(label))
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
         }
     };
-    print!("{}", analyze_impact(&graph, &catalog, &paths).render());
+    print!("{}", slice.render(impact));
+    if impact.is_some() {
+        // "Chip could not map this change" is different from "this change has no impact".
+        let unresolved = analyze_impact(&graph, &catalog, &parsed.changed).unresolved_paths;
+        if !unresolved.is_empty() {
+            println!("\nUnresolved:");
+            for path in unresolved {
+                println!("  {path}");
+            }
+        }
+    }
     0
 }
