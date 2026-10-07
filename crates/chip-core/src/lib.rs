@@ -1,6 +1,7 @@
 mod decision;
 mod decision_state;
 mod evidence;
+mod model_decision;
 mod observation;
 mod reasoning;
 mod work;
@@ -18,6 +19,7 @@ pub use decision_state::{
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
+pub use model_decision::{ModelDecisionBoundary, WORK_DECISION_SCHEMA};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
 };

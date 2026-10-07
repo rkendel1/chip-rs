@@ -12,27 +12,23 @@ use chip_core::{
     Agent, Capability, CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
     CapabilityProvider, CapabilityRequest, DecisionError, DecisionSource, EvidenceState,
     ExecutionError, ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, Executor, LimitKind, LocalReasoningResult, LocalWorkPolicy, ObservationKind,
-    ScriptedPolicy, TerminalState, TestLocalReasoner, WorkDecision, WorkDecisionBoundary,
-    WorkEvent, WorkGoal, WorkId, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec,
-    WorkView, verify_trajectory,
+    ExecutionStatus, Executor, LimitKind, LocalReasoningResult, LocalWorkPolicy,
+    ModelDecisionBoundary, ObservationKind, ScriptedPolicy, TerminalState, TestLocalReasoner,
+    WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkMeasurement,
+    WorkOutcome, WorkReport, WorkSpec, WorkView, verify_trajectory,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const CAPABILITY: &str = "compute.selftest";
 
 /// Counts calls; answers every escalation with the same text.
-struct StandInModel(Arc<AtomicUsize>);
+struct StandInModel(Arc<AtomicUsize>, &'static str);
 
 #[async_trait::async_trait]
 impl ModelProvider for StandInModel {
     async fn complete(&self, _request: ModelRequest) -> Result<ModelResponse, FxError> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(ModelResponse::new(
-            "work-model",
-            "run the self test",
-            Usage::new(1, 1),
-        ))
+        Ok(ModelResponse::new("work-model", self.1, Usage::new(1, 1)))
     }
 }
 
@@ -176,12 +172,15 @@ fn describe(event: &WorkEvent) -> String {
             "ModelEscalation: {reason} (context {} bytes, {} observations, {} decisions)",
             context.bytes, context.observations, context.decisions
         ),
-        WorkEvent::ModelCalled { usage, .. } => match usage {
-            Some(u) => format!(
+        WorkEvent::ModelCalled {
+            usage, succeeded, ..
+        } => match (succeeded, usage) {
+            (false, _) => "ModelCalled (failed)".to_string(),
+            (true, Some(u)) => format!(
                 "ModelCalled (tokens: prompt {}, completion {})",
                 u.prompt_tokens, u.completion_tokens
             ),
-            None => "ModelCalled (failed)".to_string(),
+            (true, None) => "ModelCalled (usage not reported)".to_string(),
         },
         WorkEvent::DecisionMade { decision, .. } => format!("DecisionMade: {decision}"),
         WorkEvent::CapabilityRequested { capability, .. } => {
@@ -369,6 +368,9 @@ struct Scenario {
     limits: WorkLimits,
     policy: Box<dyn LocalWorkPolicy>,
     model_decisions: Vec<WorkDecision>,
+    /// Interpret the stand-in model's reply under the real `chip.work-decision.v1` contract,
+    /// instead of playing back scripted decisions.
+    contract_reply: Option<&'static str>,
     /// Establish valid evidence with one real prior execution, outside the measured work.
     seed_evidence: bool,
     expect: fn(&WorkReport) -> bool,
@@ -388,6 +390,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             limits,
             policy: Box::new(ReactToObservation),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
@@ -402,6 +405,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             limits,
             policy: Box::new(ReactToObservation),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Blocked { .. })
@@ -419,6 +423,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             },
             policy: Box::new(Insatiable),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: false,
             expect: |r| {
                 r.outcome
@@ -439,6 +444,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             },
             policy: Box::new(Repeating),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: false,
             expect: |r| {
                 r.outcome
@@ -462,6 +468,7 @@ fn scenario(name: &str) -> Option<Scenario> {
                 }),
             ])),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: true,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
@@ -483,6 +490,7 @@ fn scenario(name: &str) -> Option<Scenario> {
                 }),
             ])),
             model_decisions: vec![],
+            contract_reply: None,
             seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
@@ -502,6 +510,29 @@ fn scenario(name: &str) -> Option<Scenario> {
                 }),
             ])),
             model_decisions: vec![WorkDecision::RequestCapability(request("asked-by-model"))],
+            contract_reply: None,
+            seed_evidence: false,
+            expect: |r| {
+                matches!(r.outcome, WorkOutcome::Completed { .. })
+                    && r.summary.model_escalations == 1
+                    && r.summary.executions == 1
+            },
+        },
+        "model-contract" => Scenario {
+            title: "Bounded autonomous work: the model's reply is read under the work-decision contract",
+            goal,
+            status: ExecutionStatus::Success,
+            limits,
+            policy: Box::new(ScriptedPolicy::new(vec![
+                None,
+                Some(WorkDecision::Complete {
+                    summary: "completed after the model's request ran".into(),
+                }),
+            ])),
+            model_decisions: vec![],
+            contract_reply: Some(
+                r#"{"decision":"request_capability","capability":"compute.selftest"}"#,
+            ),
             seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
@@ -516,7 +547,7 @@ fn scenario(name: &str) -> Option<Scenario> {
 /// The fixed baseline suite that future optimization is measured against.
 pub const CANONICAL: [&str; 5] = ["completion", "failure", "evidence", "limit", "escalation"];
 
-pub const SCENARIOS: [&str; 7] = [
+pub const SCENARIOS: [&str; 8] = [
     "completion",
     "failure",
     "evidence",
@@ -524,6 +555,7 @@ pub const SCENARIOS: [&str; 7] = [
     "escalation",
     "turn-limit",
     "evidence-in-loop",
+    "model-contract",
 ];
 
 struct Finished {
@@ -546,14 +578,17 @@ async fn run_scenario(name: &str) -> Option<Finished> {
             rationale: "the demo continues".into(),
         },
     );
-    let agent = Agent::new(Arc::new(StandInModel(model_calls.clone())))
-        .with_capabilities(Arc::new(SelfTestCapability))
-        .with_executor(Arc::new(CountingExecutor(
-            Arc::new(Fixed(s.status)),
-            execute_calls.clone(),
-        )))
-        .with_observer(Arc::new(ExecutionObserver))
-        .with_local_reasoner(Arc::new(reasoner));
+    let agent = Agent::new(Arc::new(StandInModel(
+        model_calls.clone(),
+        s.contract_reply.unwrap_or("run the self test"),
+    )))
+    .with_capabilities(Arc::new(SelfTestCapability))
+    .with_executor(Arc::new(CountingExecutor(
+        Arc::new(Fixed(s.status)),
+        execute_calls.clone(),
+    )))
+    .with_observer(Arc::new(ExecutionObserver))
+    .with_local_reasoner(Arc::new(reasoner));
     if s.seed_evidence {
         // A real prior execution, not part of the measured work.
         agent
@@ -562,14 +597,15 @@ async fn run_scenario(name: &str) -> Option<Finished> {
             .expect("seeding evidence");
     }
     let before = execute_calls.load(Ordering::SeqCst);
+    let boundary: Box<dyn WorkDecisionBoundary> = if s.contract_reply.is_some() {
+        Box::new(ModelDecisionBoundary)
+    } else {
+        Box::new(ModelDecisions(s.model_decisions, AtomicUsize::new(0)))
+    };
     let spec = WorkSpec::new(WorkId::new(format!("demo-{name}")), WorkGoal::new(s.goal))
         .with_limits(s.limits);
     let report = agent
-        .run_work(
-            &spec,
-            s.policy.as_ref(),
-            &ModelDecisions(s.model_decisions, AtomicUsize::new(0)),
-        )
+        .run_work(&spec, s.policy.as_ref(), boundary.as_ref())
         .await;
     let violations = verify_trajectory(&report.events, &s.limits);
     for v in &violations {
@@ -694,7 +730,7 @@ pub async fn test_real_work(args: &[String]) -> i32 {
     let compute = Arc::new(chip_compute::ComputeExecutor::new());
     let model_calls = Arc::new(AtomicUsize::new(0));
     let execute_calls = Arc::new(AtomicUsize::new(0));
-    let agent = Agent::new(Arc::new(StandInModel(model_calls.clone())))
+    let agent = Agent::new(Arc::new(StandInModel(model_calls.clone(), "unused")))
         .with_capabilities(compute.clone())
         .with_executor(Arc::new(CountingExecutor(compute, execute_calls.clone())))
         .with_observer(Arc::new(ExecutionObserver))
@@ -777,6 +813,152 @@ pub async fn test_real_work(args: &[String]) -> i32 {
     } else {
         eprintln!(
             "\nerror: the real workload did not complete: {:?}",
+            report.outcome
+        );
+        1
+    }
+}
+
+/// Escalates the very first decision to the model; afterwards reacts to what was observed.
+struct AskModelFirst;
+
+impl LocalWorkPolicy for AskModelFirst {
+    fn propose(&self, view: &WorkView<'_>) -> Option<WorkDecision> {
+        if view.turn == 0 {
+            None
+        } else {
+            ReactToObservation.propose(view)
+        }
+    }
+}
+
+/// `--test-real-model-work [--json] [--deterministic-executor]`
+///
+/// A real FX provider (the `CHIP_*` configuration every live mode uses) makes the first decision;
+/// Compute executes what it asks for; Chip observes the result and decides the next step itself.
+/// Exit 3 means skipped: no provider configured, or no Compute. `--deterministic-executor` swaps
+/// Compute for a fixed executor, for exercising the provider path where Compute is absent; it
+/// is never the default.
+pub async fn test_real_model_work(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
+    let deterministic_executor = args.iter().any(|a| a == "--deterministic-executor");
+
+    let config = match crate::config_from_env(|name| std::env::var(name).ok()) {
+        Ok(config) => config,
+        Err(e) => {
+            // The message names the missing variable, never a value.
+            println!("SKIPPED: real model provider unavailable ({e})");
+            return 3;
+        }
+    };
+    let model_name = config.model.to_string();
+    let provider = match fx_provider_http::HttpProvider::new(config) {
+        Ok(provider) => provider,
+        Err(e) => {
+            println!("SKIPPED: real model provider unavailable ({e})");
+            return 3;
+        }
+    };
+
+    let execute_calls = Arc::new(AtomicUsize::new(0));
+    let compute = Arc::new(chip_compute::ComputeExecutor::new());
+    let builder = Agent::with_model(Arc::new(provider), model_name)
+        .with_observer(Arc::new(ExecutionObserver))
+        .with_local_reasoner(Arc::new(TestLocalReasoner::default()));
+    let agent = if deterministic_executor {
+        builder
+            .with_capabilities(Arc::new(SelfTestCapability))
+            .with_executor(Arc::new(CountingExecutor(
+                Arc::new(Fixed(ExecutionStatus::Success)),
+                execute_calls.clone(),
+            )))
+    } else {
+        builder
+            .with_capabilities(compute.clone())
+            .with_executor(Arc::new(CountingExecutor(compute, execute_calls.clone())))
+    };
+    if let Ok(found) = agent.discover_capabilities().await.result {
+        for capability in found {
+            if let CapabilityAvailability::Unavailable(reason)
+            | CapabilityAvailability::Misconfigured(reason) = capability.availability
+            {
+                println!("SKIPPED: Compute unavailable ({reason})");
+                return 3;
+            }
+        }
+    }
+
+    let limits = WorkLimits {
+        max_turns: 4,
+        max_executions: 2,
+    };
+    let spec = WorkSpec::new(
+        WorkId::new("real-model-work"),
+        WorkGoal::new("Determine the next action for the compute.selftest capability"),
+    )
+    .with_limits(limits);
+    let report = agent
+        .run_work(&spec, &AskModelFirst, &ModelDecisionBoundary)
+        .await;
+    let m = report.measurement();
+    let violations = verify_trajectory(&report.events, &limits);
+
+    if json {
+        println!("{}", measurement_json("real-model", &m));
+    } else {
+        let secs = |d: Duration| {
+            if d >= Duration::from_secs(1) {
+                format!("{:.2} s", d.as_secs_f64())
+            } else {
+                format!("{:.0} ms", d.as_secs_f64() * 1000.0)
+            }
+        };
+        println!("Real model autonomous work");
+        println!("--------------------------");
+        let outcome = match &report.outcome {
+            WorkOutcome::Completed { .. } => "Completed".to_string(),
+            WorkOutcome::Escalated { reason } => format!("Escalated ({reason})"),
+            WorkOutcome::Blocked { reason } => format!("Blocked ({reason})"),
+            WorkOutcome::LimitReached { limit } => format!("LimitReached ({})", limit.name()),
+            WorkOutcome::Failed { reason } => format!("Failed ({reason})"),
+        };
+        println!("Outcome:       {outcome}");
+        println!("Turns:         {}", m.turns);
+        println!("Executions:    {}", m.executions);
+        println!("Observations:  {}", m.observations);
+        println!("Local:         {}", m.local_decisions);
+        println!("Escalations:   {}", m.model_escalations);
+        println!("Model calls:   {}", m.model_calls);
+        println!("Context:       {} bytes", m.context_bytes);
+        println!(
+            "Model tokens:  {}",
+            m.model_tokens
+                .map_or("not reported".to_string(), |t| t.to_string())
+        );
+        println!("Model latency: {}", secs(m.model_latency));
+        println!("Compute:       {}", secs(m.compute_latency));
+        println!("Total:         {}", secs(m.total_latency));
+        println!("\nTrajectory:");
+        for (i, event) in report.events.iter().enumerate() {
+            println!("  {:>2}. {}", i + 1, describe(event));
+        }
+    }
+
+    if !violations.is_empty() {
+        eprintln!("\nerror: trajectory invariants violated: {violations:?}");
+        return 1;
+    }
+    let as_expected = matches!(report.outcome, WorkOutcome::Completed { .. })
+        && m.model_calls == 1
+        && m.model_escalations == 1
+        && m.executions == 1
+        && m.observations == 1;
+    if as_expected {
+        0
+    } else {
+        eprintln!(
+            "\nerror: the workload did not follow the expected trajectory (outcome: {:?}); \
+             the model was asked to request compute.selftest",
             report.outcome
         );
         1

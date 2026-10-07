@@ -25,3 +25,5 @@ jobs:
           cargo run -p chip-cli -- --test-real-evidence
           cargo run -p chip-cli -- --test-real-work
           cargo run -p chip-cli -- --test-real-work --json
+          # Skips (exit 3) unless CHIP_PROVIDER/CHIP_MODEL/CHIP_ENDPOINT/CHIP_API_KEY are set
+          cargo run -p chip-cli -- --test-real-model-work || [ $? -eq 3 ]

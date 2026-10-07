@@ -586,6 +586,10 @@ async fn main() {
         std::process::exit(work_demo::test_work(&args[2..]).await);
     }
 
+    if args.len() > 1 && args[1] == "--test-real-model-work" {
+        std::process::exit(work_demo::test_real_model_work(&args[2..]).await);
+    }
+
     if args.len() > 1 && args[1] == "--benchmark-work" {
         std::process::exit(work_demo::benchmark_work(&args[2..]).await);
     }

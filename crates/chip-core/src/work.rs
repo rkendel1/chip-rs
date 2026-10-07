@@ -239,7 +239,17 @@ pub trait WorkDecisionBoundary: Send + Sync {
         response: &ModelResponse,
         capabilities: &[Capability],
     ) -> Result<WorkDecision, DecisionError>;
+
+    /// What the model is asked, given the capabilities that were described when the work started.
+    /// It is part of the escalation context and counted in its measurements. A boundary that
+    /// expects a particular reply format says so here.
+    fn question(&self, _capabilities: &[Capability]) -> String {
+        DEFAULT_QUESTION.to_string()
+    }
 }
+
+const DEFAULT_QUESTION: &str =
+    "Decide the next step: respond if the goal is complete, or request one capability.";
 
 /// Adapts the existing [`DecisionBoundary`]: a capability request stays a request, and a plain
 /// response is the model saying the work is done. Neither is evidence that anything occurred.
@@ -351,12 +361,15 @@ pub enum WorkEvent {
         reason: String,
         context: ContextMetrics,
     },
-    /// The one model call an escalation makes has returned (or failed). `usage` is what the
-    /// provider reported, `None` when the call failed.
+    /// The one model call an escalation makes has returned or failed. `usage` is what the
+    /// provider reported: `None` when the call failed, and also when it succeeded but reported
+    /// no usage (a provider that omits usage yields zero tokens, which no real call can use, so
+    /// zero is read as "not reported" and nothing is estimated).
     ModelCalled {
         work_id: WorkId,
         turn: usize,
         usage: Option<ModelUsage>,
+        succeeded: bool,
     },
     DecisionMade {
         work_id: WorkId,
@@ -918,7 +931,7 @@ impl<'a> Run<'a> {
         self.observations.push(observation);
     }
 
-    fn context(&self, turn: usize, evidence: Vec<String>) -> EscalationContext {
+    fn context(&self, turn: usize, evidence: Vec<String>, question: String) -> EscalationContext {
         EscalationContext {
             goal: self.spec.goal.as_str().to_string(),
             current_state: format!(
@@ -947,9 +960,7 @@ impl<'a> Run<'a> {
                 })
                 .collect(),
             ruled_out: self.ruled_out.clone(),
-            question:
-                "Decide the next step: respond if the goal is complete, or request one capability."
-                    .to_string(),
+            question,
         }
     }
 
@@ -961,7 +972,8 @@ impl<'a> Run<'a> {
         evidence: Vec<String>,
         boundary: &dyn WorkDecisionBoundary,
     ) -> Result<WorkDecision, WorkOutcome> {
-        let context = self.context(turn, evidence);
+        let question = boundary.question(&self.capabilities);
+        let context = self.context(turn, evidence, question);
         let metrics = context.metrics();
         self.summary.model_escalations += 1;
         self.summary.context_bytes += metrics.bytes;
@@ -981,10 +993,13 @@ impl<'a> Run<'a> {
         self.events.push(WorkEvent::ModelCalled {
             work_id: self.id(),
             turn,
-            usage: called.as_ref().ok().map(|(_, r)| ModelUsage {
-                prompt_tokens: r.usage.prompt_tokens,
-                completion_tokens: r.usage.completion_tokens,
+            usage: called.as_ref().ok().and_then(|(_, r)| {
+                (r.usage.prompt_tokens > 0 || r.usage.completion_tokens > 0).then_some(ModelUsage {
+                    prompt_tokens: r.usage.prompt_tokens,
+                    completion_tokens: r.usage.completion_tokens,
+                })
             }),
+            succeeded: called.is_ok(),
         });
         let (_, response) = called.map_err(|e| WorkOutcome::Failed {
             reason: format!("model escalation failed: {e}"),
