@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 chip-core = { path = "../chip-core" }
+chip-decision-corpus = { path = "../chip-decision-corpus" }
 chip-local-decision = { path = "../chip-local-decision" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-wasm-decision = { path = "../chip-wasm-decision" }

@@ -262,6 +262,7 @@ dependencies = [
  "async-trait",
  "chip-compute",
  "chip-core",
+ "chip-decision-corpus",
  "chip-graph",
  "chip-laya-reasoner",
  "chip-local-decision",
@@ -296,6 +297,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+]
+
+[[package]]
+name = "chip-decision-corpus"
+version = "0.1.0"
+dependencies = [
+ "chip-core",
+ "sha2",
 ]
 
 [[package]]
@@ -341,6 +350,7 @@ name = "chip-local-decision-train"
 version = "0.1.0"
 dependencies = [
  "chip-core",
+ "chip-decision-corpus",
  "chip-local-decision",
  "chip-reasoning-corpus",
  "chip-wasm-decision",

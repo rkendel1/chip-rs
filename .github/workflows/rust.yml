@@ -62,3 +62,9 @@ jobs:
         run: |
           cargo run --release -p chip-cli -- --evaluate-local-model
           cargo run --release -p chip-cli -- --benchmark-local-model 20000
+
+      - name: Decision corpus generator is current
+        run: cargo run -p chip-decision-corpus --bin chip-decision-corpus -- verify
+
+      - name: PR25 report with live inference timings
+        run: cargo run --release -p chip-cli -- --report-decision-corpus 20000

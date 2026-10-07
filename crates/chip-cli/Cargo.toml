@@ -15,6 +15,7 @@ laya = ["dep:chip-laya-reasoner", "chip-laya-reasoner/laya"]
 chip-core = { path = "../chip-core" }
 chip-graph = { path = "../chip-graph" }
 chip-local-decision = { path = "../chip-local-decision" }
+chip-decision-corpus = { path = "../chip-decision-corpus" }
 fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }

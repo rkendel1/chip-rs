@@ -102,9 +102,6 @@ pub fn benchmark(args: &[String]) -> i32 {
     let iterations: usize = args.first().and_then(|n| n.parse().ok()).unwrap_or(200_000);
     let samples = 100.min(iterations);
     let batch = (iterations / samples).max(1);
-    let embedded_len = LocalDecisionModel::embedded()
-        .map(|m| m.to_bytes().len())
-        .unwrap_or(0);
     let model = match LocalDecisionModel::embedded() {
         Ok(model) => model,
         Err(e) => {
@@ -256,6 +253,79 @@ pub fn evaluate_corpus(_args: &[String]) -> i32 {
     if evaluation.guarded.fp > 0 || evaluation.learned.fp > 0 {
         println!("\nFAILED: a false continue was produced.");
         return 1;
+    }
+    0
+}
+
+const PR25_REPORT: &str =
+    include_str!("../../chip-local-decision/models/local-decision-pr25.report.txt");
+const PR25_MODEL: &[u8] =
+    include_bytes!("../../chip-local-decision/models/local-decision-pr25.bin");
+
+/// `--report-decision-corpus`: the committed (byte-stable) PR25 report, then live native
+/// inference timings for the same model over the generated corpus.
+pub fn report_decision_corpus(args: &[String]) -> i32 {
+    let iterations: usize = args.first().and_then(|n| n.parse().ok()).unwrap_or(200_000);
+    let model = match LocalDecisionModel::from_bytes(PR25_MODEL) {
+        Ok(model) => model,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let states: Vec<CapabilityDecisionState> = chip_decision_corpus::corpus_v1()
+        .cases
+        .iter()
+        .map(|c| c.decision_state())
+        .collect();
+    let decider = LocalDecider::new(Some(model.clone()), PolicyMode::LearnedGuarded);
+    let samples = 100.min(iterations);
+    let batch = (iterations / samples).max(1);
+
+    print!("{PR25_REPORT}");
+    println!();
+    println!("== NATIVE INFERENCE (live, this machine; appended to the committed report) ==");
+    println!(
+        "Build: {}",
+        if cfg!(debug_assertions) {
+            "debug (use --release for a meaningful baseline)"
+        } else {
+            "release"
+        }
+    );
+    println!(
+        "Corpus states cycled: {}; iterations: {}",
+        states.len(),
+        samples * batch
+    );
+    println!("  {:<30} {:>10} {:>10} {:>10}", "", "median", "p95", "p99");
+    let mut i = 0usize;
+    let infer = per_call(samples, batch, || {
+        i = (i + 1) % states.len();
+        black_box(model.infer(black_box(&states[i])));
+    });
+    let mut j = 0usize;
+    let guarded = per_call(samples, batch, || {
+        j = (j + 1) % states.len();
+        black_box(decider.decide(black_box(&states[j])));
+    });
+    let mut k = 0usize;
+    let baseline = per_call(samples, batch, || {
+        k = (k + 1) % states.len();
+        black_box(deterministic_decision(black_box(&states[k])));
+    });
+    for (name, s) in [
+        ("learned: model.infer", infer),
+        ("learned: LocalDecider", guarded),
+        ("deterministic native", baseline),
+    ] {
+        println!(
+            "  {:<30} {:>10} {:>10} {:>10}",
+            name,
+            fmt(s.median),
+            fmt(s.p95),
+            fmt(s.p99)
+        );
     }
     0
 }

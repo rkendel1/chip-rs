@@ -68,3 +68,37 @@ fn the_corpus_evaluation_reports_every_policy_and_no_false_continue() {
     assert!(!text.contains("FAILED"));
     assert_eq!(text.matches("false continues 0 ").count(), 4, "{text}");
 }
+
+#[test]
+fn the_decision_corpus_report_leads_with_the_headline_and_appends_live_latency() {
+    let out = run(&["--report-decision-corpus", "2000"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.starts_with("Additional safe local decisions: "),
+        "{}",
+        &text[..80.min(text.len())]
+    );
+    for needle in [
+        "Corpus: 654 cases from generator chip.decision-corpus-gen.v1",
+        "Pattern-held-out:",
+        "Context-held-out:",
+        "Learned raw:",
+        "Learned strict:",
+        "Learned guarded:",
+        "Safe generalization rate:",
+        "Hard negatives",
+        "New safe local decisions",
+        "Failed generalizations",
+        "NATIVE INFERENCE (live",
+        "median",
+        "p95",
+        "p99",
+    ] {
+        assert!(text.contains(needle), "missing {needle:?} in\n{text}");
+    }
+}

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fx-core", "crates/fx-provider-http", "crates/chip-core", "crates/chip-compute", "crates/chip-wasm-reasoner", "crates/chip-wasm-decision", "crates/chip-wasm-decision-host", "crates/chip-local-decision", "crates/chip-local-decision-train", "crates/chip-reasoning-corpus", "crates/chip-local-ml", "crates/chip-laya-reasoner", "crates/chip-graph", "crates/chip-cli"]
+members = ["crates/fx-core", "crates/fx-provider-http", "crates/chip-core", "crates/chip-compute", "crates/chip-wasm-reasoner", "crates/chip-wasm-decision", "crates/chip-wasm-decision-host", "crates/chip-local-decision", "crates/chip-local-decision-train", "crates/chip-decision-corpus", "crates/chip-reasoning-corpus", "crates/chip-local-ml", "crates/chip-laya-reasoner", "crates/chip-graph", "crates/chip-cli"]
 resolver = "2"
 
 # Only the Wasm decision artifact is size-optimized:

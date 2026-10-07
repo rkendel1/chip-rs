@@ -581,6 +581,10 @@ async fn main() {
         std::process::exit(local_model_bench::benchmark(&args[2..]));
     }
 
+    if args.len() > 1 && args[1] == "--report-decision-corpus" {
+        std::process::exit(local_model_bench::report_decision_corpus(&args[2..]));
+    }
+
     if args.len() > 1 && args[1] == "--evaluate-local-model" {
         std::process::exit(local_model_bench::evaluate_corpus(&args[2..]));
     }

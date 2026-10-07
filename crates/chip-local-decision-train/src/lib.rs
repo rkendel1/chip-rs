@@ -14,6 +14,7 @@ use chip_reasoning_corpus::{Verdict, corpus};
 use sha2::{Digest, Sha256};
 
 pub mod mlp;
+pub mod pr25;
 pub mod report;
 
 /// Everything that determines the trained model besides the data.

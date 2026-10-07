@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use chip_local_decision_train::pr25;
 use chip_local_decision_train::report::{full_report, manifest_json};
 use chip_local_decision_train::{
     RECORDED_CONFIG, labeled_corpus, leave_one_out, select, split, train_final,
@@ -54,8 +55,35 @@ fn main() {
             let (model, sp) = train_final(&cases, &cfg);
             print!("{}", full_report(&cases, &sp, &cfg, &model));
         }
+        Some("pr25-train") => {
+            let dir = args.get(2).map(PathBuf::from).unwrap_or_else(default_dir);
+            std::fs::create_dir_all(&dir).expect("output directory");
+            let cases25 = pr25::load();
+            let model = pr25::train(&cases25, &cfg);
+            let unseen = pr25::unseen_evaluation(&cases25, &model);
+            std::fs::write(dir.join("local-decision-pr25.bin"), model.to_bytes())
+                .expect("artifact");
+            std::fs::write(
+                dir.join("local-decision-pr25.manifest.json"),
+                pr25::manifest(&cases25, &model, &cfg, &unseen),
+            )
+            .expect("manifest");
+            std::fs::write(
+                dir.join("local-decision-pr25.report.txt"),
+                pr25::report(&cases25, &model, &cfg),
+            )
+            .expect("report");
+            println!("wrote {}", dir.display());
+        }
+        Some("pr25-report") => {
+            let cases25 = pr25::load();
+            let model = pr25::train(&cases25, &cfg);
+            print!("{}", pr25::report(&cases25, &model, &cfg));
+        }
         _ => {
-            eprintln!("usage: chip-local-decision-train select | train [OUT_DIR] | report");
+            eprintln!(
+                "usage: chip-local-decision-train select | train [OUT_DIR] | report | pr25-train [OUT_DIR] | pr25-report"
+            );
             std::process::exit(2);
         }
     }
