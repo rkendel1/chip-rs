@@ -1,0 +1,16 @@
+[package]
+name = "chip-graph"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic, content-addressed architecture graph snapshots of a Rust repository"
+license = "MIT"
+
+# The graph is a projection of source, never authority. This crate only reads source and
+# depends on deterministic parsing and hashing: no runtime, model, network or process code.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
+toml = "0.8"

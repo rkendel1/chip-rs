@@ -13,6 +13,7 @@ laya = ["dep:chip-laya-reasoner", "chip-laya-reasoner/laya"]
 
 [dependencies]
 chip-core = { path = "../chip-core" }
+chip-graph = { path = "../chip-graph" }
 fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }

@@ -488,3 +488,107 @@ fn cli_test_laya_reasoner_is_real_or_explicitly_skipped() {
         "no results when skipped: {stdout}"
     );
 }
+
+mod graph_snapshot {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Output};
+
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-graph/tests/fixture")
+    }
+
+    fn copy_fixture(name: &str) -> PathBuf {
+        let dest = std::env::temp_dir().join(format!("chip-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let status = Command::new("cp")
+            .arg("-r")
+            .arg(fixture())
+            .arg(&dest)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        dest
+    }
+
+    fn run(args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    fn text(o: &Output) -> String {
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    }
+
+    #[test]
+    fn init_writes_a_snapshot_and_graph_reads_it() {
+        let dir = copy_fixture("init");
+        let root = dir.to_str().unwrap();
+
+        let missing = run(&["graph", "--root", root]);
+        assert!(text(&missing).contains("No architecture snapshot found.\nRun `chip init`."));
+
+        let init = run(&["init", "--root", root]);
+        assert!(
+            init.status.success(),
+            "{}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        let out = text(&init);
+        for needle in [
+            "Crates: 2",
+            "Binaries: 1",
+            "Snapshot: sha256:",
+            "Written: .chip/graph/sha256-",
+        ] {
+            assert!(out.contains(needle), "missing {needle} in {out}");
+        }
+        assert!(
+            !out.contains(root),
+            "init output must not print the absolute path"
+        );
+
+        let graph = run(&["graph", "--root", root]);
+        assert!(graph.status.success());
+        let shown = text(&graph);
+        assert!(
+            shown.contains("Architecture Graph") && shown.contains("Implements: 1"),
+            "{shown}"
+        );
+
+        // `graph` reads the stored snapshot; it does not rebuild from source.
+        std::fs::write(dir.join("src/extra.rs"), "pub fn extra() {}\n").unwrap();
+        assert_eq!(text(&run(&["graph", "--root", root])), shown);
+
+        // A real change to the repository is a new snapshot.
+        let second = text(&run(&["init", "--root", root]));
+        assert_ne!(
+            second.lines().find(|l| l.starts_with("Snapshot:")),
+            out.lines().find(|l| l.starts_with("Snapshot:"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_benchmark_reports_timings() {
+        let dir = copy_fixture("bench");
+        let out = text(&run(&[
+            "init",
+            "--benchmark",
+            "--root",
+            dir.to_str().unwrap(),
+        ]));
+        for needle in [
+            "Files scanned:",
+            "Parse time:",
+            "Graph construction time:",
+            "Serialization time:",
+            "Total:",
+            "Snapshot size:",
+        ] {
+            assert!(out.contains(needle), "missing {needle} in {out}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -262,6 +262,7 @@ dependencies = [
  "async-trait",
  "chip-compute",
  "chip-core",
+ "chip-graph",
  "chip-laya-reasoner",
  "chip-local-ml",
  "chip-reasoning-corpus",
@@ -290,6 +291,18 @@ dependencies = [
  "async-trait",
  "fx-core",
  "tokio",
+]
+
+[[package]]
+name = "chip-graph"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "syn 2.0.119",
+ "toml",
 ]
 
 [[package]]
