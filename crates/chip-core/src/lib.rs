@@ -31,13 +31,15 @@ pub use reasoning::{
     TestLocalReasoner,
 };
 pub use work::{
-    ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, EscalationContextPolicy,
-    FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy,
-    ObservationInvariant, ObservationPredicate, RespondCompletes, SafetyAudit, ScriptedPolicy,
-    TerminalState, TurnTrace, WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId,
-    WorkLatency, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec, WorkState,
-    WorkSummary, WorkTrajectory, WorkUtilityMeasurement, WorkView, audit_safety, measure_utility,
-    trace, verify_trajectory,
+    ContextCall, ContextMetrics, ContextReport, DecisionRecord, DecisionSource,
+    DeduplicatedEscalationContext, EscalationContext, EscalationContextPolicy,
+    FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy, ObservationClass,
+    ObservationInvariant, ObservationOrigin, ObservationPredicate, ObservationRepetition,
+    RespondCompletes, SafetyAudit, ScriptedPolicy, TerminalState, TurnTrace, WorkDecision,
+    WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLatency, WorkLimits, WorkMeasurement,
+    WorkOutcome, WorkReport, WorkSpec, WorkState, WorkSummary, WorkTrajectory,
+    WorkUtilityMeasurement, WorkView, audit_safety, classify_observations, context_report,
+    measure_utility, omissions, trace, verify_trajectory,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -655,6 +655,7 @@ fn real_model_codes_real_tasks() {
         for (var, flag) in [
             ("CHIP_LIVE_MAX_TURNS", "--max-turns"),
             ("CHIP_LIVE_MAX_EXECUTIONS", "--max-executions"),
+            ("CHIP_LIVE_CONTEXT_BUDGET_BYTES", "--context-budget-bytes"),
         ] {
             if let Ok(n) = std::env::var(var) {
                 command.args([flag, &n]);
@@ -756,6 +757,30 @@ fn real_model_codes_real_tasks() {
             independent["status"],
             j["outcome_reason"],
         );
+        let c = &j["context"];
+        let per_call: Vec<String> = c["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| format!("{}B/{}tok", k["request_bytes"], k["reported_input_tokens"]))
+            .collect();
+        eprintln!(
+            "LIVE-CONTEXT task={name} budget={} calls={} max_request_bytes={} total_request_bytes={} max_messages={} max_reported_input_tokens={} total_reported_tokens={} rejections={} omitted={} observations={} per_call=[{}]",
+            c["budget_bytes"],
+            c["model_calls"],
+            c["max_request_bytes"],
+            c["total_request_bytes"],
+            c["max_request_messages"],
+            c["max_reported_input_tokens"],
+            c["total_reported_tokens"],
+            c["context_limit_rejections"],
+            c["omitted_observations"],
+            c["observations"],
+            per_call.join(" "),
+        );
+        for key in ["context_budget_violations", "unjustified_omissions"] {
+            assert_eq!(j["audit"][key], 0, "{name} {key}: {t}");
+        }
     }
 }
 
@@ -880,4 +905,152 @@ async fn output_that_is_not_one_clean_json_object_is_rejected_and_never_repaired
         );
         assert!(!dir.join("target").exists(), "{what}: the tests ran");
     }
+}
+
+// ---- PR50: context measurement and budget -----------------------------------------------------------------------
+
+async fn go_args(reply: &str, dir: &Path, args: &[&str], env: &[(&str, &str)]) -> (Output, usize) {
+    let server = common::start(200, &completion(reply), Duration::ZERO).await;
+    let url = server.url.clone();
+    let (d, a): (PathBuf, Vec<String>) = (
+        dir.to_path_buf(),
+        args.iter().map(|s| s.to_string()).collect(),
+    );
+    let env: Vec<(String, String)> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let out = tokio::task::spawn_blocking(move || {
+        let a: Vec<&str> = a.iter().map(String::as_str).collect();
+        let mut c = mock(&url, base(&a, &d));
+        for (k, v) in &env {
+            c.env(k, v);
+        }
+        c.output().unwrap()
+    })
+    .await
+    .unwrap();
+    let calls = server.captured.lock().await.len();
+    (out, calls)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_json_report_measures_every_model_call_without_exposing_the_request() {
+    let dir = fixture("ctx-report");
+    let reply = r#"{"decision":"block","reason":"nothing to do"}"#;
+    let (out, calls) = go_args(reply, &dir, &["--json", GOAL], &[]).await;
+    assert_eq!(calls, 1);
+    let j = json_of(&out);
+    let c = &j["context"];
+    assert_eq!(c["model_calls"], 1);
+    assert_eq!(
+        c["budget_bytes"],
+        serde_json::Value::Null,
+        "no limit is invented"
+    );
+    assert_eq!(c["context_limit_rejections"], 0);
+    assert!(c["max_request_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(c["max_request_bytes"], c["total_request_bytes"]);
+    assert_eq!(c["max_request_messages"], 1);
+    assert_eq!(
+        c["max_reported_input_tokens"], 11,
+        "the provider's own figure, kept apart"
+    );
+    let call = &c["calls"][0];
+    assert_eq!(
+        (
+            &call["call"],
+            &call["turn"],
+            &call["messages"],
+            &call["system_messages"],
+            &call["user_messages"],
+            &call["assistant_messages"]
+        ),
+        (
+            &1.into(),
+            &1.into(),
+            &1.into(),
+            &0.into(),
+            &1.into(),
+            &0.into()
+        )
+    );
+    assert_eq!(call["reported_input_tokens"], 11);
+    assert_eq!(call["reported_output_tokens"], 4);
+    assert_eq!(call["observations"], 0);
+    // Measurements, never content: no prompt, goal text, key or host path in the section.
+    let section = c.to_string();
+    assert!(!section.contains("canonical_fingerprint") && !section.contains("sk-work-secret"));
+    assert!(!section.contains(dir.to_str().unwrap()));
+    assert_eq!(j["audit"]["clean"], true);
+    assert_eq!(j["audit"]["context_budget_violations"], 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_over_the_budget_is_never_sent_and_nothing_else_is_tried() {
+    let reply = r#"{"decision":"block","reason":"x"}"#;
+    for (what, args, env) in [
+        (
+            "flag",
+            vec!["--json", "--context-budget-bytes", "10", GOAL],
+            vec![],
+        ),
+        (
+            "environment",
+            vec!["--json", GOAL],
+            vec![("CHIP_CONTEXT_BUDGET_BYTES", "10")],
+        ),
+    ] {
+        let dir = fixture("ctx-budget");
+        let (out, calls) = go_args(reply, &dir, &args, &env).await;
+        let t = text(&out);
+        assert_eq!(calls, 0, "{what}: a request was sent: {t}");
+        let j = json_of(&out);
+        assert_eq!(j["terminal_state"], "limit_reached", "{what}: {t}");
+        assert_eq!(j["outcome_reason"], "context limit reached", "{what}");
+        assert_eq!(j["context"]["context_limit_rejections"], 1);
+        assert_eq!(j["context"]["budget_bytes"], 10);
+        assert_eq!(j["context"]["model_calls"], 0);
+        assert_eq!(j["audit"]["context_limit_rejections"], 1);
+        assert_eq!(
+            j["audit"]["clean"], true,
+            "the budget working is not a violation"
+        );
+        assert_eq!(j["measurement"]["executions"], 0);
+        assert_eq!(out.status.code(), Some(1), "{what}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("src/lib.rs")).unwrap(),
+            OLD_LIB
+        );
+    }
+    // The command line wins over the environment.
+    let dir = fixture("ctx-precedence");
+    let (out, calls) = go_args(
+        reply,
+        &dir,
+        &["--json", "--context-budget-bytes", "1000000", GOAL],
+        &[("CHIP_CONTEXT_BUDGET_BYTES", "10")],
+    )
+    .await;
+    assert_eq!(calls, 1, "{}", text(&out));
+    assert_eq!(json_of(&out)["context"]["budget_bytes"], 1_000_000);
+}
+
+#[test]
+fn a_bad_context_budget_is_a_usage_error_and_runs_nothing() {
+    let dir = fixture("ctx-usage");
+    for args in [
+        &["goal", "--context-budget-bytes"][..],
+        &["goal", "--context-budget-bytes", "0"],
+        &["goal", "--context-budget-bytes", "-5"],
+        &["goal", "--context-budget-bytes", "lots"],
+    ] {
+        let out = mock("http://127.0.0.1:1", base(args, &dir))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", text(&out));
+    }
+    let mut c = mock("http://127.0.0.1:1", base(&["goal"], &dir));
+    let out = c.env("CHIP_CONTEXT_BUDGET_BYTES", "many").output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
 }

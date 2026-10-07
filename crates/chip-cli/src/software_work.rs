@@ -19,11 +19,11 @@
 use std::sync::{Arc, Mutex};
 
 use chip_core::{
-    Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, CapabilitySet,
-    ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary, Observation, ObservationPredicate,
-    SafetyAudit, TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal, WorkId, WorkLimits,
-    WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
-    measure_utility, verify_trajectory,
+    Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, CapabilitySet, ContextReport,
+    DeduplicatedEscalationContext, ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary,
+    Observation, ObservationPredicate, SafetyAudit, TestLocalReasoner, WorkDecision, WorkEvent,
+    WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement,
+    WorkView, audit_safety, context_report, measure_utility, verify_trajectory,
 };
 use chip_pax::{PAX_TEST_CAPABILITY, PaxExecutor, PaxTestPassed, ResolvedPax};
 use chip_project::{
@@ -164,6 +164,8 @@ pub struct SoftwareWork {
     pub paths_written: Vec<String>,
     /// Set by the caller that chose the model; `None` when it was not a configured one.
     pub identity: Option<Identity>,
+    /// What each model request carried, and what the observation stream repeated.
+    pub context: ContextReport,
 }
 
 impl SoftwareWork {
@@ -234,6 +236,7 @@ impl SoftwareWork {
 }
 
 /// Runs the work through the existing loop with the project, PAX and the given model.
+#[cfg(test)]
 pub async fn run_software_work(
     model: Arc<dyn ModelProvider>,
     model_name: String,
@@ -242,6 +245,22 @@ pub async fn run_software_work(
     goal: &str,
     limits: WorkLimits,
     policy: &dyn LocalWorkPolicy,
+) -> SoftwareWork {
+    run_software_work_with_budget(model, model_name, root, pax, goal, limits, policy, None).await
+}
+
+/// [`run_software_work`] with the model's context budget in bytes, when one was given. A request
+/// over it is never sent.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_software_work_with_budget(
+    model: Arc<dyn ModelProvider>,
+    model_name: String,
+    root: &std::path::Path,
+    pax: PaxExecutor,
+    goal: &str,
+    limits: WorkLimits,
+    policy: &dyn LocalWorkPolicy,
+    context_budget_bytes: Option<usize>,
 ) -> SoftwareWork {
     let set = Arc::new(
         CapabilitySet::new()
@@ -254,8 +273,19 @@ pub async fn run_software_work(
         .with_observer(Arc::new(ExecutionObserver))
         .with_local_reasoner(Arc::new(TestLocalReasoner::default()))
         .with_max_output_tokens(WORK_MAX_OUTPUT_TOKENS);
-    let spec = spec(goal, root, limits);
-    let report = agent.run_work(&spec, policy, &ModelDecisionBoundary).await;
+    let mut spec = spec(goal, root, limits);
+    if let Some(bytes) = context_budget_bytes {
+        spec = spec.with_context_budget_bytes(bytes);
+    }
+    let report = agent
+        .run_work_with_context_policy(
+            &spec,
+            policy,
+            &ModelDecisionBoundary,
+            &DeduplicatedEscalationContext,
+        )
+        .await;
+    let context = context_report(&report, &spec);
     let audit = audit_safety(&report, &spec, &declared());
     let trajectory_violations = verify_trajectory(&report.events, &spec.limits).len();
     let utility = measure_utility(&report, &spec);
@@ -280,6 +310,7 @@ pub async fn run_software_work(
         changed_writes: written.iter().filter(|(_, changed)| *changed).count(),
         paths_written: written.into_iter().map(|(p, _)| p).collect(),
         identity: None,
+        context,
         report,
     }
 }
@@ -427,6 +458,47 @@ fn forged_observations(a: &SafetyAudit) -> usize {
         + a.violations_of(chip_project::GIT_OBSERVATION_INVALID)
 }
 
+/// Chip's own counts of what each model request carried, kept apart from the provider's reported
+/// tokens. Bytes are message content; no request body, prompt text or path appears here.
+fn context_json(c: &ContextReport) -> serde_json::Value {
+    let r = &c.repetition;
+    serde_json::json!({
+        "model_calls": c.calls.len(),
+        "budget_bytes": c.budget_bytes,
+        "context_limit_rejections": c.context_limit_rejections,
+        "max_request_bytes": c.max_request_bytes(),
+        "total_request_bytes": c.total_request_bytes(),
+        "max_request_messages": c.max_request_messages(),
+        "max_reported_input_tokens": c.max_reported_input_tokens(),
+        "total_reported_tokens": c.total_reported_tokens(),
+        "omitted_observations": c.omitted_observations(),
+        "observations": {
+            "new": r.new,
+            "repeated_identical": r.repeated_identical,
+            "new_from_same_capability": r.new_from_same_capability,
+            "changed_reality": r.changed_reality,
+            "repeated_and_retained": r.repeated_and_retained,
+            "retained_repeat_bytes_sent": r.retained_repeat_bytes_sent,
+        },
+        "calls": c.calls.iter().map(|k| serde_json::json!({
+            "turn": k.turn + 1,
+            "call": k.call,
+            "request_bytes": k.request_bytes,
+            "messages": k.messages,
+            "system_messages": k.system_messages,
+            "user_messages": k.user_messages,
+            "assistant_messages": k.assistant_messages,
+            "observations": k.observations,
+            "capability_results": k.observations,
+            "observations_known": k.observations_known,
+            "omitted_observations": k.omitted_observations,
+            "reported_input_tokens": k.reported_prompt_tokens,
+            "reported_output_tokens": k.reported_completion_tokens,
+            "succeeded": k.succeeded,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
     let m = w.report.measurement();
     let u = &w.utility;
@@ -470,6 +542,7 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
             "last_exit_code": last.as_ref().and_then(|r| r.exit_code),
         },
         "receipt": serde_json::Value::Null,
+        "context": context_json(&w.context),
         "audit": {
             "clean": w.invariants_hold(),
             "unauthorized_executions": a.unauthorized_executions,
@@ -485,6 +558,9 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
             "out_of_root_write": a.violations_of(OUT_OF_ROOT_WRITE),
             "host_path_leak": a.violations_of(HOST_PATH_LEAK),
             "navigation_mismatch": a.violations_of(NAVIGATION_MISMATCH),
+            "context_limit_rejections": a.context_limit_rejections,
+            "context_budget_violations": a.context_budget_violations,
+            "unjustified_omissions": a.unjustified_omissions,
             "git_scope": a.violations_of(chip_project::GIT_SCOPE),
             "git_observation_invalid": a.violations_of(chip_project::GIT_OBSERVATION_INVALID),
             "forged_observations": forged_observations(a),
@@ -497,10 +573,13 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip-cli work \"<goal>\" [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N]"
+        "usage: chip-cli work \"<goal>\" [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
     );
     eprintln!(
         "       provider/model/endpoint: command line, then CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, then the provider's default endpoint; a model is always required"
+    );
+    eprintln!(
+        "       --context-budget-bytes N (or CHIP_CONTEXT_BUDGET_BYTES): the most bytes of message content one model request may carry; a request over it is not sent"
     );
     eprintln!("       works on the project in the current directory");
     EXIT_USAGE
@@ -511,6 +590,16 @@ fn limit(value: Option<&String>, name: &str) -> Result<usize, i32> {
         Some(n) if (1..=LIMIT_CEILING).contains(&n) => Ok(n),
         _ => {
             eprintln!("error: {name} needs a number from 1 to {LIMIT_CEILING}");
+            Err(usage())
+        }
+    }
+}
+
+fn budget(value: Option<&str>, name: &str) -> Result<usize, i32> {
+    match value.and_then(|v| v.trim().parse::<usize>().ok()) {
+        Some(n) if n >= 1 => Ok(n),
+        _ => {
+            eprintln!("error: {name} needs a whole number of bytes, at least 1");
             Err(usage())
         }
     }
@@ -531,6 +620,7 @@ pub async fn work(args: &[String]) -> i32 {
     let (mut json, mut print_reply) = (false, false);
     let mut goal: Option<String> = None;
     let (mut max_turns, mut max_executions) = (DEFAULT_MAX_TURNS, DEFAULT_MAX_EXECUTIONS);
+    let mut context_budget: Option<usize> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -563,6 +653,13 @@ pub async fn work(args: &[String]) -> i32 {
                     Err(code) => return code,
                 }
             }
+            "--context-budget-bytes" => {
+                i += 1;
+                match budget(args.get(i).map(String::as_str), "--context-budget-bytes") {
+                    Ok(n) => context_budget = Some(n),
+                    Err(code) => return code,
+                }
+            }
             flag if flag.starts_with("--") => {
                 eprintln!("error: unexpected argument `{flag}`");
                 return usage();
@@ -574,6 +671,15 @@ pub async fn work(args: &[String]) -> i32 {
             }
         }
         i += 1;
+    }
+    // The command line wins over the environment; with neither, no budget is known and none is assumed.
+    if context_budget.is_none() {
+        if let Ok(given) = std::env::var("CHIP_CONTEXT_BUDGET_BYTES") {
+            match budget(Some(given.as_str()), "CHIP_CONTEXT_BUDGET_BYTES") {
+                Ok(n) => context_budget = Some(n),
+                Err(code) => return code,
+            }
+        }
     }
     let Some(goal) = goal.filter(|g| !g.trim().is_empty()) else {
         eprintln!("error: a goal is required");
@@ -641,7 +747,7 @@ pub async fn work(args: &[String]) -> i32 {
         max_turns,
         max_executions,
     };
-    let mut result = run_software_work(
+    let mut result = run_software_work_with_budget(
         model,
         model_name,
         &root,
@@ -649,6 +755,7 @@ pub async fn work(args: &[String]) -> i32 {
         &goal,
         limits,
         &CompleteWhenVerified,
+        context_budget,
     )
     .await;
     result.identity = Some(identity.clone());
@@ -2165,6 +2272,59 @@ mod tests {
         );
         // Work tree, index, HEAD, refs and objects: byte for byte.
         assert_eq!(snapshot(&fx.root), before);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_write_makes_earlier_git_and_pax_observations_history_not_current_state() {
+        let fx = git_fixture("ctx-stale");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let script = Script::new(&[
+            git_req("project.git.status", None),
+            test_run(),
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            read("src/lib.rs"),
+            git_req("project.git.status", None),
+            test_run(),
+        ]);
+        let w = go(&fx, pax, &script, LIMITS, &AskModel).await;
+        tidy(&w);
+        // Every request was performed again: nothing was answered from an earlier observation.
+        assert_eq!(
+            w.utility.executions_by_capability.get("project.git.status"),
+            Some(&2)
+        );
+        assert_eq!(w.pax_executions(), 2);
+        assert_eq!(w.reads(), 2);
+        assert!(
+            !w.report
+                .events
+                .iter()
+                .any(|e| matches!(e, WorkEvent::EvidenceReused { .. }))
+        );
+        let status = observed_json(&w, "project.git.status");
+        assert_eq!(status[0]["clean"], true);
+        assert_eq!(
+            status[1]["clean"], false,
+            "the second status is the current one"
+        );
+        assert_eq!(status[1]["unstaged"], serde_json::json!(["src/lib.rs"]));
+        // The reads and statuses changed because the write really changed reality; the model's last
+        // request carries the new file, and the passing test run came from a real run after the write.
+        let classes = chip_core::classify_observations(&w.report.origins, &w.report.observations);
+        assert!(classes.contains(&chip_core::ObservationClass::ChangedReality));
+        let seen = script.seen.lock().unwrap().last().unwrap().clone();
+        assert!(seen.contains("canonical_fingerprint"), "{seen}");
+        assert_eq!(
+            w.context.omitted_observations(),
+            0,
+            "none of these contracts allow omission"
+        );
+        assert!(w.context.repetition.new >= 4);
+        // The PAX result after the write is its own execution: the goal was evaluated from it.
+        assert!(w.verified, "pax.test ran after the last change and passed");
     }
 
     #[test]

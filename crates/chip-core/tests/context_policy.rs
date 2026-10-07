@@ -54,6 +54,7 @@ fn the_default_policy_builds_exactly_the_context_the_loop_has_always_sent() {
         },
         &WorkTrajectory {
             observations: std::slice::from_ref(&observation),
+            origins: &[],
             decisions: &decisions,
             ruled_out: &ruled_out,
             evidence: &evidence,
@@ -73,6 +74,7 @@ fn the_default_policy_builds_exactly_the_context_the_loop_has_always_sent() {
                 "turn 2 (model): complete".into()
             ],
             ruled_out: ruled_out.to_vec(),
+            omitted: vec![],
             question: "the question".into(),
         }
     );
@@ -166,6 +168,7 @@ impl EscalationContextPolicy for OnlyGoalContextPolicy {
             relevant_observations: vec![],
             prior_decisions: vec![],
             ruled_out: vec![],
+            omitted: vec![],
             question: trajectory.question.to_string(),
         }
     }

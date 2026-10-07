@@ -227,6 +227,7 @@ fn names(report: &WorkReport) -> Vec<String> {
             WorkEvent::LocalDecision { decision, .. } => format!("LocalDecision {decision}"),
             WorkEvent::ModelEscalation { .. } => "ModelEscalation".into(),
             WorkEvent::ModelCalled { .. } => "ModelCalled".into(),
+            WorkEvent::ContextLimit { .. } => "ContextLimit".into(),
             WorkEvent::DecisionMade { decision, .. } => format!("DecisionMade {decision}"),
             WorkEvent::CapabilityRequested { capability, .. } => {
                 format!("CapabilityRequested {capability}")

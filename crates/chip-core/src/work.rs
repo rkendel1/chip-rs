@@ -94,6 +94,8 @@ impl Default for WorkLimits {
 pub enum LimitKind {
     Turns,
     Executions,
+    /// The next model request would have exceeded the configured context budget.
+    Context,
 }
 
 impl LimitKind {
@@ -101,6 +103,7 @@ impl LimitKind {
         match self {
             LimitKind::Turns => "turns",
             LimitKind::Executions => "executions",
+            LimitKind::Context => "context",
         }
     }
 }
@@ -283,6 +286,9 @@ pub struct EscalationContext {
     /// Capabilities already tried and known to have failed, or to have run without satisfying the
     /// goal.
     pub ruled_out: Vec<String>,
+    /// Observations left out of this request because a later, identical observation is in it. Each
+    /// entry is a fact Chip established; nothing here is a summary of what an observation said.
+    pub omitted: Vec<String>,
     pub question: String,
 }
 
@@ -296,6 +302,14 @@ pub struct ContextMetrics {
     pub decisions: usize,
     pub evidence_items: usize,
     pub ruled_out: usize,
+    /// The request's messages by role: each observation travels as one system message, the
+    /// rendered context as one user message. Never an assistant message.
+    pub messages: usize,
+    pub system_messages: usize,
+    pub user_messages: usize,
+    pub assistant_messages: usize,
+    /// Observations the request leaves out because a later identical one is in it.
+    pub omitted_observations: usize,
 }
 
 impl EscalationContext {
@@ -315,6 +329,12 @@ impl EscalationContext {
         for item in &self.ruled_out {
             out.push_str(&format!("  - {item}\n"));
         }
+        if !self.omitted.is_empty() {
+            out.push_str("Omitted (identical to a later observation):\n");
+            for item in &self.omitted {
+                out.push_str(&format!("  - {item}\n"));
+            }
+        }
         out.push_str(&format!("Question: {}", self.question));
         out
     }
@@ -333,6 +353,11 @@ impl EscalationContext {
             decisions: self.prior_decisions.len(),
             evidence_items: self.relevant_evidence.len(),
             ruled_out: self.ruled_out.len(),
+            messages: self.relevant_observations.len() + 1,
+            system_messages: self.relevant_observations.len(),
+            user_messages: 1,
+            assistant_messages: 0,
+            omitted_observations: self.omitted.len(),
         }
     }
 }
@@ -352,6 +377,8 @@ pub struct WorkState<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct WorkTrajectory<'a> {
     pub observations: &'a [Observation],
+    /// Where each observation came from, one per observation, in the same order.
+    pub origins: &'a [ObservationOrigin],
     pub decisions: &'a [DecisionRecord],
     /// Capabilities already tried and known to have failed.
     pub ruled_out: &'a [String],
@@ -416,8 +443,291 @@ impl EscalationContextPolicy for FullEscalationContext {
                 })
                 .collect(),
             ruled_out: trajectory.ruled_out.to_vec(),
+            omitted: Vec::new(),
             question: trajectory.question.to_string(),
         }
+    }
+}
+
+/// How an observation relates to the ones before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservationClass {
+    /// The first observation of its capability.
+    New,
+    /// The same invocation (capability and inputs) as an earlier observation, with the same result.
+    RepeatedIdentical,
+    /// The capability was observed before, but with different inputs.
+    NewFromSameCapability,
+    /// The same invocation as an earlier observation, with a different result: reality changed
+    /// between the two, and the later observation is what is now true.
+    ChangedReality,
+}
+
+/// Where one observation came from, recorded by Chip when it performed the request. Never read
+/// from a model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservationOrigin {
+    pub capability: CapabilityId,
+    /// The capability and its complete inputs: two observations with the same key answered the same
+    /// request.
+    pub invocation: String,
+    /// The capability's own contract: may an earlier observation of it stand in for a later one?
+    /// Only such an observation may ever be left out of a request.
+    pub reusable: bool,
+}
+
+/// Two observations say the same thing about reality: same kind, status and output. Their
+/// identifiers and receipts differ by construction and say nothing about reality.
+fn same_reality(a: &Observation, b: &Observation) -> bool {
+    a.kind == b.kind && a.status == b.status && a.output == b.output
+}
+
+/// Classifies each observation against the ones before it.
+pub fn classify_observations(
+    origins: &[ObservationOrigin],
+    observations: &[Observation],
+) -> Vec<ObservationClass> {
+    (0..observations.len().min(origins.len()))
+        .map(|i| {
+            let earlier = (0..i).rev();
+            let same_call = earlier
+                .clone()
+                .find(|j| origins[*j].invocation == origins[i].invocation);
+            match same_call {
+                Some(j) if same_reality(&observations[j], &observations[i]) => {
+                    ObservationClass::RepeatedIdentical
+                }
+                Some(_) => ObservationClass::ChangedReality,
+                None if earlier
+                    .clone()
+                    .any(|j| origins[j].capability == origins[i].capability) =>
+                {
+                    ObservationClass::NewFromSameCapability
+                }
+                None => ObservationClass::New,
+            }
+        })
+        .collect()
+}
+
+/// The observations that may be left out of a request: `(omitted, kept)` index pairs. An
+/// observation is left out only when its capability's contract says an earlier observation may
+/// stand in for a later one, and a *later observation of the same invocation with the same result*
+/// is in the request. The later one was performed and observed; the earlier one adds nothing it does
+/// not say. Anything else (a non-reusable capability, or a result that changed) is always kept.
+pub fn omissions(
+    origins: &[ObservationOrigin],
+    observations: &[Observation],
+) -> Vec<(usize, usize)> {
+    let n = observations.len().min(origins.len());
+    (0..n)
+        .filter(|i| origins[*i].reusable)
+        .filter_map(|i| {
+            (i + 1..n)
+                .rev()
+                .find(|j| {
+                    origins[*j].invocation == origins[i].invocation
+                        && same_reality(&observations[i], &observations[*j])
+                })
+                .map(|j| (i, j))
+        })
+        .collect()
+}
+
+/// Like [`FullEscalationContext`], except that an observation a capability's contract allows to be
+/// left out, and that a later identical observation makes redundant, is left out and named. Nothing
+/// is summarised, truncated or reordered.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeduplicatedEscalationContext;
+
+impl DeduplicatedEscalationContext {
+    pub const ID: &'static str = "dedup-v1";
+}
+
+impl EscalationContextPolicy for DeduplicatedEscalationContext {
+    fn id(&self) -> &'static str {
+        Self::ID
+    }
+
+    fn build(&self, state: &WorkState<'_>, trajectory: &WorkTrajectory<'_>) -> EscalationContext {
+        let mut context = FullEscalationContext.build(state, trajectory);
+        let left_out = omissions(trajectory.origins, trajectory.observations);
+        if left_out.is_empty() {
+            return context;
+        }
+        let id = |i: usize| trajectory.observations[i].execution_id.clone();
+        context.omitted = left_out
+            .iter()
+            .map(|(i, j)| {
+                format!(
+                    "execution {} of {} is identical to execution {}",
+                    id(*i),
+                    trajectory.origins[*i].capability,
+                    id(*j)
+                )
+            })
+            .collect();
+        context.relevant_observations = trajectory
+            .observations
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !left_out.iter().any(|(o, _)| o == i))
+            .map(|(_, o)| o.clone())
+            .collect();
+        context
+    }
+}
+
+/// One model call's context, as Chip measured it before sending and as the provider reported it
+/// after. The two are kept apart: bytes are Chip's own count of message content; tokens are only
+/// what a provider said, and `None` when it said nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextCall {
+    pub turn: usize,
+    /// 1-based, in the order the calls were made.
+    pub call: usize,
+    pub request_bytes: usize,
+    pub messages: usize,
+    pub system_messages: usize,
+    pub user_messages: usize,
+    pub assistant_messages: usize,
+    /// Observations in the request (each is a capability result).
+    pub observations: usize,
+    /// Observations Chip had recorded when the request was built.
+    pub observations_known: usize,
+    pub omitted_observations: usize,
+    pub reported_prompt_tokens: Option<u32>,
+    pub reported_completion_tokens: Option<u32>,
+    pub succeeded: bool,
+}
+
+/// How much of the observation stream was new, repeated or changed, and what repeating cost.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ObservationRepetition {
+    pub new: usize,
+    pub repeated_identical: usize,
+    pub new_from_same_capability: usize,
+    pub changed_reality: usize,
+    /// Repeated-identical observations whose earlier copy the capability's contract does not allow
+    /// to be left out, so it was sent again.
+    pub repeated_and_retained: usize,
+    /// Bytes of output in those retained earlier copies, per call they were sent in: what leaving
+    /// them out would have saved had the contracts allowed it.
+    pub retained_repeat_bytes_sent: usize,
+}
+
+/// The whole run's context measurements. Derived from the events and observations only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextReport {
+    pub calls: Vec<ContextCall>,
+    /// Requests refused because they would have exceeded the budget.
+    pub context_limit_rejections: usize,
+    pub budget_bytes: Option<usize>,
+    pub repetition: ObservationRepetition,
+}
+
+impl ContextReport {
+    pub fn max_request_bytes(&self) -> usize {
+        self.calls
+            .iter()
+            .map(|c| c.request_bytes)
+            .max()
+            .unwrap_or(0)
+    }
+    pub fn total_request_bytes(&self) -> usize {
+        self.calls.iter().map(|c| c.request_bytes).sum()
+    }
+    pub fn max_request_messages(&self) -> usize {
+        self.calls.iter().map(|c| c.messages).max().unwrap_or(0)
+    }
+    pub fn omitted_observations(&self) -> usize {
+        self.calls.iter().map(|c| c.omitted_observations).sum()
+    }
+    pub fn max_reported_input_tokens(&self) -> Option<u32> {
+        self.calls
+            .iter()
+            .filter_map(|c| c.reported_prompt_tokens)
+            .max()
+    }
+    pub fn total_reported_tokens(&self) -> Option<u64> {
+        let mut any = false;
+        let mut total = 0u64;
+        for c in &self.calls {
+            if let (Some(p), Some(o)) = (c.reported_prompt_tokens, c.reported_completion_tokens) {
+                any = true;
+                total += u64::from(p) + u64::from(o);
+            }
+        }
+        any.then_some(total)
+    }
+}
+
+/// Measures the context of a finished run.
+pub fn context_report(report: &WorkReport, spec: &WorkSpec) -> ContextReport {
+    let mut calls: Vec<ContextCall> = Vec::new();
+    let mut known = 0usize;
+    let mut pending: Option<(usize, ContextMetrics, usize)> = None;
+    let mut rejections = 0usize;
+    for event in &report.events {
+        match event {
+            WorkEvent::ObservationRecorded { .. } | WorkEvent::EvidenceReused { .. } => known += 1,
+            WorkEvent::ContextLimit { .. } => rejections += 1,
+            WorkEvent::ModelEscalation { turn, context, .. } => {
+                pending = Some((*turn, *context, known));
+            }
+            WorkEvent::ModelCalled {
+                usage, succeeded, ..
+            } => {
+                if let Some((turn, m, known_then)) = pending.take() {
+                    calls.push(ContextCall {
+                        turn,
+                        call: calls.len() + 1,
+                        request_bytes: m.bytes,
+                        messages: m.messages,
+                        system_messages: m.system_messages,
+                        user_messages: m.user_messages,
+                        assistant_messages: m.assistant_messages,
+                        observations: m.observations,
+                        observations_known: known_then,
+                        omitted_observations: m.omitted_observations,
+                        reported_prompt_tokens: usage.map(|u| u.prompt_tokens),
+                        reported_completion_tokens: usage.map(|u| u.completion_tokens),
+                        succeeded: *succeeded,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let classes = classify_observations(&report.origins, &report.observations);
+    let mut repetition = ObservationRepetition::default();
+    for (i, class) in classes.iter().enumerate() {
+        match class {
+            ObservationClass::New => repetition.new += 1,
+            ObservationClass::NewFromSameCapability => repetition.new_from_same_capability += 1,
+            ObservationClass::ChangedReality => repetition.changed_reality += 1,
+            ObservationClass::RepeatedIdentical => {
+                repetition.repeated_identical += 1;
+                // The earlier copy this one repeats: sent in every later call that still carried it.
+                let earlier = (0..i)
+                    .rev()
+                    .find(|j| report.origins[*j].invocation == report.origins[i].invocation);
+                if let Some(j) = earlier {
+                    if !report.origins[j].reusable {
+                        repetition.repeated_and_retained += 1;
+                        let size = report.observations[j].output.as_deref().map_or(0, str::len);
+                        let carried = calls.iter().filter(|c| c.observations_known > i).count();
+                        repetition.retained_repeat_bytes_sent += size * carried;
+                    }
+                }
+            }
+        }
+    }
+    ContextReport {
+        calls,
+        context_limit_rejections: rejections,
+        budget_bytes: spec.context_budget_bytes,
+        repetition,
     }
 }
 
@@ -459,6 +769,14 @@ pub enum WorkEvent {
         turn: usize,
         usage: Option<ModelUsage>,
         succeeded: bool,
+    },
+    /// The next model request was not sent: it would have exceeded the configured context budget.
+    /// Nothing was truncated, retried or substituted; the work ends at this limit.
+    ContextLimit {
+        work_id: WorkId,
+        turn: usize,
+        request_bytes: usize,
+        budget_bytes: usize,
     },
     DecisionMade {
         work_id: WorkId,
@@ -927,6 +1245,8 @@ pub struct WorkReport {
     pub events: Vec<WorkEvent>,
     pub decisions: Vec<DecisionRecord>,
     pub observations: Vec<Observation>,
+    /// Where each observation came from, in the same order.
+    pub origins: Vec<ObservationOrigin>,
     /// The measurements of every escalation, in order.
     pub escalations: Vec<ContextMetrics>,
     /// Observed wall-clock attribution.
@@ -973,6 +1293,9 @@ pub struct WorkSpec {
     /// Capabilities whose earlier observations must never answer a later request. The audit holds
     /// the trajectory to it: an `EvidenceReused` event for one of these is a violation.
     pub evidence_reuse_prohibited: Vec<CapabilityId>,
+    /// The most bytes a model request may carry (see [`ContextMetrics::bytes`]), when the caller has
+    /// been told one. `None` means none is known and none is assumed.
+    pub context_budget_bytes: Option<usize>,
 }
 
 /// Decides whether one authoritative observation establishes a required outcome.
@@ -1024,12 +1347,19 @@ impl WorkSpec {
             required_observations: Vec::new(),
             observation_invariants: Vec::new(),
             evidence_reuse_prohibited: Vec::new(),
+            context_budget_bytes: None,
         }
     }
 
     /// A capability whose evidence the audit requires to never be reused.
     pub fn with_evidence_reuse_prohibited(mut self, capability: CapabilityId) -> Self {
         self.evidence_reuse_prohibited.push(capability);
+        self
+    }
+
+    /// The configured context budget in bytes. A request over it is never sent.
+    pub fn with_context_budget_bytes(mut self, bytes: usize) -> Self {
+        self.context_budget_bytes = Some(bytes);
         self
     }
 
@@ -1085,6 +1415,7 @@ struct Run<'a> {
     context_policy: &'a dyn EscalationContextPolicy,
     events: Vec<WorkEvent>,
     observations: Vec<Observation>,
+    origins: Vec<ObservationOrigin>,
     decisions: Vec<DecisionRecord>,
     ruled_out: Vec<String>,
     escalations: Vec<ContextMetrics>,
@@ -1133,8 +1464,18 @@ impl<'a> Run<'a> {
             capability: request.capability_id.clone(),
             receipt_id: observation.receipt_id.clone(),
         });
+        self.record_origin(request);
         self.observations.push(observation.clone());
         self.evaluate_goal(turn, request, &observation);
+    }
+
+    /// Records where the observation about to be pushed came from.
+    fn record_origin(&mut self, request: &CapabilityRequest) {
+        self.origins.push(ObservationOrigin {
+            capability: request.capability_id.clone(),
+            invocation: format!("{}|{:?}", request.capability_id, request.inputs),
+            reusable: self.reusable(&request.capability_id),
+        });
     }
 
     /// Whether completing now would claim a goal some required output of which no authoritative
@@ -1222,6 +1563,7 @@ impl<'a> Run<'a> {
             },
             &WorkTrajectory {
                 observations: &self.observations,
+                origins: &self.origins,
                 decisions: &self.decisions,
                 ruled_out: &self.ruled_out,
                 evidence,
@@ -1241,6 +1583,20 @@ impl<'a> Run<'a> {
         let question = boundary.question(&self.capabilities);
         let context = self.context(turn, &evidence, &question);
         let metrics = context.metrics();
+        // Fail closed: a request over the configured budget is not sent, trimmed or retried.
+        if let Some(budget) = self.spec.context_budget_bytes {
+            if metrics.bytes > budget {
+                self.events.push(WorkEvent::ContextLimit {
+                    work_id: self.id(),
+                    turn,
+                    request_bytes: metrics.bytes,
+                    budget_bytes: budget,
+                });
+                return Err(WorkOutcome::LimitReached {
+                    limit: LimitKind::Context,
+                });
+            }
+        }
         self.summary.model_escalations += 1;
         self.summary.context_bytes += metrics.bytes;
         self.escalations.push(metrics);
@@ -1383,6 +1739,7 @@ impl<'a> Run<'a> {
                 invocation_label(request)
             ));
         }
+        self.record_origin(request);
         self.observations.push(observation.clone());
         self.evaluate_goal(turn, request, &observation);
         Step::Next
@@ -1467,6 +1824,7 @@ impl Agent {
                 limits: spec.limits,
             }],
             observations: Vec::new(),
+            origins: Vec::new(),
             decisions: Vec::new(),
             ruled_out: Vec::new(),
             escalations: Vec::new(),
@@ -1538,6 +1896,7 @@ impl Agent {
             events: run.events,
             decisions: run.decisions,
             observations: run.observations,
+            origins: run.origins,
             escalations: run.escalations,
             latency,
         }
@@ -1756,6 +2115,14 @@ pub struct SafetyAudit {
     pub stale_evidence_reuse: usize,
     /// Events recorded after the work reached a terminal state, or a second terminal state.
     pub events_after_terminal: usize,
+    /// Model requests Chip refused to send because they would have exceeded the context budget.
+    /// Not a violation: it is the budget doing its job.
+    pub context_limit_rejections: usize,
+    /// A model request that was sent although it exceeded the context budget.
+    pub context_budget_violations: usize,
+    /// An observation left out of a request that its capability's contract did not allow to be
+    /// left out, or that no later identical observation made redundant.
+    pub unjustified_omissions: usize,
     pub details: Vec<String>,
 }
 
@@ -1773,6 +2140,8 @@ impl SafetyAudit {
             && self.observation_without_execution == 0
             && self.execution_without_valid_request == 0
             && self.limit_violations == 0
+            && self.context_budget_violations == 0
+            && self.unjustified_omissions == 0
             && self.invariant_violations.values().all(|n| *n == 0)
             && self.stale_evidence_reuse == 0
             && self.events_after_terminal == 0
@@ -1804,7 +2173,11 @@ pub fn audit_safety(
     let mut last_remaining: Option<usize> = None;
     let mut completion_decided = false;
     let mut terminal_seen = false;
+    let mut observations_known = 0usize;
     for event in &report.events {
+        if matches!(event, WorkEvent::EvidenceReused { .. }) {
+            observations_known += 1;
+        }
         if terminal_seen {
             audit.events_after_terminal += 1;
             audit
@@ -1829,6 +2202,32 @@ pub fn audit_safety(
                 audit
                     .details
                     .push(format!("evidence for {capability} was reused"));
+            }
+            WorkEvent::ContextLimit { .. } => audit.context_limit_rejections += 1,
+            WorkEvent::ModelEscalation { context, .. } => {
+                if spec
+                    .context_budget_bytes
+                    .is_some_and(|budget| context.bytes > budget)
+                {
+                    audit.context_budget_violations += 1;
+                    audit.details.push(format!(
+                        "a request of {} bytes was sent over the budget",
+                        context.bytes
+                    ));
+                }
+                // What was left out must be justified by the observations themselves, read again
+                // here: only what a contract allowed, and only what a later identical one covers.
+                let allowed = omissions(
+                    &report.origins[..observations_known.min(report.origins.len())],
+                    &report.observations[..observations_known.min(report.observations.len())],
+                )
+                .len();
+                if context.omitted_observations > allowed {
+                    audit.unjustified_omissions += context.omitted_observations - allowed;
+                    audit
+                        .details
+                        .push("an observation was left out of a request without cause".to_string());
+                }
             }
             WorkEvent::DecisionStarted { .. } => {
                 turns += 1;
@@ -1870,6 +2269,7 @@ pub fn audit_safety(
                 }
             }
             WorkEvent::ObservationRecorded { execution_id, .. } => {
+                observations_known += 1;
                 if !turn.as_ref().is_some_and(|t| t.started) {
                     audit.observation_without_execution += 1;
                     audit

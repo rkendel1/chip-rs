@@ -172,6 +172,13 @@ fn describe(event: &WorkEvent) -> String {
             "ModelEscalation: {reason} (context {} bytes, {} observations, {} decisions)",
             context.bytes, context.observations, context.decisions
         ),
+        WorkEvent::ContextLimit {
+            request_bytes,
+            budget_bytes,
+            ..
+        } => format!(
+            "ContextLimit: request of {request_bytes} bytes exceeds the budget of {budget_bytes}; not sent"
+        ),
         WorkEvent::ModelCalled {
             usage, succeeded, ..
         } => match (succeeded, usage) {
