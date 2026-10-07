@@ -7,6 +7,7 @@ mod live_benchmark;
 mod local_model_bench;
 mod native;
 mod wasm_decision_bench;
+mod work_demo;
 
 use std::sync::Arc;
 
@@ -579,6 +580,14 @@ async fn main() {
 
     if args.len() > 1 && args[1] == "--benchmark-local-model" {
         std::process::exit(local_model_bench::benchmark(&args[2..]));
+    }
+
+    if args.len() > 1 && args[1] == "--test-work" {
+        std::process::exit(work_demo::test_work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "--test-real-work" {
+        std::process::exit(work_demo::test_real_work().await);
     }
 
     if args.len() > 1 && args[1] == "--report-decision-corpus" {

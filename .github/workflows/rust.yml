@@ -68,3 +68,9 @@ jobs:
 
       - name: PR25 report with live inference timings
         run: cargo run --release -p chip-cli -- --report-decision-corpus 20000
+
+      - name: Bounded autonomous work loop
+        run: |
+          for scenario in completion failure limit turn-limit evidence escalation; do
+            cargo run -p chip-cli -- --test-work $scenario
+          done

@@ -3,6 +3,7 @@ mod decision_state;
 mod evidence;
 mod observation;
 mod reasoning;
+mod work;
 
 use std::error::Error;
 use std::fmt;
@@ -23,6 +24,12 @@ pub use observation::{
 pub use reasoning::{
     EvidenceState, LocalReasoner, LocalReasoningResult, ReasoningError, ReasoningInput,
     TestLocalReasoner,
+};
+pub use work::{
+    ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, LimitKind, LocalWorkPolicy,
+    NoLocalPolicy, RespondCompletes, ScriptedPolicy, TerminalState, WorkDecision,
+    WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport,
+    WorkSpec, WorkSummary, WorkView,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

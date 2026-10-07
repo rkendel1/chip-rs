@@ -48,3 +48,94 @@ impl fx_core::ModelProvider for NoModel {
         Err(fx_core::FxError::Provider("not used".into()))
     }
 }
+
+/// Requests the self test, then completes only if the observation says it completed.
+struct SelfTestThenFinish;
+
+impl chip_core::LocalWorkPolicy for SelfTestThenFinish {
+    fn propose(&self, view: &chip_core::WorkView<'_>) -> Option<chip_core::WorkDecision> {
+        use chip_core::{CapabilityId, CapabilityRequest, ObservationKind, WorkDecision};
+        match view.observations.last() {
+            None => Some(WorkDecision::RequestCapability(CapabilityRequest::new(
+                ExecutionId::new("live-work-1"),
+                CapabilityId::new(SELFTEST_INTENT).unwrap(),
+            ))),
+            Some(o) if o.kind == ObservationKind::ExecutionCompleted => {
+                Some(WorkDecision::Complete {
+                    summary: "the self test completed".into(),
+                })
+            }
+            Some(_) => Some(WorkDecision::Block {
+                reason: "the self test did not complete".into(),
+            }),
+        }
+    }
+}
+
+struct NeverEscalates;
+
+impl chip_core::WorkDecisionBoundary for NeverEscalates {
+    fn interpret(
+        &self,
+        _r: &fx_core::ModelResponse,
+        _c: &[chip_core::Capability],
+    ) -> Result<chip_core::WorkDecision, chip_core::DecisionError> {
+        Err(chip_core::DecisionError::InvalidDecision(
+            "no escalation expected".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn live_bounded_work_loop() {
+    use chip_core::{
+        CapabilityAvailability, ExecutionObserver, WorkGoal, WorkId, WorkOutcome, WorkSpec,
+    };
+    let compute = Arc::new(ComputeExecutor::new());
+    let agent = Agent::new(Arc::new(NoModel))
+        .with_capabilities(compute.clone())
+        .with_executor(compute)
+        .with_observer(Arc::new(ExecutionObserver))
+        .with_local_reasoner(Arc::new(chip_core::TestLocalReasoner::default().on(
+            chip_core::EvidenceState::Unknown,
+            chip_core::LocalReasoningResult::Continue {
+                rationale: "live".into(),
+            },
+        )));
+    if let Ok(found) = agent.discover_capabilities().await.result {
+        for capability in found {
+            if let CapabilityAvailability::Unavailable(reason)
+            | CapabilityAvailability::Misconfigured(reason) = capability.availability
+            {
+                eprintln!("SKIPPED — Compute unavailable ({reason})");
+                return;
+            }
+        }
+    }
+    let spec = WorkSpec::new(WorkId::new("live-work"), WorkGoal::new("run the self test"));
+    let report = agent
+        .run_work(&spec, &SelfTestThenFinish, &NeverEscalates)
+        .await;
+
+    // One call: execution, receipt, observation and the next decision all happened inside it.
+    assert_eq!(
+        report.outcome,
+        WorkOutcome::Completed {
+            summary: "the self test completed".into()
+        }
+    );
+    assert_eq!(
+        (
+            report.summary.turns,
+            report.summary.executions,
+            report.summary.model_escalations
+        ),
+        (2, 1, 0)
+    );
+    let receipt = report.observations[0]
+        .receipt_id
+        .clone()
+        .expect("Compute returns a receipt");
+    assert!(receipt.starts_with("sha256:"), "{receipt}");
+    eprintln!("PASSED — real bounded work loop (receipt {receipt})");
+}
