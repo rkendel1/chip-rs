@@ -1011,7 +1011,15 @@ fn parse_args(args: &[String]) -> Result<ServeArgs, i32> {
     })
 }
 
+/// `chip serve`: the runtime service over the local machine.
 pub async fn serve(args: &[String]) -> i32 {
+    serve_in(args, None).await
+}
+
+/// The runtime service over the given environments, or over the local machine when `None`. This
+/// is how a program that embeds Rust Chip supplies its own environment provider: the service, the
+/// scheduler and the work loop are the same ones `chip serve` runs.
+pub async fn serve_in(args: &[String], environments: Option<Arc<Environments>>) -> i32 {
     let ServeArgs {
         addr,
         max_concurrent,
@@ -1039,15 +1047,19 @@ pub async fn serve(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     };
-    // The environment is the local machine: this project directory, which is mutable.
-    let provider = match LocalEnvironmentProvider::prepare(&root).await {
-        Ok(provider) => provider,
-        Err(why) => {
-            eprintln!("error: {why}");
-            return EXIT_UNAVAILABLE;
+    let environments = match environments {
+        Some(environments) => environments,
+        None => {
+            // The environment is the local machine: this project directory, which is mutable.
+            match LocalEnvironmentProvider::prepare(&root).await {
+                Ok(provider) => Arc::new(Environments::new(Arc::new(provider))),
+                Err(why) => {
+                    eprintln!("error: {why}");
+                    return EXIT_UNAVAILABLE;
+                }
+            }
         }
     };
-    let environments = Arc::new(Environments::new(Arc::new(provider)));
     // Conservative by default, and never more than the environment can isolate.
     let isolated = environments.isolation_capacity();
     if let Some(n) = max_concurrent.filter(|n| *n > isolated) {
@@ -1089,7 +1101,7 @@ pub async fn serve(args: &[String]) -> i32 {
     );
     let _ = writeln!(
         out,
-        "Admission: {} work at once, {} queued (FIFO). Environment: the local machine, {} isolated environment(s) (one mutable project directory).",
+        "Admission: {} work at once, {} queued (FIFO). {} isolated environment(s) available.",
         capacity.max_concurrent, capacity.max_queued, isolated
     );
     let _ = out.flush();
