@@ -20,6 +20,8 @@ chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-local-ml = { path = "../chip-local-ml", optional = true }
 chip-laya-reasoner = { path = "../chip-laya-reasoner", optional = true }
 chip-wasm-reasoner = { path = "../chip-wasm-reasoner", features = ["fixture"] }
+chip-wasm-decision = { path = "../chip-wasm-decision" }
+chip-wasm-decision-host = { path = "../chip-wasm-decision-host" }
 fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

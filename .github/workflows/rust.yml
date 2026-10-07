@@ -46,8 +46,14 @@ jobs:
       - name: Check chip-core for Wasm
         run: cargo check -p chip-core --target wasm32-unknown-unknown
 
+      - name: Build the Wasm decision module
+        run: cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
+
       - name: Run tests
         run: cargo test --workspace --verbose
 
       - name: Run Chip CLI acceptance
         run: cargo run -p chip-cli -- --test
+
+      - name: Wasm decision baseline
+        run: cargo run --release -p chip-cli -- --benchmark-wasm-decision 1000

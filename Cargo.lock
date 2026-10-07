@@ -266,6 +266,8 @@ dependencies = [
  "chip-laya-reasoner",
  "chip-local-ml",
  "chip-reasoning-corpus",
+ "chip-wasm-decision",
+ "chip-wasm-decision-host",
  "chip-wasm-reasoner",
  "fx-core",
  "fx-provider-http",
@@ -341,6 +343,21 @@ name = "chip-reasoning-corpus"
 version = "0.1.0"
 dependencies = [
  "chip-core",
+]
+
+[[package]]
+name = "chip-wasm-decision"
+version = "0.1.0"
+
+[[package]]
+name = "chip-wasm-decision-host"
+version = "0.1.0"
+dependencies = [
+ "chip-core",
+ "chip-reasoning-corpus",
+ "chip-wasm-decision",
+ "wasmi",
+ "wat",
 ]
 
 [[package]]

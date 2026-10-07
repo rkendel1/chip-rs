@@ -1,3 +1,13 @@
 [workspace]
-members = ["crates/fx-core", "crates/fx-provider-http", "crates/chip-core", "crates/chip-compute", "crates/chip-wasm-reasoner", "crates/chip-reasoning-corpus", "crates/chip-local-ml", "crates/chip-laya-reasoner", "crates/chip-graph", "crates/chip-cli"]
+members = ["crates/fx-core", "crates/fx-provider-http", "crates/chip-core", "crates/chip-compute", "crates/chip-wasm-reasoner", "crates/chip-wasm-decision", "crates/chip-wasm-decision-host", "crates/chip-reasoning-corpus", "crates/chip-local-ml", "crates/chip-laya-reasoner", "crates/chip-graph", "crates/chip-cli"]
 resolver = "2"
+
+# Only the Wasm decision artifact is size-optimized:
+#   cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
+[profile.wasm-decision]
+inherits = "release"
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
