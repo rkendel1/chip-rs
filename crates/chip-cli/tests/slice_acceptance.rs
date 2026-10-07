@@ -498,6 +498,7 @@ fn the_token_follows_relevant_structure_not_the_repository() {
         section_value(&first, "StateToken"),
         section_value(&first, "Snapshot"),
     );
+    let b_before = section_value(&stdout(&repo.slice(&catalog, &[], "cap.b")), "StateToken");
 
     // The repository changes, outside the capability's slice.
     fs::write(
