@@ -178,3 +178,43 @@ fn debug_output_redacts_api_key() {
     let provider = HttpProvider::new(cfg).unwrap();
     assert!(!format!("{provider:?}").contains(FAKE_KEY));
 }
+
+/// Chip sends each observation as its own system message. Some servers' chat templates accept a
+/// system message only first, and only one: consecutive system messages go out as one, in order,
+/// and nothing else about the conversation changes.
+#[tokio::test]
+async fn consecutive_system_messages_are_sent_as_one_in_order() {
+    let server = start(200, OK_BODY, Duration::ZERO).await;
+    let provider = HttpProvider::new(config(&server.url)).unwrap();
+    let request = ModelRequest::new(
+        "mock-model",
+        vec![
+            Message::new(MessageRole::System, "observation one"),
+            Message::new(MessageRole::System, "observation two"),
+            Message::new(MessageRole::System, "observation three"),
+            Message::new(MessageRole::User, "decide"),
+            Message::new(MessageRole::Assistant, "ok"),
+            Message::new(MessageRole::System, "a later system note"),
+            Message::new(MessageRole::User, "again"),
+        ],
+    );
+    provider.complete(request).await.unwrap();
+    let captured = server.captured.lock().await;
+    let json: serde_json::Value = serde_json::from_str(&captured[0].body).unwrap();
+    let roles: Vec<&str> = json["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["system", "user", "assistant", "system", "user"]);
+    assert_eq!(
+        json["messages"][0]["content"],
+        "observation one\n\nobservation two\n\nobservation three"
+    );
+    assert_eq!(json["messages"][1]["content"], "decide");
+    assert_eq!(
+        json["messages"][3]["content"], "a later system note",
+        "a system message after a user turn stays where it is"
+    );
+}

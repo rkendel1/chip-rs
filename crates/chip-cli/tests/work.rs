@@ -649,6 +649,9 @@ fn real_model_codes_real_tasks() {
         if let Some(m) = &model {
             command.args(["--model", m]);
         }
+        if let Ok(endpoint) = std::env::var("CHIP_LIVE_ENDPOINT") {
+            command.args(["--endpoint", &endpoint]);
+        }
         for (var, flag) in [
             ("CHIP_LIVE_MAX_TURNS", "--max-turns"),
             ("CHIP_LIVE_MAX_EXECUTIONS", "--max-executions"),

@@ -554,7 +554,13 @@ impl ProjectExecutor {
 
 /// A directory's entries as Chip lists them: no symlinks, nothing reserved, and nothing whose name
 /// the path rules would not let a model address anyway. Sorted by name.
-fn visible_entries(dir: &Path) -> std::io::Result<(Vec<(String, fs::Metadata)>, usize, usize)> {
+struct Visible {
+    entries: Vec<(String, fs::Metadata)>,
+    symlinks: usize,
+    unaddressable: usize,
+}
+
+fn visible_entries(dir: &Path) -> std::io::Result<Visible> {
     let (mut entries, mut symlinks, mut unaddressable) = (Vec::new(), 0, 0);
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -572,7 +578,11 @@ fn visible_entries(dir: &Path) -> std::io::Result<(Vec<(String, fs::Metadata)>, 
         }
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((entries, symlinks, unaddressable))
+    Ok(Visible {
+        entries,
+        symlinks,
+        unaddressable,
+    })
 }
 
 fn child(base: Option<&str>, name: &str) -> String {
@@ -625,8 +635,7 @@ impl Search<'_> {
     }
 
     fn directory(&mut self, dir: &Path, rel: Option<&str>) -> std::io::Result<()> {
-        let (entries, _, _) = visible_entries(dir)?;
-        for (name, meta) in entries {
+        for (name, meta) in visible_entries(dir)?.entries {
             if self.truncated {
                 return Ok(());
             }
@@ -658,7 +667,11 @@ impl ProjectExecutor {
             Kind::Directory => {}
         }
         let base = (shown != ".").then_some(shown);
-        let (entries, symlinks, unaddressable) = match visible_entries(&located.absolute) {
+        let Visible {
+            entries,
+            symlinks,
+            unaddressable,
+        } = match visible_entries(&located.absolute) {
             Ok(found) => found,
             Err(e) => return Ok(failure(PROJECT_LIST, shown, io_code(&e))),
         };

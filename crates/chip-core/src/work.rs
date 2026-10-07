@@ -1394,7 +1394,7 @@ impl<'a> Run<'a> {
 /// that invocation: another input to the same capability is a different invocation, and nothing
 /// said here rules it out.
 fn invocation_label(request: &CapabilityRequest) -> String {
-    if true {
+    if request.inputs.is_empty() {
         return request.capability_id.to_string();
     }
     let shown: Vec<String> = request

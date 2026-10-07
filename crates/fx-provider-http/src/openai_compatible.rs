@@ -19,7 +19,29 @@ struct WireRequest<'a> {
 #[derive(Serialize)]
 struct WireMessage<'a> {
     role: &'static str,
-    content: &'a str,
+    content: std::borrow::Cow<'a, str>,
+}
+
+/// The wire messages for a request. Consecutive system messages are sent as one, in order, joined by
+/// a blank line: the chat-completions format allows several, but some servers' chat templates accept
+/// a system message only first (and then only one). Nothing is dropped or reordered, and a system
+/// message that follows a user or assistant message stays where it is.
+fn wire_messages(messages: &[Message]) -> Vec<WireMessage<'_>> {
+    let mut wire: Vec<WireMessage<'_>> = Vec::with_capacity(messages.len());
+    for m in messages {
+        let role = role(m);
+        match wire.last_mut() {
+            Some(last) if role == "system" && last.role == "system" => {
+                let merged = format!("{}\n\n{}", last.content, m.content);
+                last.content = std::borrow::Cow::Owned(merged);
+            }
+            _ => wire.push(WireMessage {
+                role,
+                content: std::borrow::Cow::Borrowed(&m.content),
+            }),
+        }
+    }
+    wire
 }
 
 #[derive(Deserialize)]
@@ -70,14 +92,7 @@ pub(crate) async fn complete(
 
     let wire = WireRequest {
         model: &request.model.0,
-        messages: request
-            .messages
-            .iter()
-            .map(|m| WireMessage {
-                role: role(m),
-                content: &m.content,
-            })
-            .collect(),
+        messages: wire_messages(&request.messages),
         max_tokens: request.max_tokens.or(config.max_tokens),
         temperature: request.temperature.or(config.temperature),
     };
