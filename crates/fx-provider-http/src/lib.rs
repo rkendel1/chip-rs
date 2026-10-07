@@ -45,6 +45,14 @@ pub struct HttpProviderConfig {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub timeout: Duration,
+    /// Ask the endpoint for a JSON object (`"response_format":{"type":"json_object"}`). A request
+    /// field, never prompt text, and a request only: the reply is still untrusted output that the
+    /// caller must parse strictly. Used by the OpenAI-compatible adapter; ignored by the others.
+    pub json_object_output: bool,
+    /// Sent as `"chat_template_kwargs":{"enable_thinking":<value>}` when set. Opt-in because some
+    /// OpenAI-compatible servers reject fields they do not know. Used by the OpenAI-compatible
+    /// adapter; ignored by the others.
+    pub enable_thinking: Option<bool>,
 }
 
 impl HttpProviderConfig {
@@ -62,7 +70,19 @@ impl HttpProviderConfig {
             temperature: None,
             max_tokens: None,
             timeout: DEFAULT_TIMEOUT,
+            json_object_output: false,
+            enable_thinking: None,
         }
+    }
+
+    pub fn with_json_object_output(mut self) -> Self {
+        self.json_object_output = true;
+        self
+    }
+
+    pub fn with_enable_thinking(mut self, enable: bool) -> Self {
+        self.enable_thinking = Some(enable);
+        self
     }
 
     pub fn with_api_key(mut self, api_key: Secret) -> Self {
@@ -92,6 +112,8 @@ impl fmt::Debug for HttpProviderConfig {
             .field("temperature", &self.temperature)
             .field("max_tokens", &self.max_tokens)
             .field("timeout", &self.timeout)
+            .field("json_object_output", &self.json_object_output)
+            .field("enable_thinking", &self.enable_thinking)
             .finish()
     }
 }

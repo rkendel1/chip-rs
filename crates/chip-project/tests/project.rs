@@ -98,13 +98,18 @@ async fn the_capabilities_are_declared_with_their_inputs_and_are_never_answered_
     let p = ProjectExecutor::new(&f.root);
     let found = p.capabilities().await.unwrap();
     let ids: Vec<&str> = found.iter().map(|d| d.id.as_str()).collect();
+    // The file capabilities, then the four read-only Git observations (tests/git.rs).
     assert_eq!(
         ids,
         [
             "project.list",
             "project.search",
             PROJECT_READ,
-            PROJECT_WRITE
+            PROJECT_WRITE,
+            "project.git.status",
+            "project.git.diff",
+            "project.git.diff_stat",
+            "project.git.log",
         ]
     );
     let names =
@@ -119,7 +124,8 @@ async fn the_capabilities_are_declared_with_their_inputs_and_are_never_answered_
             "{} could be answered from stale evidence",
             d.id
         );
-        let navigation = matches!(d.id.as_str(), "project.list" | "project.search");
+        let navigation = matches!(d.id.as_str(), "project.list" | "project.search")
+            || d.id.as_str().starts_with("project.git.");
         // Only the file-content capabilities declare room for a file; navigation takes short text.
         assert_eq!(
             d.max_input_bytes,

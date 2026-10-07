@@ -758,3 +758,126 @@ fn real_model_codes_real_tasks() {
         );
     }
 }
+
+// ---- provider boundary: structured output requested, malformed output never repaired -------------------------------
+
+/// Like `go`, with extra environment, returning every request body the server saw.
+async fn go_bodies(reply: &str, dir: &Path, env: &[(&str, &str)]) -> (Output, Vec<String>) {
+    let server = common::start(200, &completion(reply), Duration::ZERO).await;
+    let (url, d) = (server.url.clone(), dir.to_path_buf());
+    let env: Vec<(String, String)> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let out = tokio::task::spawn_blocking(move || {
+        let mut c = mock(&url, base(&["--json", GOAL], &d));
+        for (k, v) in &env {
+            c.env(k, v);
+        }
+        c.output().unwrap()
+    })
+    .await
+    .unwrap();
+    let bodies = server
+        .captured
+        .lock()
+        .await
+        .iter()
+        .map(|c| c.body.clone())
+        .collect();
+    (out, bodies)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_requests_a_json_object_and_asks_for_no_thinking_only_when_configured() {
+    let dir = fixture("structured");
+    let reply = r#"{"decision":"block","reason":"nothing to do"}"#;
+    let (out, bodies) = go_bodies(reply, &dir, &[]).await;
+    assert_eq!(bodies.len(), 1, "{}", text(&out));
+    let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
+    assert_eq!(
+        body["response_format"],
+        serde_json::json!({"type": "json_object"})
+    );
+    assert!(body.get("chat_template_kwargs").is_none() && body.get("extra_body").is_none());
+    // The request field is not prompt text.
+    let prompt = body["messages"].to_string();
+    assert!(!prompt.contains("response_format") && !prompt.contains("enable_thinking"));
+    assert!(!prompt.contains("no_think"));
+
+    let (_, bodies) = go_bodies(reply, &dir, &[("CHIP_ENABLE_THINKING", "false")]).await;
+    let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
+    assert_eq!(
+        body["chat_template_kwargs"],
+        serde_json::json!({"enable_thinking": false})
+    );
+    assert_eq!(body["response_format"]["type"], "json_object");
+}
+
+/// The decision a model might have meant, wrapped the ways reasoning models wrap it. None of these is
+/// one JSON object, so none is accepted, repaired or searched for a decision. (The parser's one
+/// documented tolerance, a single code fence around the *whole* reply, is its own existing behaviour.)
+#[tokio::test(flavor = "multi_thread")]
+async fn output_that_is_not_one_clean_json_object_is_rejected_and_never_repaired() {
+    let decision = r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#;
+    let cases = [
+        (
+            "thinking process then json",
+            format!(
+                "Thinking Process:\n\n1. Analyze the request.\n2. Pick a capability.\n\n{decision}"
+            ),
+        ),
+        (
+            "think tags then json",
+            format!("<think>I should read the file.</think>\n{decision}"),
+        ),
+        (
+            "think tags with braces",
+            format!("<think>{{\"a\":1}}</think>{decision}"),
+        ),
+        (
+            "prose then a fence",
+            format!("Here it is:\n```json\n{decision}\n```"),
+        ),
+        (
+            "a fence then prose",
+            format!("```json\n{decision}\n```\nDone."),
+        ),
+        (
+            "prose before",
+            format!("Sure! Here is my decision: {decision}"),
+        ),
+        ("prose after", format!("{decision}\nThat should do it.")),
+        ("two objects", format!("{decision}{decision}")),
+        (
+            "truncated object",
+            decision[..decision.len() - 3].to_string(),
+        ),
+    ];
+    for (what, reply) in cases {
+        let dir = fixture("norepair");
+        let (out, bodies) = go_bodies(&reply, &dir, &[("CHIP_ENABLE_THINKING", "false")]).await;
+        let t = text(&out);
+        assert_eq!(
+            bodies.len(),
+            1,
+            "{what}: a retry or another model was tried: {t}"
+        );
+        let j = json_of(&out);
+        assert_eq!(
+            j["measurement"]["executions"], 0,
+            "{what}: something executed: {t}"
+        );
+        assert_eq!(j["reads"], 0, "{what}: the decision was extracted: {t}");
+        assert_eq!(j["verified"], false, "{what}");
+        assert_ne!(j["terminal_state"], "completed", "{what}");
+        assert_ne!(out.status.code(), Some(0), "{what}");
+        assert_eq!(j["audit"]["clean"], true, "{what}: {t}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("src/lib.rs")).unwrap(),
+            OLD_LIB,
+            "{what}"
+        );
+        assert!(!dir.join("target").exists(), "{what}: the tests ran");
+    }
+}

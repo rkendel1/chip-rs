@@ -558,6 +558,18 @@ fn config_from_env(get: impl Fn(&str) -> Option<String>) -> Result<HttpProviderC
     if let Some(key) = get("CHIP_API_KEY").filter(|k| !k.is_empty()) {
         config = config.with_api_key(Secret::new(key));
     }
+    // Opt-in, and explicit either way: anything but `true` or `false` is a configuration error.
+    if let Some(value) = set("CHIP_ENABLE_THINKING") {
+        match value.trim() {
+            "true" => config = config.with_enable_thinking(true),
+            "false" => config = config.with_enable_thinking(false),
+            _ => {
+                return Err(FxError::Configuration(
+                    "CHIP_ENABLE_THINKING must be `true` or `false`".into(),
+                ));
+            }
+        }
+    }
     if let Some(workspace) = get("CHIP_ANTHROPIC_WORKSPACE_ID").filter(|v| !v.trim().is_empty()) {
         config = config.with_workspace_id(workspace);
     }
@@ -1178,5 +1190,28 @@ mod tests {
         assert!(matches!(err, FxError::Configuration(_)));
         let err = config_from_env(env(&[("CHIP_MODEL", "m")])).unwrap_err();
         assert!(matches!(err, FxError::Configuration(_)));
+    }
+
+    #[test]
+    fn thinking_is_off_only_when_explicitly_configured_and_never_guessed() {
+        let base = [("CHIP_MODEL", "m"), ("CHIP_ENDPOINT", "http://x")];
+        assert_eq!(config_from_env(env(&base)).unwrap().enable_thinking, None);
+        for (value, expected) in [("false", false), ("true", true), (" false ", false)] {
+            let mut vars = base.to_vec();
+            vars.push(("CHIP_ENABLE_THINKING", value));
+            assert_eq!(
+                config_from_env(env(&vars)).unwrap().enable_thinking,
+                Some(expected)
+            );
+        }
+        for bad in ["0", "no", "False", "off"] {
+            let mut vars = base.to_vec();
+            vars.push(("CHIP_ENABLE_THINKING", bad));
+            let err = config_from_env(env(&vars)).unwrap_err();
+            assert!(err.to_string().contains("CHIP_ENABLE_THINKING"), "{bad}");
+        }
+        // The model is never inferred from the endpoint.
+        let err = config_from_env(env(&[("CHIP_ENDPOINT", "http://127.0.0.1:8000")])).unwrap_err();
+        assert!(err.to_string().contains("CHIP_MODEL"));
     }
 }

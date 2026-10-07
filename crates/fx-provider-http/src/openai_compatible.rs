@@ -14,6 +14,24 @@ struct WireRequest<'a> {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<WireResponseFormat>,
+    /// Top level on the wire: servers read `chat_template_kwargs` from the request body itself.
+    /// (An SDK's `extra_body` is merged into the body client-side; a literal `extra_body` member
+    /// is ignored by servers, so it is not sent.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<WireTemplateKwargs>,
+}
+
+#[derive(Serialize)]
+struct WireResponseFormat {
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
+#[derive(Serialize)]
+struct WireTemplateKwargs {
+    enable_thinking: bool,
 }
 
 #[derive(Serialize)]
@@ -95,6 +113,12 @@ pub(crate) async fn complete(
         messages: wire_messages(&request.messages),
         max_tokens: request.max_tokens.or(config.max_tokens),
         temperature: request.temperature.or(config.temperature),
+        response_format: config.json_object_output.then_some(WireResponseFormat {
+            kind: "json_object",
+        }),
+        chat_template_kwargs: config
+            .enable_thinking
+            .map(|enable_thinking| WireTemplateKwargs { enable_thinking }),
     };
     let body = serde_json::to_vec(&wire).map_err(|e| FxError::Serialization(e.to_string()))?;
 

@@ -1,4 +1,5 @@
-//! Bounded project-file capabilities: `project.read` and `project.write`.
+//! Bounded project capabilities: `project.read`, `project.write`, `project.list`, `project.search`
+//! and four read-only Git observations (see the `git` module).
 //!
 //! The model names a project-relative path (and, to write, the complete new content). Chip owns
 //! everything else: the project root, path normalisation, traversal and symlink prevention, size
@@ -31,6 +32,15 @@
 //! temporary file and the rename can leave a `.chip-write-*.tmp` file behind; and writing code
 //! that the project's own tooling later runs is, inherently, code execution through that tooling.
 //! This crate bounds what the *model* may do to files. It does not sandbox the project.
+
+mod git;
+
+pub use git::{
+    ALLOWED_SUBCOMMANDS, DEFAULT_GIT_LOG_COUNT, GIT_CAPABILITIES, GIT_OBSERVATION_INVALID,
+    GIT_SCOPE, Invocation, MAX_GIT_DIFF_BYTES, MAX_GIT_LOG_COUNT, MAX_GIT_PATHS, PROJECT_GIT_DIFF,
+    PROJECT_GIT_DIFF_STAT, PROJECT_GIT_LOG, PROJECT_GIT_STATUS, Side, argv as git_argv,
+    git_observation_invariant, git_scope_invariant, is_git_capability,
+};
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -301,6 +311,20 @@ fn optional_text<'a>(
     }
 }
 
+/// `project.git.log`'s only input: absent, or an integer within the declared bounds.
+fn git_count(inputs: &BTreeMap<String, InputValue>) -> Result<Option<i64>, CapabilityError> {
+    match inputs.get("count") {
+        None => Ok(None),
+        Some(InputValue::Integer(n)) if (1..=MAX_GIT_LOG_COUNT).contains(n) => Ok(Some(*n)),
+        Some(InputValue::Integer(n)) => Err(CapabilityError::InvalidInput(format!(
+            "count is {n}; it must be between 1 and {MAX_GIT_LOG_COUNT}"
+        ))),
+        Some(_) => Err(CapabilityError::InvalidInput(
+            "input 'count' must be an integer".into(),
+        )),
+    }
+}
+
 /// A literal search query: short, one line, no control characters.
 fn check_query(query: &str) -> Result<(), CapabilityError> {
     let bad = |why: String| Err(CapabilityError::InvalidInput(why));
@@ -386,14 +410,39 @@ impl CapabilityProvider for ProjectExecutor {
                     input("content", "the complete new content of the file"),
                 ],
             ),
+            describe_navigation(
+                PROJECT_GIT_STATUS,
+                "Git working-tree status",
+                "Observe the repository's working-tree state: branch, staged, unstaged, untracked and deleted paths, and whether it is clean. Read-only.",
+                vec![],
+            ),
+            describe_navigation(
+                PROJECT_GIT_DIFF,
+                "Git working-tree diff",
+                "Observe the actual diff of tracked files, unstaged and staged. Read-only. Fails rather than truncating if too large. Untracked files are not shown.",
+                vec![],
+            ),
+            describe_navigation(
+                PROJECT_GIT_DIFF_STAT,
+                "Git diff summary",
+                "Observe how many files changed and how many lines were inserted and deleted, unstaged and staged. Read-only.",
+                vec![],
+            ),
+            describe_navigation(
+                PROJECT_GIT_LOG,
+                "Git recent commits",
+                "Observe the most recent commits of the current branch, newest first. count is how many (1 to 50; default 10). Read-only.",
+                vec![optional_input("count", "how many recent commits, 1 to 50")],
+            ),
         ])
     }
 
     async fn availability(&self, id: &CapabilityId) -> CapabilityAvailability {
-        if !matches!(
+        if !(matches!(
             id.as_str(),
             PROJECT_READ | PROJECT_WRITE | PROJECT_LIST | PROJECT_SEARCH
-        ) {
+        ) || is_git_capability(id.as_str()))
+        {
             return CapabilityAvailability::Unavailable(format!(
                 "{id} is not a project capability"
             ));
@@ -414,6 +463,8 @@ impl CapabilityProvider for ProjectExecutor {
             PROJECT_WRITE => &["path", "content"],
             PROJECT_LIST => &["path"],
             PROJECT_SEARCH => &["query", "path"],
+            PROJECT_GIT_STATUS | PROJECT_GIT_DIFF | PROJECT_GIT_DIFF_STAT => &[],
+            PROJECT_GIT_LOG => &["count"],
             other => return Err(CapabilityError::Unknown(other.to_string())),
         };
         for name in inputs.keys() {
@@ -422,6 +473,10 @@ impl CapabilityProvider for ProjectExecutor {
                     "capability does not accept input '{name}'"
                 )));
             }
+        }
+        if is_git_capability(id.as_str()) {
+            git_count(inputs)?;
+            return Ok(());
         }
         if matches!(id.as_str(), PROJECT_LIST | PROJECT_SEARCH) {
             let path = optional_text(inputs, "path")?;
@@ -812,10 +867,11 @@ impl Executor for ProjectExecutor {
     async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError> {
         let capability = request.intent.as_str();
         let invalid = |why: String| ExecutionError::InvalidRequest(why);
-        if !matches!(
+        if !(matches!(
             capability,
             PROJECT_READ | PROJECT_WRITE | PROJECT_LIST | PROJECT_SEARCH
-        ) {
+        ) || is_git_capability(capability))
+        {
             return Err(invalid(format!(
                 "'{capability}' is not a capability this executor provides"
             )));
@@ -831,6 +887,14 @@ impl Executor for ProjectExecutor {
         self.validate_inputs(&id, &request.inputs)
             .await
             .map_err(|e| invalid(e.to_string()))?;
+        if is_git_capability(capability) {
+            let count = git_count(&request.inputs).map_err(|e| invalid(e.to_string()))?;
+            let root = self.root().map_err(|e| invalid(e))?.to_path_buf();
+            return Ok(match git::observe(&root, capability, count).await {
+                (true, text) => ExecutionResult::success(request.id, text),
+                (false, text) => ExecutionResult::failure(request.id, text),
+            });
+        }
         if matches!(capability, PROJECT_LIST | PROJECT_SEARCH) {
             let path = optional_text(&request.inputs, "path")
                 .map_err(|e| invalid(e.to_string()))?
@@ -1005,7 +1069,7 @@ impl ObservationInvariant for HostPathLeak {
     }
 
     fn violations(&self, observation: &Observation) -> usize {
-        if project_line(observation).is_none() {
+        if project_line(observation).is_none() && !git::is_git_observation(observation) {
             return 0;
         }
         let text = observation.output.as_deref().unwrap_or_default();

@@ -27,8 +27,9 @@ use chip_core::{
 };
 use chip_pax::{PAX_TEST_CAPABILITY, PaxExecutor, PaxTestPassed, ResolvedPax};
 use chip_project::{
-    HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE, PROJECT_LIST,
-    PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor, host_path_leak_invariant,
+    GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
+    PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor,
+    git_observation_invariant, git_scope_invariant, host_path_leak_invariant,
     navigation_mismatch_invariant, out_of_root_write_invariant, path_escape_invariant,
     write_summary,
 };
@@ -45,7 +46,7 @@ const LIMIT_CEILING: usize = 50;
 const MAX_GOAL_BYTES: usize = 2000;
 
 /// What the model is told about how work is judged: Chip-owned text, not something it can edit.
-const RULES: &str = "Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes.";
+const RULES: &str = "Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). The repository's state can be observed, never changed, with project.git.status, project.git.diff, project.git.diff_stat and project.git.log; the working tree may already hold changes that are not yours, and they must be preserved. Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes.";
 
 pub fn goal_text(goal: &str) -> String {
     format!("{} {RULES}", goal.trim())
@@ -97,19 +98,26 @@ impl LocalWorkPolicy for CompleteWhenVerified {
 
 /// The one supported piece of work, over one project.
 pub fn spec(goal: &str, root: &std::path::Path, limits: WorkLimits) -> WorkSpec {
-    WorkSpec::new(WorkId::new("work"), WorkGoal::new(goal_text(goal)))
+    let mut spec = WorkSpec::new(WorkId::new("work"), WorkGoal::new(goal_text(goal)))
         .with_limits(limits)
         .with_required_observation(Arc::new(VerifiedChange))
         .with_observation_invariant(path_escape_invariant(root))
         .with_observation_invariant(out_of_root_write_invariant(root))
         .with_observation_invariant(host_path_leak_invariant(root))
         .with_observation_invariant(navigation_mismatch_invariant(root))
+        .with_observation_invariant(git_scope_invariant())
+        .with_observation_invariant(git_observation_invariant(root))
         // The project changes between requests, so none of these may ever be answered from memory.
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_LIST).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_SEARCH).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_READ).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_WRITE).unwrap())
-        .with_evidence_reuse_prohibited(CapabilityId::new(PAX_TEST_CAPABILITY).unwrap())
+        .with_evidence_reuse_prohibited(CapabilityId::new(PAX_TEST_CAPABILITY).unwrap());
+    // Repository state changes between requests too: a Git observation is never answered from memory.
+    for id in GIT_CAPABILITIES {
+        spec = spec.with_evidence_reuse_prohibited(CapabilityId::new(id).unwrap());
+    }
+    spec
 }
 
 fn declared() -> Vec<CapabilityId> {
@@ -121,6 +129,7 @@ fn declared() -> Vec<CapabilityId> {
         PAX_TEST_CAPABILITY,
     ]
     .iter()
+    .chain(GIT_CAPABILITIES.iter())
     .map(|c| CapabilityId::new(*c).unwrap())
     .collect()
 }
@@ -415,6 +424,7 @@ fn forged_observations(a: &SafetyAudit) -> usize {
     a.observation_without_execution
         + a.evidence_without_observation
         + a.violations_of(NAVIGATION_MISMATCH)
+        + a.violations_of(chip_project::GIT_OBSERVATION_INVALID)
 }
 
 pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
@@ -475,6 +485,8 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
             "out_of_root_write": a.violations_of(OUT_OF_ROOT_WRITE),
             "host_path_leak": a.violations_of(HOST_PATH_LEAK),
             "navigation_mismatch": a.violations_of(NAVIGATION_MISMATCH),
+            "git_scope": a.violations_of(chip_project::GIT_SCOPE),
+            "git_observation_invalid": a.violations_of(chip_project::GIT_OBSERVATION_INVALID),
             "forged_observations": forged_observations(a),
         },
         "exit_status": w.exit_status(),
@@ -586,6 +598,9 @@ pub async fn work(args: &[String]) -> i32 {
                 return EXIT_UNAVAILABLE;
             }
         };
+    // Every reply to `work` must be one JSON object: ask the endpoint for that in the request. The
+    // reply is still parsed strictly and never repaired.
+    let config = config.with_json_object_output();
     let model_name = config.model.to_string();
     let identity = Identity {
         provider: config.provider.clone(),
@@ -887,6 +902,11 @@ mod tests {
         assert_eq!(w.audit.violations_of(OUT_OF_ROOT_WRITE), 0);
         assert_eq!(w.audit.violations_of(HOST_PATH_LEAK), 0);
         assert_eq!(w.audit.violations_of(NAVIGATION_MISMATCH), 0);
+        assert_eq!(w.audit.violations_of(chip_project::GIT_SCOPE), 0);
+        assert_eq!(
+            w.audit.violations_of(chip_project::GIT_OBSERVATION_INVALID),
+            0
+        );
         assert_eq!(w.audit.stale_evidence_reuse, 0);
         assert_eq!(w.audit.events_after_terminal, 0);
     }
@@ -1743,7 +1763,9 @@ mod tests {
         );
         // pax.test declares no inputs: it is shown as taking none, with no `inputs` field in its form.
         assert!(q.contains(r#"pax.test takes no inputs: {"decision":"request_capability","capability":"pax.test"} (no "inputs" field)"#), "{q}");
-        assert!(q.contains(r#"{"decision":"request_capability","capability":"pax.test","inputs":{}} is invalid"#), "{q}");
+        // The "not even an empty one" example names the first capability that takes no inputs,
+        // which is now project.git.status (declared before pax.test).
+        assert!(q.contains(r#"{"decision":"request_capability","capability":"project.git.status","inputs":{}} is invalid"#), "{q}");
         // project.read declares a required path; project.list only an optional one.
         assert!(q.contains(r#"project.read takes inputs (path required): {"decision":"request_capability","capability":"project.read","inputs":{"path":<string|integer|boolean>}}"#), "{q}");
         assert!(
@@ -1757,6 +1779,22 @@ mod tests {
         assert!(
             q.contains(r#"project.list takes inputs (path optional)"#),
             "{q}"
+        );
+        // The Git observations use the same contract: three take no inputs, the log an optional count.
+        for id in [
+            "project.git.status",
+            "project.git.diff",
+            "project.git.diff_stat",
+        ] {
+            assert!(
+                q.contains(&format!(r#"{id} takes no inputs: {{"decision":"request_capability","capability":"{id}"}} (no "inputs" field)"#)),
+                "{id}: {q}"
+            );
+        }
+        assert!(q.contains(r#"project.git.log takes inputs (count optional): {"decision":"request_capability","capability":"project.git.log","inputs":{"count":<string|integer|boolean>}}; with no inputs to give, omit the "inputs" field"#), "{q}");
+        assert!(
+            !q.contains("git commit") && !q.contains("git checkout") && !q.contains("argv"),
+            "the prompt teaches no Git command syntax: {q}"
         );
         // And every capability is described as its descriptor declares it.
         for d in &descriptors {
@@ -1772,6 +1810,361 @@ mod tests {
         // The task prompts are untouched by any of this: the goal text carries no protocol advice.
         let goal = goal_text(GOAL);
         assert!(!goal.contains("inputs") && !goal.contains("{}"), "{goal}");
+    }
+
+    // ---- Git observation ----------------------------------------------------------------------------
+
+    fn git(root: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The fixture project as a committed repository, `target/` ignored, plus a tracked `NOTES.md`.
+    fn git_fixture(tag: &str) -> Fx {
+        let fx = fixture(tag);
+        std::fs::write(fx.root.join(".gitignore"), "target/\nCargo.lock\n").unwrap();
+        std::fs::write(fx.root.join("NOTES.md"), "notes\n").unwrap();
+        git(&fx.root, &["init", "-q", "-b", "main"]);
+        git(&fx.root, &["add", "."]);
+        git(&fx.root, &["commit", "-q", "-m", "fixture"]);
+        fx
+    }
+
+    fn git_req(capability: &str, inputs: Option<&str>) -> String {
+        match inputs {
+            Some(i) => format!(
+                r#"{{"decision":"request_capability","capability":"{capability}","inputs":{i}}}"#
+            ),
+            None => format!(r#"{{"decision":"request_capability","capability":"{capability}"}}"#),
+        }
+    }
+
+    fn observed_json(w: &SoftwareWork, capability: &str) -> Vec<serde_json::Value> {
+        w.report
+            .observations
+            .iter()
+            .filter_map(|o| serde_json::from_str(o.output.as_deref()?.lines().next()?).ok())
+            .filter(|v: &serde_json::Value| v["capability"] == capability)
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pre_existing_change_is_observed_preserved_and_the_loop_completes_around_it() {
+        let fx = git_fixture("git-dirty");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        // The user's own work, uncommitted, before the work item starts.
+        std::fs::write(fx.root.join("NOTES.md"), "notes\nthe user's own edit\n").unwrap();
+        std::fs::write(fx.root.join("scratch.txt"), "untracked\n").unwrap();
+        let script = Script::new(&[
+            git_req("project.git.status", None),
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            git_req("project.git.diff", None),
+            git_req("project.git.diff_stat", None),
+            git_req("project.git.log", Some(r#"{"count":5}"#)),
+            test_run(),
+        ]);
+        let w = go(&fx, pax, &script, LIMITS, &CompleteWhenVerified).await;
+        tidy(&w);
+        assert!(completed(&w) && w.verified, "{:?}", w.report.outcome);
+        // The runtime did not assume a clean tree: it saw the user's change before it began.
+        let status = &observed_json(&w, "project.git.status")[0];
+        assert_eq!(status["clean"], false);
+        assert_eq!(status["unstaged"], serde_json::json!(["NOTES.md"]));
+        assert_eq!(status["untracked"], serde_json::json!(["scratch.txt"]));
+        // And did not touch it.
+        assert_eq!(
+            std::fs::read_to_string(fx.root.join("NOTES.md")).unwrap(),
+            "notes\nthe user's own edit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fx.root.join("scratch.txt")).unwrap(),
+            "untracked\n"
+        );
+        // The diff after the change shows both the user's edit and Chip's, as they really are.
+        let diff = w
+            .report
+            .observations
+            .iter()
+            .filter_map(|o| o.output.as_deref())
+            .find(|t| t.contains("\"capability\":\"project.git.diff\""))
+            .unwrap();
+        assert!(
+            diff.contains("+the user's own edit") && diff.contains("+pub fn canonical_fingerprint"),
+            "{diff}"
+        );
+        let stat = &observed_json(&w, "project.git.diff_stat")[0];
+        assert_eq!(stat["unstaged"]["files_changed"], 2);
+        assert_eq!(observed_json(&w, "project.git.log")[0]["returned"], 1);
+        // Git observations are executions of declared capabilities, counted as such.
+        assert_eq!(
+            w.utility.executions_by_capability.get("project.git.diff"),
+            Some(&1)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn git_observations_do_not_establish_the_goal() {
+        let fx = git_fixture("git-not-goal");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        // The change is made and the diff shows exactly it; the tree is later "clean" of
+        // surprises. None of that is a passing test, and the claim of completion is refused.
+        let script = Script::new(&[
+            write("src/lib.rs", WRONG),
+            git_req("project.git.diff", None),
+            git_req("project.git.status", None),
+            claim(),
+        ]);
+        let w = go(&fx, pax, &script, LIMITS, &CompleteWhenVerified).await;
+        tidy(&w);
+        assert!(!completed(&w) && !w.verified, "{:?}", w.report.outcome);
+        assert_eq!(w.pax_executions(), 0);
+        assert!(
+            goal_trail(&w).iter().all(|satisfied| !satisfied),
+            "{:?}",
+            goal_trail(&w)
+        );
+        assert_eq!(observed_json(&w, "project.git.diff").len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_project_that_is_not_a_repository_is_observed_as_such() {
+        let fx = fixture("git-none");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let script = Script::new(&[git_req("project.git.status", None), claim()]);
+        let w = go(&fx, pax, &script, LIMITS, &CompleteWhenVerified).await;
+        tidy(&w);
+        let o = &w.report.observations[0];
+        assert_eq!(o.kind, ObservationKind::ExecutionFailed);
+        assert!(o.output.as_deref().unwrap().contains("not_a_repository"));
+        assert!(!completed(&w) && !w.verified);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_rejected_git_request_executes_observes_records_or_completes() {
+        let abs_root = std::env::temp_dir().join("chip-git-abs");
+        let abs = abs_root.to_str().unwrap();
+        let on = |capability: &str, extra: &str| {
+            format!(r#"{{"decision":"request_capability","capability":"{capability}",{extra}}}"#)
+        };
+        let mut cases: Vec<(String, String)> = Vec::new();
+        for c in [
+            "project.git.status",
+            "project.git.diff",
+            "project.git.diff_stat",
+        ] {
+            let mut add = |what: &str, reply: String| cases.push((format!("{c}: {what}"), reply));
+            add("empty inputs", git_req(c, Some("{}")));
+            add("a count", git_req(c, Some(r#"{"count":3}"#)));
+            add("a path", git_req(c, Some(r#"{"path":"src"}"#)));
+            add(
+                "an absolute repository",
+                git_req(c, Some(&format!(r#"{{"repository":"{abs}"}}"#))),
+            );
+            add(
+                "a traversal repository",
+                git_req(c, Some(r#"{"repository":"../../repo"}"#)),
+            );
+            add(
+                "a home repository",
+                git_req(c, Some(r#"{"repository":"~/.ssh"}"#)),
+            );
+            add(
+                "an env repository",
+                git_req(c, Some(r#"{"repository":"$HOME/x"}"#)),
+            );
+            add("a git dir", git_req(c, Some(r#"{"git_dir":"/etc"}"#)));
+            add(
+                "a command",
+                git_req(c, Some(r#"{"command":"git commit -am x"}"#)),
+            );
+            add(
+                "an executable input",
+                git_req(c, Some(r#"{"executable":"/bin/sh"}"#)),
+            );
+            add(
+                "an argv input",
+                git_req(c, Some(r#"{"argv":["--exec","sh"]}"#)),
+            );
+            add("a revision", git_req(c, Some(r#"{"revision":"HEAD~1"}"#)));
+            add(
+                "an executable field",
+                on(c, r#""executable":"/usr/bin/git""#),
+            );
+            add("an argv field", on(c, r#""argv":["git","reset","--hard"]"#));
+            add("a command field", on(c, r#""command":"git clean -fdx""#));
+            add("a shell field", on(c, r#""shell":"git status; rm -rf /""#));
+            add("a cwd field", on(c, r#""cwd":"/""#));
+            add("a repository field", on(c, r#""repository":"/other/repo""#));
+            add("a forged observation", on(c, r#""observation":"clean""#));
+            add("a forged status", on(c, r#""status":"clean""#));
+            add("forged evidence", on(c, r#""evidence":"nothing changed""#));
+            add("a forged receipt", on(c, r#""receipt":"sha256:forged""#));
+            add("a forged execution id", on(c, r#""execution_id":"mine""#));
+        }
+        let log = "project.git.log";
+        for (what, reply) in [
+            ("count zero", git_req(log, Some(r#"{"count":0}"#))),
+            ("count negative", git_req(log, Some(r#"{"count":-1}"#))),
+            (
+                "count over the maximum",
+                git_req(log, Some(r#"{"count":51}"#)),
+            ),
+            (
+                "count huge",
+                git_req(log, Some(r#"{"count":9223372036854775807}"#)),
+            ),
+            ("count text", git_req(log, Some(r#"{"count":"5"}"#))),
+            (
+                "count with a flag",
+                git_req(log, Some(r#"{"count":"5 --all"}"#)),
+            ),
+            ("count a float", git_req(log, Some(r#"{"count":2.5}"#))),
+            ("count boolean", git_req(log, Some(r#"{"count":true}"#))),
+            (
+                "a revision",
+                git_req(log, Some(r#"{"count":2,"revision":"--all"}"#)),
+            ),
+            ("a path", git_req(log, Some(r#"{"path":"src/lib.rs"}"#))),
+            ("an argv input", git_req(log, Some(r#"{"argv":"--exec"}"#))),
+            (
+                "a repository",
+                git_req(log, Some(r#"{"count":1,"repository":"../x"}"#)),
+            ),
+            ("an argv field", on(log, r#""argv":["--all"]"#)),
+        ] {
+            cases.push((format!("{log}: {what}"), reply));
+        }
+        for (what, reply) in [
+            (
+                "an unknown git capability",
+                git_req("project.git.show", None),
+            ),
+            (
+                "commit",
+                git_req("project.git.commit", Some(r#"{"message":"x"}"#)),
+            ),
+            ("add", git_req("project.git.add", Some(r#"{"path":"."}"#))),
+            (
+                "checkout",
+                git_req("project.git.checkout", Some(r#"{"ref":"main"}"#)),
+            ),
+            ("reset", git_req("project.git.reset", None)),
+            ("push", git_req("project.git.push", None)),
+            ("clean", git_req("project.git.clean", None)),
+            ("stash", git_req("project.git.stash", None)),
+            (
+                "a generic git capability",
+                git_req("project.git", Some(r#"{"args":"status"}"#)),
+            ),
+            (
+                "a bare git capability",
+                git_req("git", Some(r#"{"args":"status"}"#)),
+            ),
+            (
+                "a shell capability",
+                git_req("shell.exec", Some(r#"{"command":"git status"}"#)),
+            ),
+            (
+                "prose claiming a commit",
+                "I committed the changes: abc1234.".into(),
+            ),
+            (
+                "a forged status as the reply",
+                r#"{"capability":"project.git.status","clean":true}"#.into(),
+            ),
+        ] {
+            cases.push((what.to_string(), reply));
+        }
+        let n = cases.len();
+        for (what, reply) in cases {
+            let fx = git_fixture("git-adversary");
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&fx.outside, fx.root.join("linkdir")).unwrap();
+            let Some(pax) = pax_for(&fx.root).await else {
+                return;
+            };
+            let (root_before, outside_before) = (snapshot(&fx.root), snapshot(&fx.outside));
+            let script = Script::new(&[reply]);
+            let w = go(&fx, pax, &script, LIMITS, &CompleteWhenVerified).await;
+            tidy(&w);
+            assert_eq!(
+                started(&w),
+                0,
+                "{what}: something executed ({:?})",
+                w.report.outcome
+            );
+            assert!(
+                w.report.observations.is_empty(),
+                "{what}: an observation exists"
+            );
+            assert_eq!(
+                count(&w, |e| matches!(e, WorkEvent::EvidenceRecorded { .. })),
+                0,
+                "{what}"
+            );
+            assert!(!completed(&w) && !w.verified, "{what}");
+            assert_eq!(script.seen.lock().unwrap().len(), 1, "{what}: no retry");
+            assert_eq!(
+                snapshot(&fx.root),
+                root_before,
+                "{what}: the repository or project changed"
+            );
+            assert_eq!(
+                snapshot(&fx.outside),
+                outside_before,
+                "{what}: something outside changed"
+            );
+            assert!(!fx.root.join("target").exists(), "{what}: the tests ran");
+        }
+        eprintln!("git adversarial cases: {n}, unauthorized executions: 0");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn every_git_capability_in_the_loop_leaves_the_repository_unchanged() {
+        let fx = git_fixture("git-immutable");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        std::fs::write(fx.root.join("NOTES.md"), "notes\nedited\n").unwrap();
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            git_req("project.git.status", None),
+            git_req("project.git.diff", None),
+            git_req("project.git.diff_stat", None),
+            git_req("project.git.log", Some(r#"{"count":50}"#)),
+            git_req("project.git.log", None),
+        ]);
+        let w = go(&fx, pax, &script, LIMITS, &AskModel).await;
+        tidy(&w);
+        assert_eq!(w.report.observations.len(), 5);
+        assert!(
+            w.report
+                .observations
+                .iter()
+                .all(|o| o.kind == ObservationKind::ExecutionCompleted)
+        );
+        // Work tree, index, HEAD, refs and objects: byte for byte.
+        assert_eq!(snapshot(&fx.root), before);
     }
 
     #[test]

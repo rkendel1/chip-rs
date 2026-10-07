@@ -218,3 +218,152 @@ async fn consecutive_system_messages_are_sent_as_one_in_order() {
         "a system message after a user turn stays where it is"
     );
 }
+
+// ---- structured output and thinking, requested by the provider boundary ------------------------------------------
+
+const QWEN: &str = "mlx-community/Qwen3.5-35B-A3B-4bit";
+
+async fn sent(config: HttpProviderConfig, server: &common::MockServer) -> serde_json::Value {
+    HttpProvider::new(config)
+        .unwrap()
+        .complete(ModelRequest::new(
+            QWEN,
+            vec![Message::new(MessageRole::User, "Decide.")],
+        ))
+        .await
+        .unwrap();
+    let captured = server.captured.lock().await;
+    assert_eq!(captured.len(), 1, "exactly one request");
+    serde_json::from_str(&captured[0].body).unwrap()
+}
+
+#[tokio::test]
+async fn the_request_asks_for_a_json_object_and_no_thinking_when_configured() {
+    let server = start(200, OK_BODY, Duration::ZERO).await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+        .with_json_object_output()
+        .with_enable_thinking(false);
+    let body = sent(cfg, &server).await;
+    assert_eq!(
+        body["response_format"],
+        serde_json::json!({"type": "json_object"})
+    );
+    // Servers read this from the top level of the body; a literal `extra_body` member is ignored by
+    // them, so it is not sent.
+    assert_eq!(
+        body["chat_template_kwargs"],
+        serde_json::json!({"enable_thinking": false})
+    );
+    assert!(body.get("extra_body").is_none());
+    // A request field, not prompt text: the messages are exactly what the caller gave.
+    assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(body["messages"][0]["content"], "Decide.");
+    assert!(!body["messages"].to_string().contains("think"));
+}
+
+#[tokio::test]
+async fn nothing_extra_is_sent_unless_configured() {
+    let server = start(200, OK_BODY, Duration::ZERO).await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url);
+    let body = sent(cfg, &server).await;
+    for key in ["response_format", "chat_template_kwargs", "extra_body"] {
+        assert!(
+            body.get(key).is_none(),
+            "{key} is sent only when configured: other OpenAI-compatible servers see the plain request"
+        );
+    }
+}
+
+#[tokio::test]
+async fn thinking_can_be_asked_for_explicitly_too() {
+    let server = start(200, OK_BODY, Duration::ZERO).await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+        .with_enable_thinking(true);
+    let body = sent(cfg, &server).await;
+    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+    assert!(body.get("response_format").is_none());
+}
+
+#[tokio::test]
+async fn the_selected_model_and_endpoint_are_used_unchanged() {
+    let server = start(200, OK_BODY, Duration::ZERO).await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+        .with_json_object_output();
+    let body = sent(cfg, &server).await;
+    assert_eq!(body["model"], QWEN);
+    let captured = server.captured.lock().await;
+    assert!(
+        captured[0]
+            .request_line
+            .starts_with("POST /v1/chat/completions ")
+    );
+}
+
+#[tokio::test]
+async fn the_other_adapters_never_send_these_fields() {
+    for provider in ["ollama", "anthropic"] {
+        let server = start(200, OK_BODY, Duration::ZERO).await;
+        let cfg = HttpProviderConfig::new(provider, QWEN, &server.url)
+            .with_json_object_output()
+            .with_enable_thinking(false);
+        let _ = HttpProvider::new(cfg)
+            .unwrap()
+            .complete(ModelRequest::new(
+                QWEN,
+                vec![Message::new(MessageRole::User, "x")],
+            ))
+            .await;
+        let captured = server.captured.lock().await;
+        let body = &captured[0].body;
+        assert!(
+            !body.contains("response_format") && !body.contains("chat_template_kwargs"),
+            "{provider}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_failed_request_stays_failed_with_no_second_attempt() {
+    let server = start(
+        500,
+        r#"{"error":{"message":"out of memory"}}"#,
+        Duration::ZERO,
+    )
+    .await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+        .with_json_object_output()
+        .with_enable_thinking(false);
+    let err = HttpProvider::new(cfg)
+        .unwrap()
+        .complete(ModelRequest::new(
+            QWEN,
+            vec![Message::new(MessageRole::User, "x")],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, FxError::Provider(_)), "{err:?}");
+    assert_eq!(server.captured.lock().await.len(), 1, "no retry");
+}
+
+#[tokio::test]
+async fn a_reply_with_reasoning_before_the_json_is_returned_exactly_as_it_came() {
+    // The provider boundary does not repair, strip or extract: what the server said is the output.
+    let reply = "Thinking Process:\n1. read the file\n{\"decision\":\"block\",\"reason\":\"x\"}";
+    let body = serde_json::json!({
+        "id": "r", "choices": [{"message": {"role": "assistant", "content": reply}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+    })
+    .to_string();
+    let server = start(200, &body, Duration::ZERO).await;
+    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+        .with_json_object_output();
+    let out = HttpProvider::new(cfg)
+        .unwrap()
+        .complete(ModelRequest::new(
+            QWEN,
+            vec![Message::new(MessageRole::User, "x")],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(out.output, reply);
+}
