@@ -4,6 +4,7 @@ mod decision_state_cmd;
 mod graph_cmd;
 mod laya_eval;
 mod live_benchmark;
+mod local_model_bench;
 mod native;
 mod wasm_decision_bench;
 
@@ -574,6 +575,14 @@ async fn main() {
 
     if args.len() > 1 && args[1] == "--benchmark-decision-state" {
         std::process::exit(decision_state_cmd::benchmark(&args[2..]));
+    }
+
+    if args.len() > 1 && args[1] == "--benchmark-local-model" {
+        std::process::exit(local_model_bench::benchmark(&args[2..]));
+    }
+
+    if args.len() > 1 && args[1] == "--evaluate-local-model" {
+        std::process::exit(local_model_bench::evaluate_corpus(&args[2..]));
     }
 
     if args.len() > 1 && args[1] == "--benchmark-wasm-decision" {

@@ -264,6 +264,7 @@ dependencies = [
  "chip-core",
  "chip-graph",
  "chip-laya-reasoner",
+ "chip-local-decision",
  "chip-local-ml",
  "chip-reasoning-corpus",
  "chip-wasm-decision",
@@ -324,6 +325,26 @@ dependencies = [
  "laya-decision",
  "serde_json",
  "tokenizers 0.21.4",
+]
+
+[[package]]
+name = "chip-local-decision"
+version = "0.1.0"
+dependencies = [
+ "chip-core",
+ "chip-wasm-decision",
+ "chip-wasm-decision-host",
+]
+
+[[package]]
+name = "chip-local-decision-train"
+version = "0.1.0"
+dependencies = [
+ "chip-core",
+ "chip-local-decision",
+ "chip-reasoning-corpus",
+ "chip-wasm-decision",
+ "sha2",
 ]
 
 [[package]]

@@ -13,7 +13,10 @@
 
 use std::collections::BTreeMap;
 
-use chip_core::{CapabilityId, EvidenceState, InputValue, LocalReasoningResult, ReasoningInput};
+use chip_core::{
+    CapabilityDecisionState, CapabilityId, EvidenceState, GraphStateToken, ImpactState, InputValue,
+    LocalReasoningResult, ReasoningInput,
+};
 
 /// The normalized verdict. Verdict text is never part of an evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,6 +98,27 @@ pub struct ReasoningCase {
     pub expected: Verdict,
     /// For humans reading evaluation output; never part of any decision.
     pub reason: &'static str,
+}
+
+impl ReasoningCase {
+    /// The case as the compact decision state a local decision model consumes. The corpus has
+    /// no architecture, so every case carries the same placeholder graph state. Impact comes
+    /// from the case's own `change_affects_capability` fact (absent means unchanged); every
+    /// fact stays in `inputs` exactly as stated.
+    pub fn decision_state(&self) -> CapabilityDecisionState {
+        let impact = match self.input.inputs.get("change_affects_capability") {
+            Some(InputValue::Bool(true)) => ImpactState::Impacted,
+            _ => ImpactState::Unchanged,
+        };
+        let mut state = CapabilityDecisionState::new(
+            self.input.capability.clone(),
+            GraphStateToken::from_digest([0x5a; 32]),
+            self.input.evidence,
+            impact,
+        );
+        state.inputs = self.input.inputs.clone();
+        state
+    }
 }
 
 fn t(text: &str) -> InputValue {

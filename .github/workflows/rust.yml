@@ -57,3 +57,8 @@ jobs:
 
       - name: Wasm decision baseline
         run: cargo run --release -p chip-cli -- --benchmark-wasm-decision 1000
+
+      - name: Local decision model (corpus + footprint)
+        run: |
+          cargo run --release -p chip-cli -- --evaluate-local-model
+          cargo run --release -p chip-cli -- --benchmark-local-model 20000

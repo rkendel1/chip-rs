@@ -1,0 +1,179 @@
+Model: tiny-linear, two logits over chip.decision-features.v1
+Parameters: 75 (36 dimensions x 2 logits + 2 biases + threshold); vocabulary 5 capabilities, 21 fact tokens
+Artifact size: 840 bytes (sha256 87358124dbf2f9257e158b650527672cb3f2134b2b3c443ea2ba4a0206cdccc8)
+Resident size: 1950 bytes (parameters plus vocabulary)
+Threshold on margin: 0.5000
+Seed 42 / lambda 0.001 / kappa 0.5 / 8000 iterations
+
+Training cases: 18
+Validation cases: 7
+Held-out cases: 7
+(32 cases is very small: every number below has wide uncertainty, and the feature design was
+informed by reading all 32 cases, so even the held-out split tests the fitted weights, not the design.)
+
+== HELD-OUT (never used for fitting or selection) ==
+Held-out: 7 decisions, ceiling on safe local coverage 28.6%
+
+Deterministic
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 1FP 0  <- false continue
+Pred Escalate                       FN 1              TN 5
+  local decision coverage 14.3%   escalation rate 85.7%   accuracy 85.7%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 1
+
+Learned (raw, unguarded)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 1FP 0  <- false continue
+Pred Escalate                       FN 1              TN 5
+  local decision coverage 14.3%   escalation rate 85.7%   accuracy 85.7%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 1
+
+LearnedGuarded
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 1FP 0  <- false continue
+Pred Escalate                       FN 1              TN 5
+  local decision coverage 14.3%   escalation rate 85.7%   accuracy 85.7%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 1
+
+LearnedStrict (learned AND deterministic)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 1FP 0  <- false continue
+Pred Escalate                       FN 1              TN 5
+  local decision coverage 14.3%   escalation rate 85.7%   accuracy 85.7%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 1
+
+local_gain (guarded local - deterministic local): 0
+additional safe local decisions (guarded true continues - deterministic): 0
+newly resolved: none
+learned beyond baseline: none
+unsafe learned continues (caught or not): none
+
+== LEAVE-ONE-OUT on train + validation (each case judged by a model that never saw it) ==
+Leave-one-out (dev): 25 decisions, ceiling on safe local coverage 20.0%
+
+Deterministic
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 2FP 0  <- false continue
+Pred Escalate                       FN 3             TN 20
+  local decision coverage 8.0%   escalation rate 92.0%   accuracy 88.0%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 2
+
+Learned (raw, unguarded)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 0FP 0  <- false continue
+Pred Escalate                       FN 5             TN 20
+  local decision coverage 0.0%   escalation rate 100.0%   accuracy 80.0%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 0
+
+LearnedGuarded
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 2FP 0  <- false continue
+Pred Escalate                       FN 3             TN 20
+  local decision coverage 8.0%   escalation rate 92.0%   accuracy 88.0%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 2
+
+LearnedStrict (learned AND deterministic)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 0FP 0  <- false continue
+Pred Escalate                       FN 5             TN 20
+  local decision coverage 0.0%   escalation rate 100.0%   accuracy 80.0%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 0
+
+local_gain (guarded local - deterministic local): 0
+additional safe local decisions (guarded true continues - deterministic): 0
+newly resolved: none
+learned beyond baseline: none
+unsafe learned continues (caught or not): none
+
+== LEAVE-ONE-OUT on all 32 cases (same configuration; informational) ==
+Leave-one-out (all): 32 decisions, ceiling on safe local coverage 21.9%
+
+Deterministic
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 3FP 0  <- false continue
+Pred Escalate                       FN 4             TN 25
+  local decision coverage 9.4%   escalation rate 90.6%   accuracy 87.5%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 3
+
+Learned (raw, unguarded)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 2FP 0  <- false continue
+Pred Escalate                       FN 5             TN 25
+  local decision coverage 6.2%   escalation rate 93.8%   accuracy 84.4%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 2
+
+LearnedGuarded
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 3FP 0  <- false continue
+Pred Escalate                       FN 4             TN 25
+  local decision coverage 9.4%   escalation rate 90.6%   accuracy 87.5%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 3
+
+LearnedStrict (learned AND deterministic)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 2FP 0  <- false continue
+Pred Escalate                       FN 5             TN 25
+  local decision coverage 6.2%   escalation rate 93.8%   accuracy 84.4%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 2
+
+local_gain (guarded local - deterministic local): 0
+additional safe local decisions (guarded true continues - deterministic): 0
+newly resolved: none
+learned beyond baseline: none
+unsafe learned continues (caught or not): none
+
+Hard cases, leave-one-out (judged out-of-sample):
+  lj-01   expected Continue deterministic Escalate learned Escalate guarded Escalate
+  lj-04   expected Continue deterministic Escalate learned Escalate guarded Escalate
+  lj-06   expected Continue deterministic Escalate learned Escalate guarded Escalate
+  lj-09   expected Continue deterministic Escalate learned Escalate guarded Escalate
+
+== HIDDEN-LAYER EXPERIMENT (rejected unless it beats the linear model; leave-one-out on train + validation) ==
+tiny tanh network (4 hidden units), 12 configurations (regularization x headroom x seed):
+  configurations with zero false continues: 4 of 12
+  most additional safe local decisions among those: 0
+  worst false continues across the grid: 4
+  verdict: no gain over the linear model, and less safe at low regularization; rejected
+
+== IN-SAMPLE on all 32 cases (25 of them were fitted; NOT evidence of quality) ==
+In-sample: 32 decisions, ceiling on safe local coverage 21.9%
+
+Deterministic
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 3FP 0  <- false continue
+Pred Escalate                       FN 4             TN 25
+  local decision coverage 9.4%   escalation rate 90.6%   accuracy 87.5%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 3
+
+Learned (raw, unguarded)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 5FP 0  <- false continue
+Pred Escalate                       FN 2             TN 25
+  local decision coverage 15.6%   escalation rate 84.4%   accuracy 93.8%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 5
+
+LearnedGuarded
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 5FP 0  <- false continue
+Pred Escalate                       FN 2             TN 25
+  local decision coverage 15.6%   escalation rate 84.4%   accuracy 93.8%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 5
+
+LearnedStrict (learned AND deterministic)
+                       Expected Continue Expected Escalate
+Pred Continue                       TP 3FP 0  <- false continue
+Pred Escalate                       FN 4             TN 25
+  local decision coverage 9.4%   escalation rate 90.6%   accuracy 87.5%
+  false continues 0 (0.0% of all, 0.0% of should-escalate)   safe local (true continues) 3
+
+local_gain (guarded local - deterministic local): 2
+additional safe local decisions (guarded true continues - deterministic): 2
+newly resolved: lj-06, lj-09
+learned beyond baseline: lj-06, lj-09
+unsafe learned continues (caught or not): none
+
+Hard cases, in-sample:
+  lj-01   expected Continue deterministic Escalate learned Escalate guarded Escalate
+  lj-04   expected Continue deterministic Escalate learned Escalate guarded Escalate
+  lj-06   expected Continue deterministic Escalate learned Continue guarded Continue
+  lj-09   expected Continue deterministic Escalate learned Continue guarded Continue

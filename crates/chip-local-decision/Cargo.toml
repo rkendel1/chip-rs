@@ -1,0 +1,15 @@
+[package]
+name = "chip-local-decision"
+version = "0.1.0"
+edition = "2024"
+description = "Tiny learned Continue/Escalate classifier over Chip's decision state, with a deterministic safety fallback"
+license = "MIT"
+
+# Runtime only: feature extraction, a linear model, its compact artifact format, the policy
+# modes and corpus-agnostic evaluation arithmetic. No training code, no I/O, no JSON.
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-wasm-decision = { path = "../chip-wasm-decision" }
+
+[dev-dependencies]
+chip-wasm-decision-host = { path = "../chip-wasm-decision-host" }
