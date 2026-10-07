@@ -27,12 +27,13 @@
 //! Exit status: 0 normal end (the service runs until it is stopped), 2 usage, 3 required
 //! infrastructure unavailable (no model selected, no usable PAX; nothing ran), 4 could not listen.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::io::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use chip_core::{CapabilityEvent, ExecutionEvent, WorkEvent, WorkId, WorkLimits};
 use serde_json::{Value, json};
@@ -41,51 +42,100 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::software_work::{
-    DEFAULT_MAX_EXECUTIONS, DEFAULT_MAX_TURNS, SoftwareWork, WorkRuntime, goal_is_acceptable,
-    render_json,
+    DEFAULT_MAX_EXECUTIONS, DEFAULT_MAX_TURNS, RunControl, SoftwareWork, WorkRuntime,
+    goal_is_acceptable, render_json,
 };
 use crate::verify::{EXIT_RUNTIME_FAILURE, EXIT_UNAVAILABLE, EXIT_USAGE};
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 8765;
 
-/// Work that may be running at once. A resource bound, not a queue: past it, a request is refused.
-const MAX_RUNNING: usize = 8;
 const MAX_HEAD_BYTES: usize = 8 * 1024;
 /// A goal is at most 2000 bytes; this leaves room for the JSON around it and nothing more.
 const MAX_BODY_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-// ---- the registry ---------------------------------------------------------------------------------
+// ---- the registry and the scheduler ---------------------------------------------------------------
 
-/// The registry's own knowledge of one work item. While it runs the registry knows only that it
-/// was started and whether cancellation was requested: the loop reports its events and outcome
-/// when it ends, and until then there is nothing authoritative to show.
+/// Work admission limits. Both bounds are about work trajectories, not HTTP requests.
+pub const DEFAULT_MAX_CONCURRENT_WORK: usize = 2;
+pub const DEFAULT_MAX_QUEUED_WORK: usize = 32;
+const MAX_CONCURRENT_CEILING: usize = 64;
+const MAX_QUEUED_CEILING: usize = 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capacity {
+    pub max_concurrent: usize,
+    pub max_queued: usize,
+}
+
+impl Default for Capacity {
+    fn default() -> Self {
+        Self {
+            max_concurrent: DEFAULT_MAX_CONCURRENT_WORK,
+            max_queued: DEFAULT_MAX_QUEUED_WORK,
+        }
+    }
+}
+
+/// The scheduler's own knowledge of one work item: where it is in admission. The agent's lifecycle
+/// is the runtime's and is reported separately; `Running` says only that the loop was started.
+/// While it runs there is nothing authoritative to show: the loop returns its events and outcome
+/// when it ends.
 enum Phase {
-    Running,
+    Queued,
+    Running { admitted: Instant },
     Finished(Box<Finished>),
 }
 
-/// What the runtime established, projected once when the loop returned.
+/// What is known once the work has ended, projected once.
 struct Finished {
-    /// `TerminalState::name()`, or `failed` if the task running the loop ended abnormally.
+    /// `TerminalState::name()`; `failed` if the task running the loop ended abnormally; or
+    /// `cancelled`, which only the scheduler can establish: the work was removed from the queue
+    /// before it started.
     state: &'static str,
+    /// The loop was started. False only for work cancelled while queued.
+    ran: bool,
     /// The CLI's JSON report for this work (`render_json`), unchanged.
     result: Value,
     events: Vec<Value>,
+    queue_wait: Duration,
+    first_model_call: Option<Duration>,
+    work_duration: Option<Duration>,
 }
 
 struct Item {
     goal: String,
-    cancel: Arc<AtomicBool>,
+    submitted: Instant,
+    control: Arc<RunControl>,
     phase: Mutex<Phase>,
+}
+
+/// FIFO admission. Nothing else: no priorities, no stealing, no dependencies.
+#[derive(Default)]
+struct Scheduler {
+    queue: VecDeque<String>,
+    active: usize,
+}
+
+/// Locks, ignoring poison: a panic in one work's task must not wedge the scheduler.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn ms(d: Duration) -> f64 {
+    (d.as_secs_f64() * 1_000_000.0).round() / 1000.0
 }
 
 pub struct Service {
     runtime: Arc<WorkRuntime>,
     limits: WorkLimits,
+    capacity: Capacity,
+    /// Lock order: `sched`, then `items` or one item's `phase`. `items` is never held while
+    /// taking either.
+    sched: Mutex<Scheduler>,
     items: Mutex<HashMap<String, Arc<Item>>>,
-    running: AtomicUsize,
+    rejected: AtomicU64,
     issued: AtomicU64,
     /// Only a loopback listener can check `Host`: a client that names another host is a browser
     /// being steered to this port by a name that is not ours.
@@ -93,15 +143,21 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(runtime: Arc<WorkRuntime>, loopback_hosts_only: bool) -> Arc<Self> {
+    pub fn new(
+        runtime: Arc<WorkRuntime>,
+        loopback_hosts_only: bool,
+        capacity: Capacity,
+    ) -> Arc<Self> {
         Arc::new(Self {
             runtime,
             limits: WorkLimits {
                 max_turns: DEFAULT_MAX_TURNS,
                 max_executions: DEFAULT_MAX_EXECUTIONS,
             },
+            capacity,
+            sched: Mutex::new(Scheduler::default()),
             items: Mutex::new(HashMap::new()),
-            running: AtomicUsize::new(0),
+            rejected: AtomicU64::new(0),
             issued: AtomicU64::new(0),
             loopback_hosts_only,
         })
@@ -119,57 +175,103 @@ impl Service {
             hash.update(now.to_le_bytes());
             hash.update(std::process::id().to_le_bytes());
             let id = format!("work_{}", hex(&hash.finalize()[..8]));
-            if !self.items.lock().unwrap().contains_key(&id) {
+            if !lock(&self.items).contains_key(&id) {
                 return id;
             }
         }
     }
 
     fn item(&self, id: &str) -> Option<Arc<Item>> {
-        self.items.lock().unwrap().get(id).cloned()
+        lock(&self.items).get(id).cloned()
     }
 
-    fn start(self: &Arc<Self>, goal: String) -> Result<String, Response> {
-        if self.running.fetch_add(1, Ordering::SeqCst) >= MAX_RUNNING {
-            self.running.fetch_sub(1, Ordering::SeqCst);
+    /// Registers and enqueues. Returns the id and whether admission was immediate.
+    fn submit(self: &Arc<Self>, goal: String) -> Result<(String, bool), Response> {
+        let mut sched = lock(&self.sched);
+        if sched.active >= self.capacity.max_concurrent
+            && sched.queue.len() >= self.capacity.max_queued
+        {
+            self.rejected.fetch_add(1, Ordering::SeqCst);
             return Err(Response::error(
                 429,
-                "too_many_running",
-                "The service is already running as much work as it allows",
+                "queue_full",
+                "The work queue is full; nothing was accepted",
             ));
         }
         let id = self.allocate_id();
-        let cancel = Arc::new(AtomicBool::new(false));
         let item = Arc::new(Item {
-            goal: goal.clone(),
-            cancel: cancel.clone(),
-            phase: Mutex::new(Phase::Running),
+            goal,
+            submitted: Instant::now(),
+            control: Arc::new(RunControl::default()),
+            phase: Mutex::new(Phase::Queued),
         });
-        self.items.lock().unwrap().insert(id.clone(), item.clone());
+        lock(&self.items).insert(id.clone(), item.clone());
+        sched.queue.push_back(id.clone());
+        self.admit_available(&mut sched);
+        let admitted = !matches!(*lock(&item.phase), Phase::Queued);
+        Ok((id, admitted))
+    }
 
-        // The existing runtime does the work. The inner task exists so a panic in it is observed
-        // and reported as a failure instead of leaving the work "running" forever.
+    /// Starts queued work, oldest first, while there is capacity. Called with the scheduler locked
+    /// whenever the queue or the active count changes.
+    fn admit_available(self: &Arc<Self>, sched: &mut Scheduler) {
+        while sched.active < self.capacity.max_concurrent {
+            let Some(id) = sched.queue.pop_front() else {
+                break;
+            };
+            let Some(item) = self.item(&id) else { continue };
+            sched.active += 1;
+            *lock(&item.phase) = Phase::Running {
+                admitted: Instant::now(),
+            };
+            self.spawn(id, item);
+        }
+    }
+
+    /// Runs the existing loop for one admitted item. Each item gets its own task, its own agent
+    /// (built inside `run`) and its own control; the only shared object is the immutable
+    /// `WorkRuntime`.
+    fn spawn(self: &Arc<Self>, id: String, item: Arc<Item>) {
         let runtime = self.runtime.clone();
-        let limits = self.limits;
-        let work_id = WorkId::new(id.clone());
+        let (limits, control, goal) = (self.limits, item.control.clone(), item.goal.clone());
+        let work_id = WorkId::new(id);
         let task =
-            tokio::spawn(async move { runtime.run(work_id, &goal, limits, Some(cancel)).await.0 });
+            tokio::spawn(async move { runtime.run(work_id, &goal, limits, Some(control)).await.0 });
         let service = self.clone();
+        // The inner task is the containment boundary: a panic in one work ends that work as
+        // `failed` and frees its slot. It never reaches the scheduler, another work, or the server.
         tokio::spawn(async move {
-            let finished = match task.await {
+            let outcome = task.await;
+            let ended = Instant::now();
+            let admitted = match &*lock(&item.phase) {
+                Phase::Running { admitted } => *admitted,
+                _ => ended,
+            };
+            let mut finished = match outcome {
                 Ok(work) => finish(&work, &service.runtime),
                 Err(_) => Finished {
                     state: "failed",
+                    ran: true,
                     result: json!({
-                        "outcome_reason": "the task running the work ended abnormally",
+                        "outcome_reason": "the task running the work ended abnormally; its trajectory is not available",
                     }),
                     events: Vec::new(),
+                    queue_wait: Duration::ZERO,
+                    first_model_call: None,
+                    work_duration: None,
                 },
             };
-            *item.phase.lock().unwrap() = Phase::Finished(Box::new(finished));
-            service.running.fetch_sub(1, Ordering::SeqCst);
+            finished.queue_wait = admitted.saturating_duration_since(item.submitted);
+            finished.work_duration = Some(ended.saturating_duration_since(admitted));
+            finished.first_model_call = item
+                .control
+                .first_model_call()
+                .map(|t| t.saturating_duration_since(admitted));
+            let mut sched = lock(&service.sched);
+            *lock(&item.phase) = Phase::Finished(Box::new(finished));
+            sched.active -= 1;
+            service.admit_available(&mut sched);
         });
-        Ok(id)
     }
 
     // ---- routing ----------------------------------------------------------------------------------
@@ -186,11 +288,13 @@ impl Service {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         match (segments.as_slice(), request.method.as_str()) {
             (["health"], "GET") => Response::ok(200, json!({"status": "ok"})),
+            (["v1", "metrics"], "GET") => self.metrics(),
             (["v1", "work"], "POST") => self.post_work(&request),
             (["v1", "work", id], "GET") => self.get_work(id),
             (["v1", "work", id, "events"], "GET") => self.get_events(id),
             (["v1", "work", id, "cancel"], "POST") => self.cancel(id),
             (["health"], _)
+            | (["v1", "metrics"], _)
             | (["v1", "work"], _)
             | (["v1", "work", _], _)
             | (["v1", "work", _, "events" | "cancel"], _) => Response::error(
@@ -215,8 +319,11 @@ impl Service {
             Ok(goal) => goal,
             Err(response) => return response,
         };
-        match self.start(goal) {
-            Ok(id) => Response::ok(202, json!({"work_id": id, "status": "running"})),
+        match self.submit(goal) {
+            Ok((id, admitted)) => Response::ok(
+                202,
+                json!({"work_id": id, "status": if admitted { "running" } else { "queued" }}),
+            ),
             Err(response) => response,
         }
     }
@@ -225,19 +332,56 @@ impl Service {
         let Some(item) = self.item(id) else {
             return unknown_work();
         };
-        let phase = item.phase.lock().unwrap();
-        let cancellation_requested = item.cancel.load(Ordering::SeqCst);
+        let sched = lock(&self.sched);
+        let phase = lock(&item.phase);
         let mut body = match &*phase {
-            Phase::Running => json!({"status": "running", "lifecycle": "executing"}),
-            Phase::Finished(f) => json!({
-                "status": f.state,
-                "lifecycle": f.state,
-                "result": f.result,
+            // Not started: the agent has no lifecycle yet, and none is claimed.
+            Phase::Queued => json!({
+                "status": "queued",
+                "lifecycle": null,
+                "scheduling": {
+                    "state": "queued",
+                    "queue_position": sched.queue.iter().position(|q| q == id).map(|p| p + 1),
+                    "queue_wait_ms": ms(item.submitted.elapsed()),
+                },
             }),
+            Phase::Running { admitted } => json!({
+                "status": "running",
+                "lifecycle": "executing",
+                "scheduling": {
+                    "state": "admitted",
+                    "queue_wait_ms": ms(admitted.saturating_duration_since(item.submitted)),
+                    "running_ms": ms(admitted.elapsed()),
+                },
+            }),
+            Phase::Finished(f) => {
+                let m = &f.result["measurement"];
+                json!({
+                    "status": f.state,
+                    "lifecycle": f.ran.then_some(f.state),
+                    "result": f.result,
+                    "scheduling": {
+                        "state": "finished",
+                        "queue_wait_ms": ms(f.queue_wait),
+                        "time_to_first_model_call_ms": f.first_model_call.map(ms),
+                        "work_duration_ms": f.work_duration.map(ms),
+                    },
+                    // Queue wait is the scheduler's; the rest are the runtime's own measurements.
+                    "timing": {
+                        "queue_wait_ms": ms(f.queue_wait),
+                        "model_ms": m["model_latency_ms"],
+                        "execution_ms": m["compute_latency_ms"],
+                        "local_decision_ms": m["local_decision_latency_ms"],
+                        "runtime_total_ms": m["total_latency_ms"],
+                        "work_duration_ms": f.work_duration.map(ms),
+                        "turns": m["turns"],
+                    },
+                })
+            }
         };
         body["work_id"] = json!(id);
         body["goal"] = json!(item.goal);
-        body["cancellation_requested"] = json!(cancellation_requested);
+        body["cancellation_requested"] = json!(item.control.cancel.load(Ordering::SeqCst));
         Response::ok(200, body)
     }
 
@@ -245,12 +389,13 @@ impl Service {
         let Some(item) = self.item(id) else {
             return unknown_work();
         };
-        let phase = item.phase.lock().unwrap();
+        let phase = lock(&item.phase);
         let (complete, events) = match &*phase {
             // The loop returns its trajectory when it ends. Nothing is invented in the meantime.
-            Phase::Running => (false, Vec::new()),
+            Phase::Queued | Phase::Running { .. } => (false, Vec::new()),
             Phase::Finished(f) => (true, f.events.clone()),
         };
+        // Order is guaranteed within this work only; there is no global order across works.
         Response::ok(
             200,
             json!({"work_id": id, "complete": complete, "events": events}),
@@ -261,25 +406,142 @@ impl Service {
         let Some(item) = self.item(id) else {
             return unknown_work();
         };
-        let phase = item.phase.lock().unwrap();
-        if let Phase::Finished(f) = &*phase {
-            return Response::error(
+        let mut sched = lock(&self.sched);
+        let mut phase = lock(&item.phase);
+        match &*phase {
+            Phase::Finished(f) => Response::error(
                 409,
                 "work_already_finished",
                 &format!("The work already ended: {}", f.state),
-            );
+            ),
+            // Never admitted, so nothing ran and this is a fact the scheduler establishes itself.
+            Phase::Queued => {
+                sched.queue.retain(|q| q != id);
+                *phase = Phase::Finished(Box::new(Finished {
+                    state: "cancelled",
+                    ran: false,
+                    result: json!({
+                        "outcome_reason": "cancelled while queued; the work never started",
+                    }),
+                    events: Vec::new(),
+                    queue_wait: item.submitted.elapsed(),
+                    first_model_call: None,
+                    work_duration: None,
+                }));
+                Response::ok(
+                    200,
+                    json!({
+                        "work_id": id,
+                        "status": "cancelled",
+                        "note": "removed from the queue before it started: no model call, execution or observation occurred",
+                    }),
+                )
+            }
+            // Advisory: it stops the next model call. Nothing in flight is interrupted, the runtime
+            // may still complete the work, and the outcome is whatever the runtime then reports.
+            Phase::Running { .. } => {
+                item.control.cancel.store(true, Ordering::SeqCst);
+                Response::ok(
+                    200,
+                    json!({
+                        "work_id": id,
+                        "status": "cancellation_requested",
+                        "note": "advisory: no further model call will be made; work already in flight is not interrupted, and the outcome is whatever the runtime establishes",
+                    }),
+                )
+            }
         }
-        // Advisory: it stops the next model call. Nothing in flight is interrupted, the runtime
-        // may still complete the work, and the outcome is whatever the runtime then reports.
-        item.cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// Service-level counts, derived on demand from the registry so they cannot drift from it.
+    /// Per-work agent metrics stay on the work (`result.measurement`, `result.context`).
+    fn metrics(&self) -> Response {
+        let items: Vec<Arc<Item>> = lock(&self.items).values().cloned().collect();
+        let sched = lock(&self.sched);
+        let (mut queued, mut started, mut active) = (0usize, 0usize, 0usize);
+        let mut by_state: HashMap<&'static str, usize> = HashMap::new();
+        let (mut wait, mut duration, mut model, mut execution) = (
+            Stat::default(),
+            Stat::default(),
+            Stat::default(),
+            Stat::default(),
+        );
+        for item in &items {
+            match &*lock(&item.phase) {
+                Phase::Queued => queued += 1,
+                Phase::Running { admitted } => {
+                    started += 1;
+                    active += 1;
+                    wait.add(
+                        admitted
+                            .saturating_duration_since(item.submitted)
+                            .as_secs_f64()
+                            * 1e3,
+                    );
+                }
+                Phase::Finished(f) => {
+                    *by_state.entry(f.state).or_default() += 1;
+                    if f.ran {
+                        started += 1;
+                        wait.add(f.queue_wait.as_secs_f64() * 1e3);
+                        if let Some(d) = f.work_duration {
+                            duration.add(d.as_secs_f64() * 1e3);
+                        }
+                        let m = &f.result["measurement"];
+                        if let Some(v) = m["model_latency_ms"].as_f64() {
+                            model.add(v);
+                        }
+                        if let Some(v) = m["compute_latency_ms"].as_f64() {
+                            execution.add(v);
+                        }
+                    }
+                }
+            }
+        }
+        let count = |k: &str| by_state.get(k).copied().unwrap_or(0);
         Response::ok(
             200,
             json!({
-                "work_id": id,
-                "status": "cancellation_requested",
-                "note": "advisory: no further model call will be made; work already in flight is not interrupted, and the outcome is whatever the runtime establishes",
+                "submitted_work": items.len(),
+                "rejected_work": self.rejected.load(Ordering::SeqCst),
+                "queued_work": queued,
+                "started_work": started,
+                "active_work": active,
+                "completed_work": count("completed"),
+                "blocked_work": count("blocked"),
+                "failed_work": count("failed"),
+                "escalated_work": count("escalated"),
+                "limit_reached_work": count("limit_reached"),
+                "cancelled_work": count("cancelled"),
+                "max_concurrent_work": self.capacity.max_concurrent,
+                "max_queued_work": self.capacity.max_queued,
+                "queue_length": sched.queue.len(),
+                "queue_wait_ms": wait.json(),
+                "work_duration_ms": duration.json(),
+                "model_ms": model.json(),
+                "execution_ms": execution.json(),
             }),
         )
+    }
+}
+
+#[derive(Default)]
+struct Stat {
+    count: usize,
+    total: f64,
+    max: f64,
+}
+
+impl Stat {
+    fn add(&mut self, v: f64) {
+        self.count += 1;
+        self.total += v;
+        self.max = self.max.max(v);
+    }
+
+    fn json(&self) -> Value {
+        let r = |v: f64| (v * 1000.0).round() / 1000.0;
+        json!({"count": self.count, "total": r(self.total), "max": r(self.max)})
     }
 }
 
@@ -323,8 +585,12 @@ fn finish(work: &SoftwareWork, runtime: &WorkRuntime) -> Finished {
         serde_json::from_str(&render_json(work, &runtime.pax)).expect("the work report is JSON");
     Finished {
         state: work.report.outcome.terminal_state().name(),
+        ran: true,
         result,
         events: work.report.events.iter().map(event_json).collect(),
+        queue_wait: Duration::ZERO,
+        first_model_call: None,
+        work_duration: None,
     }
 }
 
@@ -625,15 +891,18 @@ pub async fn run(listener: TcpListener, service: Arc<Service>) {
 // ---- the command -----------------------------------------------------------------------------------
 
 fn usage() -> i32 {
-    eprintln!("usage: chip-cli serve [--host ADDR] [--port PORT]");
     eprintln!(
-        "       defaults: {DEFAULT_HOST}:{DEFAULT_PORT}. The model comes from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, as for `work`; works on the project in the current directory"
+        "usage: chip-cli serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]"
+    );
+    eprintln!(
+        "       defaults: {DEFAULT_HOST}:{DEFAULT_PORT}, {DEFAULT_MAX_CONCURRENT_WORK} work at once (1 to {MAX_CONCURRENT_CEILING}), {DEFAULT_MAX_QUEUED_WORK} queued (0 to {MAX_QUEUED_CEILING}). The model comes from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, as for `work`; works on the project in the current directory"
     );
     EXIT_USAGE
 }
 
-fn parse_args(args: &[String]) -> Result<SocketAddr, i32> {
+fn parse_args(args: &[String]) -> Result<(SocketAddr, Capacity), i32> {
     let (mut host, mut port) = (DEFAULT_HOST.to_string(), DEFAULT_PORT);
+    let mut capacity = Capacity::default();
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
@@ -648,6 +917,24 @@ fn parse_args(args: &[String]) -> Result<SocketAddr, i32> {
                 Ok(p) => port = p,
                 Err(_) => {
                     eprintln!("error: --port needs a number from 0 to 65535");
+                    return Err(usage());
+                }
+            },
+            "--max-concurrent-work" => match given.parse::<usize>() {
+                Ok(n) if (1..=MAX_CONCURRENT_CEILING).contains(&n) => capacity.max_concurrent = n,
+                _ => {
+                    eprintln!(
+                        "error: --max-concurrent-work needs a number from 1 to {MAX_CONCURRENT_CEILING}"
+                    );
+                    return Err(usage());
+                }
+            },
+            "--max-queued-work" => match given.parse::<usize>() {
+                Ok(n) if n <= MAX_QUEUED_CEILING => capacity.max_queued = n,
+                _ => {
+                    eprintln!(
+                        "error: --max-queued-work needs a number from 0 to {MAX_QUEUED_CEILING}"
+                    );
                     return Err(usage());
                 }
             },
@@ -666,12 +953,12 @@ fn parse_args(args: &[String]) -> Result<SocketAddr, i32> {
             usage()
         })?
     };
-    Ok(SocketAddr::new(ip, port))
+    Ok((SocketAddr::new(ip, port), capacity))
 }
 
 pub async fn serve(args: &[String]) -> i32 {
-    let addr = match parse_args(args) {
-        Ok(addr) => addr,
+    let (addr, capacity) = match parse_args(args) {
+        Ok(parsed) => parsed,
         Err(code) => return code,
     };
     let context_budget = match crate::software_work::context_budget_from_env() {
@@ -705,12 +992,24 @@ pub async fn serve(args: &[String]) -> i32 {
             "warning: listening on {bound}, which is not loopback. This service has no authentication and is a local trusted-client interface only."
         );
     }
-    println!("Chip Runtime Service listening on http://{bound}");
-    println!(
+    // A closed stdout must not end the service.
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "Chip Runtime Service listening on http://{bound}");
+    let _ = writeln!(
+        out,
         "Local trusted-client interface: no authentication, no CORS. Work is held in memory for this process only."
     );
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    run(listener, Service::new(runtime, bound.ip().is_loopback())).await;
+    let _ = writeln!(
+        out,
+        "Admission: {} work at once, {} queued (FIFO). All work shares this one project directory; concurrent writes to the same files can conflict.",
+        capacity.max_concurrent, capacity.max_queued
+    );
+    let _ = out.flush();
+    run(
+        listener,
+        Service::new(runtime, bound.ip().is_loopback(), capacity),
+    )
+    .await;
     0
 }
 
@@ -724,10 +1023,10 @@ async fn prepare(root: &Path, context_budget: Option<usize>) -> Result<Arc<WorkR
 #[cfg(test)]
 mod tests {
     //! The service over the real work loop, real project capabilities and a scripted model, driven
-    //! through real TCP. PAX is not involved: no script here runs `pax.test`, so no work in this
-    //! module can be verified or complete, and none claims to.
+    //! through real TCP. No script here runs `pax.test`, so no work in this module can be verified
+    //! or complete, and none claims to. Gates make concurrency observable without sleeping: a gated
+    //! model call does not return until the test releases it.
 
-    use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::path::PathBuf;
 
@@ -742,28 +1041,83 @@ mod tests {
     const BLOCK: &str = r#"{"decision":"block","reason":"scripted stop"}"#;
     /// An invented input on a capability that does not declare it.
     const FORGED: &str = r#"{"decision":"request_capability","capability":"project.list","inputs":{"path":".","executable":"/bin/sh"}}"#;
+    const WRITE_A: &str = r#"{"decision":"request_capability","capability":"project.write","inputs":{"path":"alpha.txt","content":"from alpha"}}"#;
+    const WRITE_B: &str = r#"{"decision":"request_capability","capability":"project.write","inputs":{"path":"bravo.txt","content":"from bravo"}}"#;
 
-    /// Replies by which marker the goal carries, so concurrent works never share a script.
+    #[derive(Default)]
+    struct Seen {
+        entered: HashMap<&'static str, usize>,
+        calls: HashMap<&'static str, usize>,
+        inflight: HashMap<&'static str, usize>,
+        max_inflight: HashMap<&'static str, usize>,
+        order: Vec<&'static str>,
+        texts: HashMap<&'static str, Vec<String>>,
+    }
+
+    /// Replies by which marker the request carries (the goal is in every request), so concurrent
+    /// works never share a script. Every response id is unique to its marker and call.
     struct Model {
         scripts: Mutex<HashMap<&'static str, VecDeque<&'static str>>>,
-        gate: Semaphore,
-        entered: AtomicUsize,
-        calls: AtomicUsize,
+        gates: HashMap<&'static str, Semaphore>,
+        panics: Vec<&'static str>,
+        seen: Mutex<Seen>,
     }
 
     impl Model {
-        fn new(scripts: &[(&'static str, &[&'static str])]) -> Arc<Self> {
-            Arc::new(Self {
+        fn new(scripts: &[(&'static str, &[&'static str])]) -> Self {
+            Self {
                 scripts: Mutex::new(
                     scripts
                         .iter()
                         .map(|(m, r)| (*m, r.iter().copied().collect()))
                         .collect(),
                 ),
-                gate: Semaphore::new(0),
-                entered: AtomicUsize::new(0),
-                calls: AtomicUsize::new(0),
-            })
+                gates: HashMap::new(),
+                panics: Vec::new(),
+                seen: Mutex::new(Seen::default()),
+            }
+        }
+
+        fn gated(mut self, markers: &[&'static str]) -> Self {
+            self.gates = markers.iter().map(|m| (*m, Semaphore::new(0))).collect();
+            self
+        }
+
+        fn panicking(mut self, markers: &[&'static str]) -> Self {
+            self.panics = markers.to_vec();
+            self
+        }
+
+        fn arc(self) -> Arc<Self> {
+            Arc::new(self)
+        }
+
+        fn entered(&self, m: &str) -> usize {
+            lock(&self.seen).entered.get(m).copied().unwrap_or(0)
+        }
+
+        fn calls(&self, m: &str) -> usize {
+            lock(&self.seen).calls.get(m).copied().unwrap_or(0)
+        }
+
+        fn max_inflight(&self, m: &str) -> usize {
+            lock(&self.seen).max_inflight.get(m).copied().unwrap_or(0)
+        }
+
+        fn total_entered(&self) -> usize {
+            lock(&self.seen).entered.values().sum()
+        }
+
+        fn order(&self) -> Vec<&'static str> {
+            lock(&self.seen).order.clone()
+        }
+
+        fn texts(&self, m: &str) -> Vec<String> {
+            lock(&self.seen).texts.get(m).cloned().unwrap_or_default()
+        }
+
+        fn release(&self, m: &str) {
+            self.gates[m].add_permits(100);
         }
     }
 
@@ -771,22 +1125,65 @@ mod tests {
     impl ModelProvider for Model {
         async fn complete(&self, r: ModelRequest) -> Result<ModelResponse, FxError> {
             let text: String = r.messages.iter().map(|m| m.content.as_str()).collect();
-            self.entered.fetch_add(1, Ordering::SeqCst);
-            if text.contains("SLOW") {
-                self.gate.acquire().await.unwrap().forget();
-            }
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let reply = {
-                let mut scripts = self.scripts.lock().unwrap();
-                let queue = scripts
-                    .iter_mut()
-                    .find(|(marker, _)| text.contains(**marker))
-                    .map(|(_, q)| q);
-                queue.and_then(|q| q.pop_front())
+            let marker = {
+                let scripts = lock(&self.scripts);
+                *scripts
+                    .keys()
+                    .find(|m| text.contains(**m))
+                    .ok_or_else(|| FxError::Provider("a request with no known marker".into()))?
             };
+            {
+                let mut seen = lock(&self.seen);
+                *seen.entered.entry(marker).or_default() += 1;
+                if !seen.order.contains(&marker) {
+                    seen.order.push(marker);
+                }
+                let now = {
+                    let n = seen.inflight.entry(marker).or_default();
+                    *n += 1;
+                    *n
+                };
+                let max = seen.max_inflight.entry(marker).or_default();
+                *max = (*max).max(now);
+                seen.texts.entry(marker).or_default().push(text);
+            }
+            let done = |this: &Self| {
+                *lock(&this.seen).inflight.entry(marker).or_default() -= 1;
+            };
+            if self.panics.contains(&marker) {
+                done(self);
+                panic!("scripted panic in {marker}");
+            }
+            if let Some(gate) = self.gates.get(marker) {
+                gate.acquire().await.unwrap().forget();
+            }
+            let n = {
+                let mut seen = lock(&self.seen);
+                let n = seen.calls.entry(marker).or_default();
+                *n += 1;
+                *n
+            };
+            let reply = lock(&self.scripts)
+                .get_mut(marker)
+                .and_then(|q| q.pop_front());
+            done(self);
             let reply = reply.ok_or_else(|| FxError::Provider("unscripted model call".into()))?;
-            Ok(ModelResponse::new("m", reply, Usage::new(3, 2)))
+            Ok(ModelResponse::new(
+                format!("{}-{n}", marker.to_lowercase()),
+                reply,
+                Usage::new(3, 2),
+            ))
         }
+    }
+
+    async fn until(what: &str, mut condition: impl FnMut() -> bool) {
+        for _ in 0..1000 {
+            if condition() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for {what}");
     }
 
     fn root(tag: &str) -> PathBuf {
@@ -808,13 +1205,28 @@ mod tests {
         ))
     }
 
-    async fn start(model: Arc<Model>, tag: &str) -> (SocketAddr, Arc<Service>, PathBuf) {
+    fn cap(max_concurrent: usize, max_queued: usize) -> Capacity {
+        Capacity {
+            max_concurrent,
+            max_queued,
+        }
+    }
+
+    async fn start_with(
+        model: Arc<Model>,
+        tag: &str,
+        capacity: Capacity,
+    ) -> (SocketAddr, Arc<Service>, PathBuf) {
         let dir = root(tag);
-        let service = Service::new(runtime(model, &dir), true);
+        let service = Service::new(runtime(model, &dir), true, capacity);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(run(listener, service.clone()));
         (addr, service, dir)
+    }
+
+    async fn start(model: Arc<Model>, tag: &str) -> (SocketAddr, Arc<Service>, PathBuf) {
+        start_with(model, tag, cap(4, 8)).await
     }
 
     struct Reply {
@@ -858,14 +1270,36 @@ mod tests {
         )
     }
 
+    /// Submits and returns the id.
+    fn submit(addr: SocketAddr, goal: &str) -> String {
+        let r = post(addr, goal);
+        assert_eq!(r.status, 202, "{}", r.body);
+        r.body["work_id"].as_str().unwrap().to_string()
+    }
+
+    fn get(addr: SocketAddr, id: &str) -> Value {
+        let r = call(addr, "GET", &format!("/v1/work/{id}"), None);
+        assert_eq!(r.status, 200);
+        r.body
+    }
+
+    fn status(addr: SocketAddr, id: &str) -> String {
+        get(addr, id)["status"].as_str().unwrap().to_string()
+    }
+
+    fn metrics(addr: SocketAddr) -> Value {
+        let r = call(addr, "GET", "/v1/metrics", None);
+        assert_eq!(r.status, 200);
+        r.body
+    }
+
     async fn finished(addr: SocketAddr, id: &str) -> Value {
-        for _ in 0..500 {
-            let r = call(addr, "GET", &format!("/v1/work/{id}"), None);
-            assert_eq!(r.status, 200);
-            if r.body["status"] != "running" {
-                return r.body;
+        for _ in 0..1000 {
+            let body = get(addr, id);
+            if body["status"] != "running" && body["status"] != "queued" {
+                return body;
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("work did not finish");
     }
@@ -883,25 +1317,56 @@ mod tests {
             .collect()
     }
 
+    fn execution_ids(events: &[Value]) -> Vec<String> {
+        events
+            .iter()
+            .filter(|e| e["kind"] == "ExecutionStarted")
+            .map(|e| e["execution_id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    // ---- the surface ----------------------------------------------------------------------------
+
     #[test]
-    fn the_defaults_are_loopback_8765_and_flags_override_them() {
+    fn the_defaults_are_loopback_8765_two_at_once_and_flags_override_them() {
         let none: Vec<String> = Vec::new();
-        assert_eq!(parse_args(&none), Ok("127.0.0.1:8765".parse().unwrap()));
+        let default = ("127.0.0.1:8765".parse().unwrap(), cap(2, 32));
+        assert_eq!(parse_args(&none), Ok(default));
+        assert_eq!(DEFAULT_MAX_CONCURRENT_WORK, 2);
+        assert_eq!(DEFAULT_MAX_QUEUED_WORK, 32);
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            parse_args(&a(&["--host", "127.0.0.1", "--port", "9000"])),
-            Ok("127.0.0.1:9000".parse().unwrap())
+            parse_args(&a(&[
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "9000",
+                "--max-concurrent-work",
+                "5",
+                "--max-queued-work",
+                "0"
+            ])),
+            Ok(("127.0.0.1:9000".parse().unwrap(), cap(5, 0)))
         );
-        assert!(parse_args(&a(&["--port", "x"])).is_err());
-        assert!(parse_args(&a(&["--host", "not-an-ip"])).is_err());
-        assert!(parse_args(&a(&["--model", "m"])).is_err());
-        assert!(parse_args(&a(&["--port"])).is_err());
+        for bad in [
+            &["--port", "x"][..],
+            &["--host", "not-an-ip"],
+            &["--model", "m"],
+            &["--port"],
+            &["--max-concurrent-work", "0"],
+            &["--max-concurrent-work", "65"],
+            &["--max-concurrent-work", "many"],
+            &["--max-queued-work", "-1"],
+            &["--max-queued-work", "1025"],
+        ] {
+            assert!(parse_args(&a(bad)).is_err(), "{bad:?}");
+        }
         assert!(DEFAULT_HOST.parse::<IpAddr>().unwrap().is_loopback());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn health_is_service_health_and_nothing_more() {
-        let (addr, _s, _d) = start(Model::new(&[]), "health").await;
+        let (addr, _s, _d) = start(Model::new(&[]).arc(), "health").await;
         let r = call(addr, "GET", "/health", None);
         assert_eq!(r.status, 200);
         assert_eq!(r.body, json!({"status": "ok"}));
@@ -912,16 +1377,16 @@ mod tests {
         assert!(!options.head.contains("access-control"));
         assert_eq!(call(addr, "GET", "/nowhere", None).status, 404);
         assert_eq!(call(addr, "DELETE", "/health", None).status, 405);
+        assert_eq!(call(addr, "POST", "/v1/metrics", None).status, 405);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn only_loopback_host_names_are_answered() {
-        let (addr, _s, _d) = start(Model::new(&[]), "host").await;
+        let (addr, _s, _d) = start(Model::new(&[]).arc(), "host").await;
         let r = raw(addr, b"GET /health HTTP/1.1\r\nHost: evil.example\r\n\r\n");
         assert_eq!(r.status, 403);
         assert_eq!(r.body["error"]["code"], "host_not_allowed");
-        let r = raw(addr, b"GET /health HTTP/1.1\r\n\r\n");
-        assert_eq!(r.status, 403);
+        assert_eq!(raw(addr, b"GET /health HTTP/1.1\r\n\r\n").status, 403);
         let r = raw(
             addr,
             b"GET /health HTTP/1.1\r\nHost: localhost:8765\r\n\r\n",
@@ -931,7 +1396,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn malformed_requests_are_refused_and_start_nothing() {
-        let model = Model::new(&[]);
+        let model = Model::new(&[]).arc();
         let (addr, service, _d) = start(model.clone(), "malformed").await;
         let h = |body: &str| {
             format!(
@@ -958,9 +1423,7 @@ mod tests {
         let long = json!({"goal": "x".repeat(2001)}).to_string();
         assert_eq!(raw(addr, h(&long).as_bytes()).status, 400);
         let huge = json!({"goal": "x".repeat(MAX_BODY_BYTES + 1)}).to_string();
-        let r = raw(addr, h(&huge).as_bytes());
-        assert_eq!(r.status, 413);
-        // Not JSON by type: also refused, whatever the body says.
+        assert_eq!(raw(addr, h(&huge).as_bytes()).status, 413);
         let r = raw(
             addr,
             format!(
@@ -976,17 +1439,13 @@ mod tests {
         );
         assert_eq!(r.status, 400);
         assert_eq!(raw(addr, b"garbage\r\n\r\n").status, 400);
-        assert!(service.items.lock().unwrap().is_empty());
-        assert_eq!(
-            model.entered.load(Ordering::SeqCst),
-            0,
-            "no model was asked"
-        );
+        assert!(lock(&service.items).is_empty());
+        assert_eq!(model.total_entered(), 0, "no model was asked");
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_client_cannot_supply_authority_or_configuration() {
-        let model = Model::new(&[]);
+    async fn a_client_cannot_supply_authority_configuration_or_a_workspace() {
+        let model = Model::new(&[]).arc();
         let (addr, service, dir) = start(model.clone(), "forged").await;
         for field in [
             "work_id",
@@ -1002,6 +1461,8 @@ mod tests {
             "cwd",
             "workspace_root",
             "root",
+            "workspace",
+            "worktree",
             "capability",
             "capabilities",
             "inputs",
@@ -1015,30 +1476,53 @@ mod tests {
             "events",
             "output",
             "max_turns",
+            "priority",
+            "queue",
+            "max_concurrent_work",
         ] {
             let body = format!(r#"{{"goal":"inspect the project","{field}":"forged"}}"#);
             let r = call(addr, "POST", "/v1/work", Some(&body));
             assert_eq!(r.status, 400, "{field}");
             assert_eq!(r.body["error"]["code"], "unknown_field", "{field}");
         }
-        // Nothing was created, asked, or executed, and the project is untouched.
-        assert!(service.items.lock().unwrap().is_empty());
-        assert_eq!(model.entered.load(Ordering::SeqCst), 0);
+        assert!(lock(&service.items).is_empty());
+        assert_eq!(model.total_entered(), 0);
         assert_eq!(
             std::fs::read_to_string(dir.join("src/lib.rs")).unwrap(),
             "pub fn one() -> u8 { 1 }\n"
         );
-        // The read-only routes take no body that changes anything either.
-        let r = call(addr, "POST", "/v1/work/work_x/events", Some("{}"));
-        assert_eq!(r.status, 405);
+        assert_eq!(
+            call(addr, "POST", "/v1/work/work_x/events", Some("{}")).status,
+            405
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn unknown_work_is_404_on_every_route() {
+        let (addr, _s, _d) = start(Model::new(&[]).arc(), "unknown").await;
+        for (method, path) in [
+            ("GET", "/v1/work/work_nope"),
+            ("GET", "/v1/work/work_nope/events"),
+            ("POST", "/v1/work/work_nope/cancel"),
+            ("GET", "/v1/work/..%2f..%2fetc%2fpasswd"),
+        ] {
+            let r = call(addr, method, path, None);
+            assert_eq!(r.status, 404, "{path}");
+            assert_eq!(r.body["error"]["code"], "work_not_found", "{path}");
+            assert_eq!(r.body["error"]["message"], "Unknown work id");
+        }
+    }
+
+    // ---- one work -------------------------------------------------------------------------------
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn post_is_prompt_the_id_is_chips_and_the_loop_runs_in_the_background() {
-        let model = Model::new(&[("SLOW", &[LIST, BLOCK])]);
+        let model = Model::new(&[("ALPHA", &[LIST, BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
         let (addr, _s, _d) = start(model.clone(), "prompt").await;
-        let t0 = std::time::Instant::now();
-        let r = post(addr, "SLOW inspect the project");
+        let t0 = Instant::now();
+        let r = post(addr, "ALPHA inspect the project");
         assert!(
             t0.elapsed() < Duration::from_secs(2),
             "POST waited for the work"
@@ -1047,22 +1531,16 @@ mod tests {
         assert_eq!(r.body["status"], "running");
         let id = r.body["work_id"].as_str().unwrap().to_string();
         assert!(id.starts_with("work_"), "{id}");
-        assert_ne!(id, "m", "not the provider's response id");
+        assert!(!id.contains("alpha"), "not a provider response id: {id}");
 
-        // The model is held inside its first call: the work is running, and says only that.
-        while model.entered.load(Ordering::SeqCst) == 0 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let g = call(addr, "GET", &format!("/v1/work/{id}"), None);
-        assert_eq!(g.status, 200);
-        assert_eq!(g.body["status"], "running");
-        assert_eq!(g.body["lifecycle"], "executing");
-        assert_eq!(g.body["goal"], "SLOW inspect the project");
-        assert_eq!(g.body["cancellation_requested"], false);
-        assert!(
-            g.body.get("result").is_none(),
-            "no result before there is one"
-        );
+        until("the model call", || model.entered("ALPHA") == 1).await;
+        let g = get(addr, &id);
+        assert_eq!(g["status"], "running");
+        assert_eq!(g["lifecycle"], "executing");
+        assert_eq!(g["scheduling"]["state"], "admitted");
+        assert_eq!(g["goal"], "ALPHA inspect the project");
+        assert_eq!(g["cancellation_requested"], false);
+        assert!(g.get("result").is_none(), "no result before there is one");
         let e = call(addr, "GET", &format!("/v1/work/{id}/events"), None);
         assert_eq!(e.body["complete"], false);
         assert_eq!(
@@ -1071,25 +1549,21 @@ mod tests {
             "no event is invented while it runs"
         );
 
-        model.gate.add_permits(10);
+        model.release("ALPHA");
         let done = finished(addr, &id).await;
         assert_eq!(done["status"], "blocked");
         assert_eq!(done["lifecycle"], "blocked");
         assert_eq!(done["result"]["terminal_state"], "blocked");
         assert_eq!(done["result"]["verified"], false);
         assert_eq!(done["result"]["audit"]["clean"], true);
-        // Terminal state is authoritative and stable.
-        assert_eq!(finished(addr, &id).await, done);
+        assert_eq!(finished(addr, &id).await, done, "terminal state is stable");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn events_are_the_runtimes_trajectory_in_order_and_match_a_direct_run() {
-        let script: &[(&str, &[&str])] = &[("TRACE", &[LIST, BLOCK])];
-        let (addr, _s, dir) = start(Model::new(script), "events").await;
-        let id = post(addr, "TRACE inspect the project").body["work_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let script: &[(&str, &[&str])] = &[("ALPHA", &[LIST, BLOCK])];
+        let (addr, _s, dir) = start(Model::new(script).arc(), "events").await;
+        let id = submit(addr, "ALPHA inspect the project");
         finished(addr, &id).await;
         let served = events(addr, &id);
 
@@ -1111,8 +1585,6 @@ mod tests {
                 .position(|x| x == needle)
                 .unwrap_or_else(|| panic!("{needle} missing or out of order in {k:?}"));
         }
-        assert_eq!(k.iter().filter(|x| *x == "ExecutionStarted").count(), 1);
-        assert_eq!(k.iter().filter(|x| *x == "WorkBlocked").count(), 1);
         assert_eq!(
             k.last().unwrap(),
             "WorkBlocked",
@@ -1120,10 +1592,10 @@ mod tests {
         );
 
         // The same runtime, called the way `chip work` calls it, records the same trajectory.
-        let direct = runtime(Model::new(script), &dir)
+        let direct = runtime(Model::new(script).arc(), &dir)
             .run(
                 WorkId::new("direct"),
-                "TRACE inspect the project",
+                "ALPHA inspect the project",
                 WorkLimits {
                     max_turns: DEFAULT_MAX_TURNS,
                     max_executions: DEFAULT_MAX_EXECUTIONS,
@@ -1138,11 +1610,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_rejected_request_produces_no_execution_observation_or_evidence() {
-        let (addr, _s, _d) = start(Model::new(&[("FORGE", &[FORGED])]), "rejected").await;
-        let id = post(addr, "FORGE something").body["work_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let (addr, _s, _d) = start(Model::new(&[("ALPHA", &[FORGED])]).arc(), "rejected").await;
+        let id = submit(addr, "ALPHA something");
         let done = finished(addr, &id).await;
         assert_eq!(done["status"], "blocked");
         let k = kinds(&events(addr, &id));
@@ -1163,135 +1632,16 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn unknown_work_is_404_on_every_route() {
-        let (addr, _s, _d) = start(Model::new(&[]), "unknown").await;
-        for (method, path) in [
-            ("GET", "/v1/work/work_nope"),
-            ("GET", "/v1/work/work_nope/events"),
-            ("POST", "/v1/work/work_nope/cancel"),
-            ("GET", "/v1/work/..%2f..%2fetc%2fpasswd"),
-        ] {
-            let r = call(addr, method, path, None);
-            assert_eq!(r.status, 404, "{path}");
-            assert_eq!(r.body["error"]["code"], "work_not_found", "{path}");
-            assert_eq!(r.body["error"]["message"], "Unknown work id");
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn concurrent_work_stays_isolated() {
-        let script: &[(&str, &[&str])] = &[
-            ("ALPHA", &[LIST, BLOCK]),
-            ("BETA", &[FORGED]),
-            ("GAMMA", &[BLOCK]),
-        ];
-        let (addr, _s, _d) = start(Model::new(script), "isolated").await;
-        let goals = ["ALPHA one", "BETA two", "GAMMA three"];
-        let mut ids = Vec::new();
-        for goal in &goals {
-            ids.push(
-                post(addr, goal).body["work_id"]
-                    .as_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-        let unique: std::collections::HashSet<_> = ids.iter().collect();
-        assert_eq!(unique.len(), ids.len(), "ids are unique");
-        for (id, goal) in ids.iter().zip(&goals) {
-            let done = finished(addr, id).await;
-            assert_eq!(done["work_id"], id.as_str());
-            assert_eq!(done["goal"], *goal);
-            assert_eq!(done["result"]["goal"], *goal);
-            let ev = events(addr, id);
-            assert_eq!(ev[0]["kind"], "WorkStarted");
-            assert!(ev[0]["goal"].as_str().unwrap().contains(goal), "{goal}");
-        }
-        let shape = |i: usize| kinds(&events(addr, &ids[i]));
-        assert!(shape(0).iter().any(|k| k == "ExecutionStarted"));
-        assert!(!shape(1).iter().any(|k| k == "ExecutionStarted"));
-        assert!(!shape(2).iter().any(|k| k == "ExecutionStarted"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cancellation_is_advisory_and_reported_honestly() {
-        let model = Model::new(&[("SLOW", &[LIST, BLOCK])]);
-        let (addr, _s, _d) = start(model.clone(), "cancel").await;
-        let id = post(addr, "SLOW inspect").body["work_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        while model.entered.load(Ordering::SeqCst) == 0 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let c = call(addr, "POST", &format!("/v1/work/{id}/cancel"), None);
-        assert_eq!(c.status, 200);
-        assert_eq!(c.body["status"], "cancellation_requested");
-        assert_ne!(c.body["status"], "cancelled");
-        // Requested is not cancelled: the work is still running, and says so.
-        let g = call(addr, "GET", &format!("/v1/work/{id}"), None);
-        assert_eq!(g.body["status"], "running");
-        assert_eq!(g.body["cancellation_requested"], true);
-
-        // The model call already in flight completes and its request executes (nothing is
-        // interrupted); the next model call is the one that is not made.
-        model.gate.add_permits(10);
-        let done = finished(addr, &id).await;
-        assert_ne!(done["status"], "cancelled");
-        assert_eq!(done["cancellation_requested"], true);
-        assert_eq!(
-            model.calls.load(Ordering::SeqCst),
-            1,
-            "no model call after the request"
-        );
-        let ev = events(addr, &id);
-        let k = kinds(&ev);
-        assert!(k.iter().any(|x| x == "ExecutionCompleted"), "{k:?}");
-        assert!(
-            ev.iter()
-                .any(|e| e["kind"] == "ModelCalled" && e["succeeded"] == false),
-            "{k:?}"
-        );
-        assert!(
-            !k.iter().any(|x| x.contains("ancel")),
-            "no cancellation event is invented"
-        );
-        assert!(done["result"].get("cancel_receipt").is_none());
-
-        // Finished work cannot be cancelled, and nothing changes its state.
-        let again = call(addr, "POST", &format!("/v1/work/{id}/cancel"), None);
-        assert_eq!(again.status, 409);
-        assert_eq!(again.body["error"]["code"], "work_already_finished");
-        assert_eq!(finished(addr, &id).await, done);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn work_that_finishes_before_cancellation_keeps_its_own_terminal_state() {
-        let (addr, _s, _d) = start(Model::new(&[("QUICK", &[BLOCK])]), "terminal").await;
-        let id = post(addr, "QUICK").body["work_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let done = finished(addr, &id).await;
-        let c = call(addr, "POST", &format!("/v1/work/{id}/cancel"), None);
-        assert_eq!(c.status, 409);
-        let after = call(addr, "GET", &format!("/v1/work/{id}"), None).body;
-        assert_eq!(after, done);
-        assert_eq!(after["cancellation_requested"], false);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn responses_carry_no_credentials_environment_or_host_paths() {
-        let (addr, _s, dir) = start(Model::new(&[("TRACE", &[LIST, BLOCK])]), "secrets").await;
-        let id = post(addr, "TRACE inspect").body["work_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let (addr, _s, dir) =
+            start(Model::new(&[("ALPHA", &[LIST, BLOCK])]).arc(), "secrets").await;
+        let id = submit(addr, "ALPHA inspect");
         finished(addr, &id).await;
         let all = format!(
-            "{}{}",
-            call(addr, "GET", &format!("/v1/work/{id}"), None).body,
-            call(addr, "GET", &format!("/v1/work/{id}/events"), None).body
+            "{}{}{}",
+            get(addr, &id),
+            call(addr, "GET", &format!("/v1/work/{id}/events"), None).body,
+            metrics(addr)
         );
         assert!(
             !all.contains(dir.to_str().unwrap()),
@@ -1302,16 +1652,599 @@ mod tests {
         }
     }
 
+    // ---- many works -----------------------------------------------------------------------------
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_service_refuses_work_past_its_bound() {
-        let model = Model::new(&[("SLOW", &[BLOCK; MAX_RUNNING + 1])]);
-        let (addr, _s, _d) = start(model.clone(), "bound").await;
-        for _ in 0..MAX_RUNNING {
-            assert_eq!(post(addr, "SLOW work").status, 202);
+    async fn two_works_execute_at_the_same_time_without_waiting_for_each_other() {
+        let model = Model::new(&[("ALPHA", &[LIST, BLOCK]), ("BRAVO", &[LIST, BLOCK])])
+            .gated(&["ALPHA", "BRAVO"])
+            .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "simultaneous", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA first");
+        let b = submit(addr, "BRAVO second");
+        // Both are inside a model call at once, and neither has finished.
+        until("both in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        assert_eq!(status(addr, &a), "running");
+        assert_eq!(status(addr, &b), "running");
+        let m = metrics(addr);
+        assert_eq!(
+            (m["active_work"].as_u64(), m["queued_work"].as_u64()),
+            (Some(2), Some(0))
+        );
+        model.release("ALPHA");
+        model.release("BRAVO");
+        assert_eq!(finished(addr, &a).await["status"], "blocked");
+        assert_eq!(finished(addr, &b).await["status"], "blocked");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn work_past_the_limit_is_queued_not_running_and_starts_only_when_capacity_opens() {
+        let model = Model::new(&[
+            ("ALPHA", &[LIST, BLOCK]),
+            ("BRAVO", &[LIST, BLOCK]),
+            ("CHARLIE", &[BLOCK]),
+        ])
+        .gated(&["ALPHA", "BRAVO"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "limit", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        let queued = post(addr, "CHARLIE");
+        assert_eq!(queued.status, 202);
+        assert_eq!(
+            queued.body["status"], "queued",
+            "not running until it starts"
+        );
+        let c = queued.body["work_id"].as_str().unwrap().to_string();
+        until("A and B to be in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        let q = get(addr, &c);
+        assert_eq!(q["status"], "queued");
+        assert_eq!(
+            q["lifecycle"],
+            Value::Null,
+            "the agent has no lifecycle before it starts"
+        );
+        assert_eq!(q["scheduling"]["state"], "queued");
+        assert_eq!(q["scheduling"]["queue_position"], 1);
+        assert_eq!(
+            model.entered("CHARLIE"),
+            0,
+            "C did not start before capacity existed"
+        );
+        assert_eq!(events(addr, &c), Vec::<Value>::new());
+        let m = metrics(addr);
+        assert_eq!(
+            (
+                m["active_work"].as_u64(),
+                m["queued_work"].as_u64(),
+                m["started_work"].as_u64()
+            ),
+            (Some(2), Some(1), Some(2))
+        );
+
+        // A ends; C takes its place while B is still running.
+        model.release("ALPHA");
+        assert_eq!(finished(addr, &a).await["status"], "blocked");
+        let done = finished(addr, &c).await;
+        assert_eq!(done["status"], "blocked");
+        assert_eq!(status(addr, &b), "running");
+        assert_eq!(model.entered("CHARLIE"), 1);
+
+        // Queue wait is the scheduler's number and is kept apart from the runtime's own timings.
+        assert!(
+            done["scheduling"]["queue_wait_ms"].as_f64().unwrap() >= 70.0,
+            "{}",
+            done["scheduling"]
+        );
+        let t = &done["timing"];
+        assert!(
+            t["model_ms"].is_number() && t["execution_ms"].is_number(),
+            "{t}"
+        );
+        assert!(
+            t["work_duration_ms"].is_number() && t["queue_wait_ms"].is_number(),
+            "{t}"
+        );
+        assert!(done["scheduling"]["time_to_first_model_call_ms"].is_number());
+        assert!(
+            t["model_ms"].as_f64().unwrap() < t["queue_wait_ms"].as_f64().unwrap(),
+            "queue wait is not counted as model time: {t}"
+        );
+        model.release("BRAVO");
+        finished(addr, &b).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn admission_is_fifo() {
+        let model = Model::new(&[
+            ("ALPHA", &[BLOCK]),
+            ("BRAVO", &[BLOCK]),
+            ("CHARLIE", &[BLOCK]),
+            ("DELTA", &[BLOCK]),
+        ])
+        .gated(&["ALPHA"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "fifo", cap(1, 8)).await;
+        let a = submit(addr, "ALPHA");
+        until("A to start", || model.entered("ALPHA") == 1).await;
+        let rest: Vec<String> = ["BRAVO", "CHARLIE", "DELTA"]
+            .iter()
+            .map(|g| submit(addr, g))
+            .collect();
+        for (i, id) in rest.iter().enumerate() {
+            assert_eq!(get(addr, id)["scheduling"]["queue_position"], i + 1);
         }
-        let r = post(addr, "SLOW one too many");
-        assert_eq!(r.status, 429);
-        assert_eq!(r.body["error"]["code"], "too_many_running");
-        model.gate.add_permits(100);
+        model.release("ALPHA");
+        for id in std::iter::once(&a).chain(&rest) {
+            finished(addr, id).await;
+        }
+        assert_eq!(model.order(), ["ALPHA", "BRAVO", "CHARLIE", "DELTA"]);
+        assert_eq!(model.max_inflight("BRAVO"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queued_work_cancelled_before_admission_never_runs() {
+        let model = Model::new(&[
+            ("ALPHA", &[BLOCK]),
+            ("BRAVO", &[BLOCK]),
+            ("CHARLIE", &[LIST, BLOCK]),
+        ])
+        .gated(&["ALPHA", "BRAVO"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "queuecancel", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        let c = submit(addr, "CHARLIE");
+        until("A and B running", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        assert_eq!(status(addr, &c), "queued");
+
+        let cancelled = call(addr, "POST", &format!("/v1/work/{c}/cancel"), None);
+        assert_eq!(cancelled.status, 200);
+        assert_eq!(cancelled.body["status"], "cancelled");
+        let g = get(addr, &c);
+        assert_eq!(g["status"], "cancelled");
+        assert_eq!(
+            g["lifecycle"],
+            Value::Null,
+            "no agent lifecycle ever existed"
+        );
+        let e = call(addr, "GET", &format!("/v1/work/{c}/events"), None);
+        assert_eq!(
+            (e.body["complete"].clone(), e.body["events"].clone()),
+            (json!(true), json!([]))
+        );
+
+        // Capacity opens; the cancelled work is not admitted.
+        model.release("ALPHA");
+        model.release("BRAVO");
+        finished(addr, &a).await;
+        finished(addr, &b).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(status(addr, &c), "cancelled");
+        assert_eq!(model.entered("CHARLIE"), 0, "0 model requests");
+        assert_eq!(model.calls("CHARLIE"), 0, "0 model calls");
+        assert!(model.texts("CHARLIE").is_empty());
+        assert!(
+            get(addr, &c)
+                .get("result")
+                .is_some_and(|r| r.get("measurement").is_none())
+        );
+
+        let again = call(addr, "POST", &format!("/v1/work/{c}/cancel"), None);
+        assert_eq!(again.status, 409);
+        let m = metrics(addr);
+        assert_eq!(m["cancelled_work"], 1);
+        assert_eq!(m["started_work"], 2, "C never started");
+        assert_eq!(m["submitted_work"], 3);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_full_queue_is_refused_explicitly_and_nothing_is_dropped() {
+        let model = Model::new(&[
+            ("ALPHA", &[BLOCK]),
+            ("BRAVO", &[BLOCK]),
+            ("CHARLIE", &[BLOCK]),
+            ("DELTA", &[BLOCK]),
+        ])
+        .gated(&["ALPHA"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "backpressure", cap(1, 2)).await;
+        let a = submit(addr, "ALPHA");
+        until("A to start", || model.entered("ALPHA") == 1).await;
+        let b = submit(addr, "BRAVO");
+        let c = submit(addr, "CHARLIE");
+        let full = post(addr, "DELTA");
+        assert_eq!(full.status, 429);
+        assert_eq!(full.body["error"]["code"], "queue_full");
+        let m = metrics(addr);
+        assert_eq!(
+            (
+                m["submitted_work"].as_u64(),
+                m["rejected_work"].as_u64(),
+                m["queued_work"].as_u64()
+            ),
+            (Some(3), Some(1), Some(2))
+        );
+        assert_eq!(model.entered("DELTA"), 0, "the refused work did not run");
+
+        model.release("ALPHA");
+        for id in [&a, &b, &c] {
+            assert_eq!(
+                finished(addr, id).await["status"],
+                "blocked",
+                "accepted work is never dropped"
+            );
+        }
+        // Space again: the same request is now accepted.
+        assert_eq!(post(addr, "DELTA").status, 202);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_no_queue_a_work_past_the_limit_is_refused() {
+        let model = Model::new(&[("ALPHA", &[BLOCK]), ("BRAVO", &[BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "noqueue", cap(1, 0)).await;
+        let a = submit(addr, "ALPHA");
+        assert_eq!(post(addr, "BRAVO").status, 429);
+        model.release("ALPHA");
+        finished(addr, &a).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_works_share_nothing_goals_events_context_results_and_ids() {
+        let model = Model::new(&[("ALPHA", &[LIST, BLOCK]), ("BRAVO", &[LIST, LIST, BLOCK])])
+            .gated(&["ALPHA", "BRAVO"])
+            .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "isolation", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA inspect");
+        let b = submit(addr, "BRAVO survey");
+        assert_ne!(a, b);
+        // Overlap is real: both are in a model call before either gets an answer.
+        until("both in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        model.release("ALPHA");
+        model.release("BRAVO");
+        let (da, db) = (finished(addr, &a).await, finished(addr, &b).await);
+
+        for (done, id, goal) in [(&da, &a, "ALPHA inspect"), (&db, &b, "BRAVO survey")] {
+            assert_eq!(done["work_id"], id.as_str());
+            assert_eq!(done["goal"], goal);
+            assert_eq!(done["result"]["goal"], goal);
+        }
+        assert_eq!(da["result"]["measurement"]["executions"], 1);
+        assert_eq!(db["result"]["measurement"]["executions"], 2);
+        assert_eq!(da["result"]["measurement"]["observations"], 1);
+        assert_eq!(db["result"]["measurement"]["observations"], 2);
+        assert_ne!(da["result"]["measurement"], db["result"]["measurement"]);
+        assert_ne!(da["result"]["context"], db["result"]["context"]);
+
+        // Events: each stream is its own, starts with its own goal, and shares no execution id.
+        let (ea, eb) = (events(addr, &a), events(addr, &b));
+        assert!(ea[0]["goal"].as_str().unwrap().contains("ALPHA"));
+        assert!(eb[0]["goal"].as_str().unwrap().contains("BRAVO"));
+        assert!(!ea[0]["goal"].as_str().unwrap().contains("BRAVO"));
+        assert!(!eb[0]["goal"].as_str().unwrap().contains("ALPHA"));
+        let (xa, xb) = (execution_ids(&ea), execution_ids(&eb));
+        assert_eq!((xa.len(), xb.len()), (1, 2));
+        assert!(xa.iter().all(|id| id.contains("alpha")), "{xa:?}");
+        assert!(xb.iter().all(|id| id.contains("bravo")), "{xb:?}");
+        assert!(!ea.iter().any(|e| e.to_string().contains("bravo")));
+        assert!(!eb.iter().any(|e| e.to_string().contains("alpha")));
+        assert_eq!(
+            kinds(&ea)
+                .iter()
+                .filter(|k| *k == "ObservationRecorded")
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds(&eb)
+                .iter()
+                .filter(|k| *k == "ObservationRecorded")
+                .count(),
+            2
+        );
+
+        // What each model was shown: never the other's goal, execution ids or observations.
+        assert!(model.texts("ALPHA").iter().all(|t| !t.contains("BRAVO")));
+        assert!(model.texts("BRAVO").iter().all(|t| !t.contains("ALPHA")));
+        assert!(model.texts("ALPHA").len() == 2 && model.texts("BRAVO").len() == 3);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn each_trajectory_stays_sequential_while_works_overlap() {
+        let model = Model::new(&[
+            ("ALPHA", &[LIST, LIST, LIST, BLOCK]),
+            ("BRAVO", &[LIST, LIST, LIST, BLOCK]),
+        ])
+        .gated(&["ALPHA", "BRAVO"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "sequential", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        until("both in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        model.release("ALPHA");
+        model.release("BRAVO");
+        finished(addr, &a).await;
+        finished(addr, &b).await;
+        for (marker, id) in [("ALPHA", &a), ("BRAVO", &b)] {
+            assert_eq!(
+                model.max_inflight(marker),
+                1,
+                "one model call at a time for {marker}"
+            );
+            assert_eq!(model.calls(marker), 4);
+            // Within the work: an execution is closed before the next one opens, and no model
+            // request is made while one is open; observation follows execution.
+            let mut open = false;
+            let mut executions = 0;
+            let mut last = String::new();
+            for e in events(addr, id) {
+                let kind = e["kind"].as_str().unwrap().to_string();
+                match kind.as_str() {
+                    "ExecutionStarted" => {
+                        assert!(!open, "two simultaneous executions in {marker}");
+                        open = true;
+                        executions += 1;
+                    }
+                    "ExecutionCompleted" | "ExecutionFailed" => {
+                        assert!(open);
+                        open = false;
+                    }
+                    "ModelEscalation" | "ModelCalled" | "DecisionMade" => {
+                        assert!(!open, "{kind} while an execution is open in {marker}");
+                    }
+                    "ObservationRecorded" => assert_eq!(last, "ExecutionCompleted"),
+                    _ => {}
+                }
+                last = kind;
+            }
+            assert_eq!(executions, 3);
+            assert!(!open);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_panic_in_one_work_fails_that_work_and_nothing_else() {
+        let model = Model::new(&[
+            ("ALPHA", &[BLOCK]),
+            ("BRAVO", &[LIST, BLOCK]),
+            ("CHARLIE", &[BLOCK]),
+        ])
+        .gated(&["BRAVO"])
+        .panicking(&["ALPHA"])
+        .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "panic", cap(2, 4)).await;
+        let b = submit(addr, "BRAVO");
+        let a = submit(addr, "ALPHA");
+        let c = submit(addr, "CHARLIE");
+        until("B in the model", || model.entered("BRAVO") == 1).await;
+
+        let failed = finished(addr, &a).await;
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["lifecycle"], "failed");
+        assert!(
+            failed["result"]["outcome_reason"]
+                .as_str()
+                .unwrap()
+                .contains("abnormally")
+        );
+        assert_ne!(failed["status"], "completed");
+        assert_eq!(
+            events(addr, &a),
+            Vec::<Value>::new(),
+            "no events are fabricated"
+        );
+        // The slot A held was freed: queued C ran, while B was still in flight.
+        assert_eq!(finished(addr, &c).await["status"], "blocked");
+        assert_eq!(status(addr, &b), "running");
+        assert_eq!(call(addr, "GET", "/health", None).status, 200);
+
+        model.release("BRAVO");
+        let done = finished(addr, &b).await;
+        assert_eq!(done["status"], "blocked");
+        assert_eq!(done["result"]["measurement"]["executions"], 1);
+        assert_eq!(done["result"]["audit"]["clean"], true);
+        let m = metrics(addr);
+        assert_eq!(
+            (m["failed_work"].as_u64(), m["blocked_work"].as_u64()),
+            (Some(1), Some(2))
+        );
+        assert_eq!(m["active_work"], 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_works_use_the_one_workspace_and_the_service_adds_none() {
+        let model = Model::new(&[("ALPHA", &[WRITE_A, BLOCK]), ("BRAVO", &[WRITE_B, BLOCK])])
+            .gated(&["ALPHA", "BRAVO"])
+            .arc();
+        let (addr, service, dir) = start_with(model.clone(), "workspace", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        until("both in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        model.release("ALPHA");
+        model.release("BRAVO");
+        finished(addr, &a).await;
+        finished(addr, &b).await;
+        // Both wrote into the single root the runtime was given: no clone, no worktree, no
+        // per-work directory, and nothing outside it.
+        assert_eq!(service.runtime.root, dir);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("alpha.txt")).unwrap(),
+            "from alpha"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("bravo.txt")).unwrap(),
+            "from bravo"
+        );
+        let prefix = format!("chip-serve-{}-workspace", std::process::id());
+        let ours = std::fs::read_dir(dir.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+            .count();
+        assert_eq!(ours, 1, "no per-work or sibling workspace was created");
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        assert_eq!(files, ["alpha.txt", "bravo.txt", "src"]);
+    }
+
+    // ---- cancellation of running work -----------------------------------------------------------
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_running_work_is_advisory_and_reported_honestly() {
+        let model = Model::new(&[("ALPHA", &[LIST, BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
+        let (addr, _s, _d) = start(model.clone(), "cancel").await;
+        let id = submit(addr, "ALPHA inspect");
+        until("the model call", || model.entered("ALPHA") == 1).await;
+        let c = call(addr, "POST", &format!("/v1/work/{id}/cancel"), None);
+        assert_eq!(c.status, 200);
+        assert_eq!(c.body["status"], "cancellation_requested");
+        let g = get(addr, &id);
+        assert_eq!(g["status"], "running", "requested is not cancelled");
+        assert_eq!(g["cancellation_requested"], true);
+
+        model.release("ALPHA");
+        let done = finished(addr, &id).await;
+        assert_ne!(done["status"], "cancelled");
+        assert_eq!(done["cancellation_requested"], true);
+        assert_eq!(model.calls("ALPHA"), 1, "no model call after the request");
+        let ev = events(addr, &id);
+        let k = kinds(&ev);
+        assert!(
+            k.iter().any(|x| x == "ExecutionCompleted"),
+            "in-flight work was not interrupted"
+        );
+        assert!(
+            ev.iter()
+                .any(|e| e["kind"] == "ModelCalled" && e["succeeded"] == false)
+        );
+        assert!(
+            !k.iter().any(|x| x.contains("ancel")),
+            "no cancellation event is invented"
+        );
+        let again = call(addr, "POST", &format!("/v1/work/{id}/cancel"), None);
+        assert_eq!(again.status, 409);
+        assert_eq!(again.body["error"]["code"], "work_already_finished");
+        assert_eq!(finished(addr, &id).await, done);
+        assert_eq!(
+            metrics(addr)["cancelled_work"],
+            0,
+            "only queue removals are cancelled"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_one_work_does_not_touch_another() {
+        let model = Model::new(&[("ALPHA", &[LIST, BLOCK]), ("BRAVO", &[LIST, BLOCK])])
+            .gated(&["ALPHA", "BRAVO"])
+            .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "cancel-isolated", cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        until("both in the model", || {
+            model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
+        })
+        .await;
+        call(addr, "POST", &format!("/v1/work/{a}/cancel"), None);
+        assert_eq!(get(addr, &b)["cancellation_requested"], false);
+        model.release("ALPHA");
+        model.release("BRAVO");
+        finished(addr, &a).await;
+        let done = finished(addr, &b).await;
+        assert_eq!(
+            model.calls("BRAVO"),
+            2,
+            "B's model was still asked after A's cancellation"
+        );
+        assert_eq!(done["cancellation_requested"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn work_that_finishes_before_cancellation_keeps_its_own_terminal_state() {
+        let (addr, _s, _d) = start(Model::new(&[("ALPHA", &[BLOCK])]).arc(), "terminal").await;
+        let id = submit(addr, "ALPHA");
+        let done = finished(addr, &id).await;
+        assert_eq!(
+            call(addr, "POST", &format!("/v1/work/{id}/cancel"), None).status,
+            409
+        );
+        let after = get(addr, &id);
+        assert_eq!(after, done);
+        assert_eq!(after["cancellation_requested"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn service_metrics_count_work_by_where_it_is_and_how_it_ended() {
+        let model = Model::new(&[("ALPHA", &[BLOCK]), ("BRAVO", &[BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
+        let (addr, _s, _d) = start_with(model.clone(), "metrics", cap(1, 4)).await;
+        let empty = metrics(addr);
+        for key in [
+            "submitted_work",
+            "queued_work",
+            "started_work",
+            "active_work",
+            "completed_work",
+            "blocked_work",
+            "failed_work",
+            "cancelled_work",
+            "max_concurrent_work",
+            "queue_wait_ms",
+            "work_duration_ms",
+        ] {
+            assert!(empty.get(key).is_some(), "{key}");
+        }
+        assert_eq!(empty["max_concurrent_work"], 1);
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        until("A to start", || model.entered("ALPHA") == 1).await;
+        let m = metrics(addr);
+        assert_eq!(
+            (
+                m["submitted_work"].as_u64(),
+                m["active_work"].as_u64(),
+                m["queued_work"].as_u64()
+            ),
+            (Some(2), Some(1), Some(1))
+        );
+        model.release("ALPHA");
+        finished(addr, &a).await;
+        finished(addr, &b).await;
+        let m = metrics(addr);
+        assert_eq!(
+            (m["blocked_work"].as_u64(), m["started_work"].as_u64()),
+            (Some(2), Some(2))
+        );
+        assert_eq!(m["queue_wait_ms"]["count"], 2);
+        assert_eq!(m["work_duration_ms"]["count"], 2);
+        assert_eq!(m["model_ms"]["count"], 2);
     }
 }

@@ -653,21 +653,45 @@ impl ModelProvider for Shared {
     }
 }
 
+/// What one run shares with whoever started it: a cancellation request going in, and the moment
+/// of the first model call coming out. One per run; nothing is shared between runs.
+#[derive(Debug, Default)]
+pub struct RunControl {
+    pub cancel: AtomicBool,
+    first_model_call: Mutex<Option<std::time::Instant>>,
+}
+
+impl RunControl {
+    pub fn first_model_call(&self) -> Option<std::time::Instant> {
+        *self
+            .first_model_call
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// Refuses the next model request once cancellation has been requested. The loop then ends the
 /// work the way it ends it for any model that cannot answer; nothing in flight is interrupted.
+/// It also notes when the first request was made, so queueing, model time and execution time can
+/// be told apart.
 struct CancelBeforeModelCall {
     inner: Arc<dyn ModelProvider>,
-    cancel: Arc<AtomicBool>,
+    control: Arc<RunControl>,
 }
 
 #[async_trait::async_trait]
 impl ModelProvider for CancelBeforeModelCall {
     async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
-        if self.cancel.load(Ordering::SeqCst) {
+        if self.control.cancel.load(Ordering::SeqCst) {
             return Err(FxError::Provider(
                 "cancellation was requested; no further model call was made".into(),
             ));
         }
+        self.control
+            .first_model_call
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(std::time::Instant::now);
         self.inner.complete(request).await
     }
 }
@@ -745,19 +769,19 @@ impl WorkRuntime {
     }
 
     /// Runs one piece of work through the loop. Returns what it established and the model's raw
-    /// replies. `cancel`, when set, stops further model calls (see [`CancelBeforeModelCall`]).
+    /// replies. `control`, when given, can stop further model calls and records the first one (see [`CancelBeforeModelCall`]).
     pub async fn run(
         &self,
         id: WorkId,
         goal: &str,
         limits: WorkLimits,
-        cancel: Option<Arc<AtomicBool>>,
+        control: Option<Arc<RunControl>>,
     ) -> (SoftwareWork, Vec<String>) {
         let replies = Arc::new(Mutex::new(Vec::new()));
-        let inner = match cancel {
-            Some(cancel) => Arc::new(CancelBeforeModelCall {
+        let inner = match control {
+            Some(control) => Arc::new(CancelBeforeModelCall {
                 inner: self.model.clone(),
-                cancel,
+                control,
             }) as Arc<dyn ModelProvider>,
             None => self.model.clone(),
         };

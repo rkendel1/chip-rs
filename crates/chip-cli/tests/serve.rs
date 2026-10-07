@@ -38,6 +38,8 @@ fn pax_shim(tag: &str) -> PathBuf {
 struct Server {
     child: Child,
     addr: String,
+    /// Kept open: a closed pipe would end the service for a reason that has nothing to do with it.
+    _stdout: BufReader<std::process::ChildStdout>,
 }
 
 impl Drop for Server {
@@ -76,15 +78,18 @@ fn launch(mut c: Command, args: &[&str]) -> Server {
         .spawn()
         .unwrap();
     let mut line = String::new();
-    BufReader::new(child.stdout.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    stdout.read_line(&mut line).unwrap();
     let addr = line
         .trim()
         .strip_prefix("Chip Runtime Service listening on http://")
         .unwrap_or_else(|| panic!("unexpected first line: {line:?}"))
         .to_string();
-    Server { child, addr }
+    Server {
+        child,
+        addr,
+        _stdout: stdout,
+    }
 }
 
 fn http(addr: &str, method: &str, path: &str, body: Option<&str>) -> (u16, String, Value) {
@@ -231,6 +236,10 @@ fn usage_errors_are_exit_2() {
         &["--model", "m"],
         &["--port"],
         &["extra"],
+        &["--max-concurrent-work", "0"],
+        &["--max-concurrent-work", "x"],
+        &["--max-queued-work", "-1"],
+        &["--max-queued-work"],
     ] {
         let out = command(&dir, "http://127.0.0.1:1", &shim)
             .args(args)
@@ -239,4 +248,105 @@ fn usage_errors_are_exit_2() {
         assert_eq!(out.status.code(), Some(2), "{args:?}");
         assert!(out.stdout.is_empty());
     }
+}
+
+const OLD_LIB: &str = "pub fn payload_len(payload: &str) -> usize {\n    payload.len()\n}\n";
+const TESTS: &str = "use fpfixture::canonical_fingerprint;\n\n#[test]\nfn pairs_are_sorted_and_joined() {\n    assert_eq!(canonical_fingerprint(\"b=2&a=1\"), \"a=1&b=2\");\n}\n";
+
+fn pax_installed() -> bool {
+    Command::new("pax")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Real PAX and real Cargo behind the service, with a mock model that only ever asks for the test
+/// run. The project's tests cannot pass (the function does not exist), so the work can never be
+/// verified: the point is that the real execution happened, was observed, and was not mistaken
+/// for the goal being met. The model is mocked; PAX is real.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success() {
+    if !pax_installed() {
+        eprintln!("SKIPPED: PAX is not installed");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("chip-serve-realpax-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"fpfixture_serve\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\nname = \"fpfixture\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), OLD_LIB).unwrap();
+    std::fs::write(dir.join("tests/fingerprint.rs"), TESTS).unwrap();
+    let model = common::start(
+        200,
+        &completion(r#"{"decision":"request_capability","capability":"pax.test"}"#),
+        Duration::ZERO,
+    )
+    .await;
+    let url = model.url.clone();
+    let d = dir.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+        c.arg("serve")
+            .current_dir(&d)
+            .env_remove("PAX_BIN")
+            .env("CHIP_PROVIDER", "openai-compatible")
+            .env("CHIP_MODEL", "mock-model")
+            .env("CHIP_ENDPOINT", &url)
+            .env("CHIP_API_KEY", "sk-serve-secret-never-printed");
+        let server = launch(c, &["--port", "0", "--max-concurrent-work", "2"]);
+        let addr = server.addr.clone();
+        let (_, _, body) = http(
+            &addr,
+            "POST",
+            "/v1/work",
+            Some(r#"{"goal":"Make the tests pass."}"#),
+        );
+        let id = body["work_id"].as_str().unwrap().to_string();
+        let mut state = Value::Null;
+        for _ in 0..3000 {
+            let (_, _, body) = http(&addr, "GET", &format!("/v1/work/{id}"), None);
+            if body["status"] != "running" && body["status"] != "queued" {
+                state = body;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(state["result"]["verified"], false, "{state}");
+        assert_ne!(state["status"], "completed");
+        assert_eq!(state["result"]["audit"]["clean"], true);
+        assert!(
+            state["result"]["pax_executions"].as_u64().unwrap() >= 1,
+            "{state}"
+        );
+        assert_eq!(state["result"]["pax"]["last_status"], "failed", "{state}");
+        let (_, _, ev) = http(&addr, "GET", &format!("/v1/work/{id}/events"), None);
+        let kinds: Vec<&str> = ev["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["kind"].as_str().unwrap())
+            .collect();
+        // PAX reporting failed tests is a real execution that failed, observed as such.
+        assert!(
+            kinds.contains(&"ExecutionStarted") && kinds.contains(&"ExecutionFailed"),
+            "{kinds:?}"
+        );
+        assert!(!kinds.contains(&"WorkCompleted"), "{kinds:?}");
+        assert!(kinds.contains(&"ObservationRecorded"), "{kinds:?}");
+        assert!(
+            state["timing"]["execution_ms"].as_f64().unwrap() > 0.0,
+            "{state}"
+        );
+        let (_, _, m) = http(&addr, "GET", "/v1/metrics", None);
+        assert_eq!(m["max_concurrent_work"], 2);
+        assert_eq!(m["started_work"], 1);
+    })
+    .await
+    .unwrap();
 }
