@@ -25,6 +25,9 @@ pub struct CapabilityRequest {
     pub execution_id: ExecutionId,
     pub capability_id: CapabilityId,
     pub inputs: BTreeMap<String, InputValue>,
+    /// Whether the requester sent an `inputs` member at all, even an empty one. A capability that
+    /// declares no inputs accepts no such member.
+    pub inputs_present: bool,
 }
 
 impl CapabilityRequest {
@@ -33,11 +36,13 @@ impl CapabilityRequest {
             execution_id,
             capability_id,
             inputs: BTreeMap::new(),
+            inputs_present: false,
         }
     }
 
     pub fn with_input(mut self, name: impl Into<String>, value: InputValue) -> Self {
         self.inputs.insert(name.into(), value);
+        self.inputs_present = true;
         self
     }
 }
@@ -123,6 +128,7 @@ impl DecisionBoundary for ScriptedDecision {
             } => Ok(AgentDecision::RequestCapability(CapabilityRequest {
                 execution_id: execution_id.clone(),
                 capability_id: CapabilityId::new(capability_id.clone())?,
+                inputs_present: !inputs.is_empty(),
                 inputs: inputs.clone(),
             })),
         }

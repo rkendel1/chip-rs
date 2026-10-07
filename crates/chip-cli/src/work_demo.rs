@@ -205,6 +205,18 @@ fn describe(event: &WorkEvent) -> String {
             "EvidenceReused: {capability} (receipt {})",
             receipt_id.as_deref().unwrap_or("none")
         ),
+        WorkEvent::GoalEvaluated {
+            satisfied,
+            remaining,
+            ..
+        } => format!(
+            "GoalEvaluated: {} ({remaining} required output(s) remaining)",
+            if *satisfied {
+                "the observation satisfies the goal"
+            } else {
+                "the observation does not satisfy the goal"
+            }
+        ),
         WorkEvent::WorkCompleted { .. } => "WorkCompleted".to_string(),
         WorkEvent::WorkEscalated { reason, .. } => format!("WorkEscalated: {reason}"),
         WorkEvent::WorkBlocked { reason, .. } => format!("WorkBlocked: {reason}"),
@@ -853,16 +865,491 @@ impl fx_core::ModelProvider for RecordingProvider {
     }
 }
 
-/// Escalates the very first decision to the model; afterwards reacts to what was observed.
+/// Escalates the very first decision to the model; afterwards reports what was observed. The
+/// completion summary is the executor's own output and receipt, never anything the model said.
 struct AskModelFirst;
 
 impl LocalWorkPolicy for AskModelFirst {
     fn propose(&self, view: &WorkView<'_>) -> Option<WorkDecision> {
         if view.turn == 0 {
-            None
-        } else {
-            ReactToObservation.propose(view)
+            return None;
         }
+        Some(match view.observations.last() {
+            Some(o) if o.kind == ObservationKind::ExecutionCompleted => WorkDecision::Complete {
+                summary: format!(
+                    "{} (receipt {})",
+                    o.output.as_deref().unwrap_or("").trim(),
+                    o.receipt_id.as_deref().unwrap_or("none")
+                ),
+            },
+            Some(o) if o.kind == ObservationKind::ExecutionFailed => WorkDecision::Block {
+                reason: "the requested capability failed".into(),
+            },
+            _ => WorkDecision::Escalate {
+                reason: "the execution was cancelled".into(),
+            },
+        })
+    }
+}
+
+/// What the offline (`--deterministic-executor`) path answers per capability. It stands in for
+/// Compute only to exercise the provider path; its output is never evidence of anything.
+struct DemoOutputs {
+    hash_id: &'static str,
+    system_info_id: &'static str,
+}
+
+#[async_trait::async_trait]
+impl Executor for DemoOutputs {
+    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult, ExecutionError> {
+        let output = if request.intent == self.hash_id {
+            chip_compute::HASH_EXPECTED_SHA256
+        } else if request.intent == self.system_info_id {
+            "python demo on demo"
+        } else {
+            "self test passed"
+        };
+        Ok(ExecutionResult::success(request.id, output).with_receipt_id("sha256:demo-receipt"))
+    }
+}
+
+/// The PR33 goal, which repeats the vocabulary of the digest capability's description.
+const DEFAULT_GOAL: &str = "Determine the SHA-256 digest of the fixed test input.";
+
+/// PR35: three equivalent goals for the same operation. None uses the words of the capability's
+/// description ("SHA-256", "digest", "fixed test input"), so choosing needs meaning, not a match.
+const SEMANTIC_GOALS: [&str; 3] = [
+    "Produce the canonical fingerprint of the test payload.",
+    "Calculate the deterministic identity value for the supplied test data.",
+    "Return the standard cryptographic representation of the fixed payload.",
+];
+
+/// PR37: goals that describe the wanted outcome without any word the capabilities are described
+/// with, and without the words that name the operation or its obvious synonyms. `goal_vocabulary
+/// _violations` checks every one mechanically; a goal that fails it is refused at run time.
+const ZERO_OVERLAP_GOALS: [&str; 6] = [
+    "Obtain a short code summarising the stored sample text, such that altering even one character of that text would change the code.",
+    "Establish a compact value for the reference passage that lets anyone later confirm the passage has not been tampered with.",
+    "Condense the benchmark sample text into a constant-size value that cannot feasibly be reversed to recover the original wording.",
+    "Derive an irreversible, constant-size summary of the canonical sample passage so two copies can be compared without exchanging the passage itself.",
+    "Generate a tamper-evident marker for the reference material, allowing a recipient to verify nothing was modified in transit.",
+    "Create a short unique token for the benchmark text, such that any single-character edit to the text yields a different token.",
+];
+
+/// Words that name the operation, its algorithm, its obvious synonyms or its implementation.
+/// A goal containing one has told the model the answer in the capability's own language.
+const NAMING_WORDS: &[&str] = &[
+    "sha",
+    "sha1",
+    "sha256",
+    "256",
+    "hash",
+    "hashing",
+    "hashed",
+    "digest",
+    "checksum",
+    "fingerprint",
+    "cryptographic",
+    "crypto",
+    "md5",
+    "crc",
+    "hashlib",
+    "python",
+    "selftest",
+    "operation",
+    "capability",
+];
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "the", "of", "to", "and", "or", "for", "in", "on", "at", "by", "with", "that",
+    "this", "it", "its", "is", "are", "be", "can", "so", "such", "as", "from", "than", "then",
+    "any", "even", "one", "two", "no", "not", "if", "when", "which", "who", "what", "into", "over",
+    "per", "each", "has", "have", "had", "was", "were", "been", "do", "does", "will", "would",
+    "should", "could", "may", "might", "must", "anyone", "itself", "there", "their", "they",
+    "them", "these", "those", "we", "you", "your", "our", "us", "how", "why", "also", "only",
+    "just", "both", "without", "within", "about", "after", "before", "later", "nothing",
+];
+
+fn vocabulary_tokens(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty() && !STOPWORDS.contains(t))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Two words count as the same vocabulary when they are equal, when one begins with the other
+/// (three letters or more: "run" and "running"), or when they share their first five letters
+/// ("determine" and "deterministic").
+fn same_vocabulary(a: &str, b: &str) -> bool {
+    a == b
+        || (a.len() >= 3 && b.len() >= 3 && (a.starts_with(b) || b.starts_with(a)))
+        || (a.len() >= 5 && b.len() >= 5 && a[..5] == b[..5])
+}
+
+/// Every reason `goal` is not a zero-overlap goal: a word it shares with any capability's
+/// description or id, or a word that names the operation. Empty means the goal is clean.
+fn goal_vocabulary_violations(goal: &str) -> Vec<String> {
+    let described = [
+        chip_compute::HASH_DESCRIPTION,
+        chip_compute::SYSTEM_INFO_DESCRIPTION,
+        chip_compute::SELFTEST_DESCRIPTION,
+        chip_compute::OP_A_INTENT,
+        chip_compute::OP_B_INTENT,
+        chip_compute::OP_C_INTENT,
+        chip_compute::HASH_INTENT,
+        chip_compute::SYSTEM_INFO_INTENT,
+        chip_compute::SELFTEST_INTENT,
+    ];
+    let capability_words: Vec<String> = described
+        .iter()
+        .flat_map(|d| vocabulary_tokens(d))
+        .collect();
+    let mut found = Vec::new();
+    for word in vocabulary_tokens(goal) {
+        if NAMING_WORDS.iter().any(|n| {
+            // Short names ("sha", "256", "md5", "crc") match exactly; longer ones by stem.
+            if n.len() < 4 {
+                word == *n
+            } else {
+                same_vocabulary(&word, n)
+            }
+        }) {
+            found.push(format!("'{word}' names the operation"));
+        } else if let Some(c) = capability_words.iter().find(|c| same_vocabulary(&word, c)) {
+            found.push(format!(
+                "'{word}' shares vocabulary with a capability ('{c}')"
+            ));
+        }
+    }
+    found
+}
+
+const OPAQUE_IDS: [&str; 3] = [
+    chip_compute::OP_A_INTENT,
+    chip_compute::OP_B_INTENT,
+    chip_compute::OP_C_INTENT,
+];
+
+/// PR38 fixture: the first model reply is read as usual and then replaced by a fixed request for a
+/// capability known to be wrong. The request is valid in every way Chip checks (declared,
+/// available, no invented inputs), so it goes through validation, real Compute execution,
+/// observation and evidence exactly as a model's own choice would. Every later reply is read
+/// normally. Only the *first judgment* is forced; nothing after it is.
+struct ForcedFirstDecision {
+    forced: std::sync::Mutex<Option<WorkDecision>>,
+}
+
+impl WorkDecisionBoundary for ForcedFirstDecision {
+    fn interpret(
+        &self,
+        response: &ModelResponse,
+        capabilities: &[Capability],
+    ) -> Result<WorkDecision, DecisionError> {
+        if let Some(decision) = self.forced.lock().unwrap().take() {
+            return Ok(decision);
+        }
+        ModelDecisionBoundary.interpret(response, capabilities)
+    }
+
+    fn question(&self, capabilities: &[Capability]) -> String {
+        ModelDecisionBoundary.question(capabilities)
+    }
+}
+
+/// How a run that began with a forced wrong decision ended, read from the trajectory: did Chip
+/// recover through authoritative evidence, and did it ever complete without the goal being met.
+///
+/// Returns the label and whether the work completed *without* any observation having satisfied
+/// the goal (an unauthorized completion, which must never happen).
+fn recovery_profile(
+    report: &WorkReport,
+    forced: Option<&str>,
+    hash_id: &str,
+    required: bool,
+) -> (&'static str, bool) {
+    let satisfied = report.events.iter().any(|e| {
+        matches!(
+            e,
+            WorkEvent::GoalEvaluated {
+                satisfied: true,
+                ..
+            }
+        )
+    });
+    let completed = matches!(report.outcome, WorkOutcome::Completed { .. });
+    // Only meaningful when the work had a requirement: without one nothing is ever evaluated.
+    let false_completion = required && completed && !satisfied;
+    let requested: Vec<String> = report
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            WorkEvent::CapabilityRequested { capability, .. } => Some(capability.to_string()),
+            _ => None,
+        })
+        .collect();
+    let label = match forced {
+        None => "n/a (no wrong decision was forced)",
+        Some(wrong) => {
+            let wrong_first = requested.first().map(String::as_str) == Some(wrong);
+            let right_later = requested.iter().skip(1).any(|c| c == hash_id);
+            match &report.outcome {
+                WorkOutcome::Completed { .. } if satisfied && wrong_first && right_later => {
+                    "recovered"
+                }
+                WorkOutcome::Completed { .. } => "UNAUTHORIZED COMPLETION",
+                WorkOutcome::Blocked { reason } if reason.starts_with("completion refused") => {
+                    "not recovered (the model claimed completion; Chip refused it)"
+                }
+                WorkOutcome::Blocked { .. } | WorkOutcome::Failed { .. } => {
+                    "not recovered (the second decision was rejected)"
+                }
+                _ if report.summary.executions >= 2 && !satisfied => {
+                    "not recovered (wrong again; stopped by a limit)"
+                }
+                _ => "not recovered (other)",
+            }
+        }
+    };
+    (label, false_completion)
+}
+
+/// splitmix64: the experiment's only source of "randomness", so every dealing is reproducible.
+pub(crate) fn next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+pub(crate) fn shuffle<T>(items: &mut [T], state: &mut u64) {
+    for i in (1..items.len()).rev() {
+        items.swap(i, (next(state) % (i as u64 + 1)) as usize);
+    }
+}
+
+/// How the three opaque ids are dealt for one run: which id carries each operation, and the order
+/// the capabilities are presented in. It is experiment configuration, derived from a seed so a run
+/// can be repeated exactly; it is not part of the runtime.
+struct Dealing {
+    hash: &'static str,
+    system_info: &'static str,
+    selftest: &'static str,
+    order: [&'static str; 3],
+    label: String,
+}
+
+impl Dealing {
+    /// PR32: op_a digests, op_b reports the runtime, op_c is the self test; declared in id order.
+    fn default_deal() -> Self {
+        Self {
+            hash: OPAQUE_IDS[0],
+            system_info: OPAQUE_IDS[1],
+            selftest: OPAQUE_IDS[2],
+            order: OPAQUE_IDS,
+            label: "default (op_a digests; op_a, op_b, op_c)".into(),
+        }
+    }
+
+    /// Run `run` (1-based) of a seed. The six possible assignments are shuffled into a deck, so
+    /// runs 1-6 use every assignment exactly once; the presentation order is shuffled
+    /// independently for every run.
+    fn from_seed(seed: u64, run: u64) -> Self {
+        let mut deck = vec![
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        shuffle(&mut deck, &mut seed.clone());
+        let [h, s, t] = deck[((run.max(1) - 1) % 6) as usize];
+        let mut order = [0usize, 1, 2];
+        shuffle(
+            &mut order,
+            &mut seed.wrapping_mul(1_000_003).wrapping_add(run),
+        );
+        Self {
+            hash: OPAQUE_IDS[h],
+            system_info: OPAQUE_IDS[s],
+            selftest: OPAQUE_IDS[t],
+            order: order.map(|i| OPAQUE_IDS[i]),
+            label: format!("seed {seed} run {run}"),
+        }
+    }
+}
+
+/// How one run went at the capability boundary, read from the trajectory (never from the model's
+/// reply): was a declared capability selected, was it invoked, and did the goal come out met.
+///
+/// * A: the right capability was selected and invoked, and the observation met the goal
+/// * B: the right capability was selected, but the invocation was rejected (invented inputs);
+///   nothing executed
+/// * C: a wrong but declared capability was selected and invoked; it ran and the goal stayed unmet
+/// * D: an undeclared (or unavailable) capability was named; rejected before any selection
+/// * E: the reply was not a usable decision at all (prose, malformed, a forbidden field...)
+/// * F: a wrong capability was selected and its invocation was rejected as well
+/// * G: the reply was a valid decision that selects no capability (complete, escalate or block)
+/// * `-`: no decision was reached (the model call itself failed) or the run ended otherwise
+fn capability_profile(
+    report: &WorkReport,
+    hash_id: &str,
+    goal_met: bool,
+) -> (String, String, &'static str) {
+    let model_answered = report.events.iter().any(|e| {
+        matches!(
+            e,
+            WorkEvent::ModelCalled {
+                succeeded: true,
+                ..
+            }
+        )
+    });
+    let selected = report.events.iter().find_map(|e| match e {
+        WorkEvent::CapabilityRequested { capability, .. } => Some(capability.to_string()),
+        _ => None,
+    });
+    let executed = report.summary.executions > 0;
+    let invocation_rejected = matches!(&report.outcome, WorkOutcome::Blocked { reason }
+        if reason.starts_with("invalid capability input"));
+    match (model_answered, selected) {
+        (false, _) => (
+            "none (the model call failed)".into(),
+            "not reached".into(),
+            "-",
+        ),
+        (true, None) if !matches!(&report.outcome, WorkOutcome::Failed { .. }) => (
+            "none (a valid decision that selects no capability)".into(),
+            "not reached".into(),
+            "G",
+        ),
+        (true, None) => {
+            let named_unusable = matches!(&report.outcome, WorkOutcome::Failed { reason }
+                if reason.contains("unknown capability") || reason.contains("capabilities unavailable"));
+            if named_unusable {
+                (
+                    "rejected (an undeclared or unavailable capability)".into(),
+                    "not reached".into(),
+                    "D",
+                )
+            } else {
+                (
+                    "rejected (the reply was not a usable decision)".into(),
+                    "not reached".into(),
+                    "E",
+                )
+            }
+        }
+        (true, Some(capability)) => {
+            let right = capability == hash_id;
+            let selection = format!("valid ({capability})");
+            if invocation_rejected && !executed {
+                (
+                    selection,
+                    "rejected (inputs the capability does not declare; nothing executed)".into(),
+                    if right { "B" } else { "F" },
+                )
+            } else if executed {
+                let category = match (right, goal_met) {
+                    (true, true) => "A",
+                    (false, _) => "C",
+                    (true, false) => "-",
+                };
+                (selection, "valid (executed by Compute)".into(), category)
+            } else {
+                (selection, "not completed".into(), "-")
+            }
+        }
+    }
+}
+
+impl Dealing {
+    /// PR37: run `run` (1-based) of a *balanced* dealing. A seeded search finds an assignment deck
+    /// and an order deck, each of the six possible permutations, such that across the six runs
+    /// every operation appears in every presented position exactly twice, and every id carries the
+    /// digest exactly twice. So no fixed position and no fixed id (and no first-in-identifier-
+    /// order choice) can score above one in three. The dealing does not depend on the goal.
+    fn balanced(seed: u64, run: u64) -> Self {
+        let perms: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        let mut attempt = 0u64;
+        let (assignments, orders) = loop {
+            let mut state = seed ^ attempt.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+            let mut assignments = perms;
+            let mut orders = perms;
+            shuffle(&mut assignments, &mut state);
+            shuffle(&mut orders, &mut state);
+            // Operation `role` (0 digest, 1 runtime info, 2 self test) sits at position
+            // `position` in run k when its id is at that index of the presented order.
+            let balanced = (0..3).all(|role| {
+                let mut at = [0usize; 3];
+                for (a, o) in assignments.iter().zip(orders.iter()) {
+                    at[o.iter().position(|id| *id == a[role]).unwrap()] += 1;
+                }
+                at == [2, 2, 2]
+            });
+            if balanced {
+                break (assignments, orders);
+            }
+            attempt += 1;
+            assert!(
+                attempt < 1_000_000,
+                "no balanced dealing found for seed {seed}"
+            );
+        };
+        let k = ((run.max(1) - 1) % 6) as usize;
+        let [h, s, t] = assignments[k];
+        Self {
+            hash: OPAQUE_IDS[h],
+            system_info: OPAQUE_IDS[s],
+            selftest: OPAQUE_IDS[t],
+            order: orders[k].map(|i| OPAQUE_IDS[i]),
+            label: format!("seed {seed} run {run} (balanced)"),
+        }
+    }
+}
+
+/// Presents another provider's capabilities in a chosen order. The set and the availability are
+/// the inner provider's; only the order the model reads them in differs.
+struct Reordered(Arc<dyn CapabilityProvider>, [&'static str; 3]);
+
+#[async_trait::async_trait]
+impl CapabilityProvider for Reordered {
+    async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
+        let mut found = self.0.capabilities().await?;
+        found.sort_by_key(|d| {
+            self.1
+                .iter()
+                .position(|id| *id == d.id.as_str())
+                .unwrap_or(usize::MAX)
+        });
+        Ok(found)
+    }
+
+    async fn availability(&self, id: &CapabilityId) -> CapabilityAvailability {
+        self.0.availability(id).await
+    }
+}
+
+/// A fixed, always-available set of capability descriptors (offline path only).
+struct DeclaredCapabilities(Vec<CapabilityDescriptor>);
+
+#[async_trait::async_trait]
+impl CapabilityProvider for DeclaredCapabilities {
+    async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
+        Ok(self.0.clone())
+    }
+
+    async fn availability(&self, _id: &CapabilityId) -> CapabilityAvailability {
+        CapabilityAvailability::Available
     }
 }
 
@@ -876,6 +1363,103 @@ impl LocalWorkPolicy for AskModelFirst {
 pub async fn test_real_model_work(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
     let deterministic_executor = args.iter().any(|a| a == "--deterministic-executor");
+    let flag = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .and_then(|v| v.parse::<u64>().ok())
+    };
+    // PR38: `--require-output` makes the known digest the goal's requirement, so completing needs
+    // an authoritative observation that equals it; `--force-wrong-first [--wrong-role ROLE]` also
+    // replaces the first decision with a valid request for the wrong capability.
+    let force_wrong_first = args.iter().any(|a| a == "--force-wrong-first");
+    let require_output = force_wrong_first || args.iter().any(|a| a == "--require-output");
+    let wrong_role = args
+        .iter()
+        .position(|a| a == "--wrong-role")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str);
+    if require_output && deterministic_executor {
+        eprintln!(
+            "error: the recovery experiment needs real Compute; --deterministic-executor is not allowed with --require-output or --force-wrong-first"
+        );
+        return 2;
+    }
+    if !force_wrong_first && wrong_role.is_some() {
+        eprintln!("error: --wrong-role needs --force-wrong-first");
+        return 2;
+    }
+    if force_wrong_first && !matches!(wrong_role, None | Some("runtime-info" | "self-test")) {
+        eprintln!("error: --wrong-role is runtime-info or self-test");
+        return 2;
+    }
+    // `--permutation-seed S --permutation-run N`: deal the opaque ids from a seed (PR33).
+    let balanced = args.iter().any(|a| a == "--balanced-dealing");
+    let dealing = match (flag("--permutation-seed"), flag("--permutation-run")) {
+        (Some(seed), Some(run)) if balanced => Dealing::balanced(seed, run),
+        (Some(seed), Some(run)) => Dealing::from_seed(seed, run),
+        (None, None) if balanced => {
+            eprintln!("error: --balanced-dealing needs --permutation-seed and --permutation-run");
+            return 2;
+        }
+        (None, None) => Dealing::default_deal(),
+        _ => {
+            eprintln!("error: --permutation-seed and --permutation-run go together (both numbers)");
+            return 2;
+        }
+    };
+
+    // `--zero-overlap-goal N` (1-6): one of the PR37 goals. A goal that fails the vocabulary guard
+    // is refused before any model is asked.
+    if args.iter().any(|a| a == "--zero-overlap-goal")
+        && args.iter().any(|a| a == "--semantic-goal")
+    {
+        eprintln!("error: --zero-overlap-goal and --semantic-goal are alternatives");
+        return 2;
+    }
+    let zero_overlap = match (
+        args.iter().any(|a| a == "--zero-overlap-goal"),
+        flag("--zero-overlap-goal"),
+    ) {
+        (false, _) => None,
+        (true, Some(n @ 1..=6)) => {
+            let goal = ZERO_OVERLAP_GOALS[n as usize - 1];
+            let violations = goal_vocabulary_violations(goal);
+            if !violations.is_empty() {
+                eprintln!(
+                    "error: goal Z{n} is not zero-overlap: {}",
+                    violations.join("; ")
+                );
+                return 2;
+            }
+            Some((goal, format!("Z{n}")))
+        }
+        (true, _) => {
+            eprintln!("error: --zero-overlap-goal takes a number from 1 to 6");
+            return 2;
+        }
+    };
+
+    // `--semantic-goal N` (1-3): one of the PR35 goals instead of the PR33 one.
+    let (goal, goal_label) = if let Some(chosen) = zero_overlap {
+        chosen
+    } else {
+        match flag("--semantic-goal") {
+            None if args.iter().any(|a| a == "--semantic-goal") => {
+                eprintln!("error: --semantic-goal takes a number from 1 to 3");
+                return 2;
+            }
+            None => (DEFAULT_GOAL, "default (PR33)".to_string()),
+            Some(n @ 1..=3) => (
+                SEMANTIC_GOALS[n as usize - 1],
+                format!("{}", (b'A' + n as u8 - 1) as char),
+            ),
+            Some(_) => {
+                eprintln!("error: --semantic-goal takes a number from 1 to 3");
+                return 2;
+            }
+        }
+    };
 
     let config = match crate::config_from_env(|name| std::env::var(name).ok()) {
         Ok(config) => config,
@@ -900,24 +1484,38 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
     };
 
     let execute_calls = Arc::new(AtomicUsize::new(0));
-    let compute = Arc::new(chip_compute::ComputeExecutor::new());
+    let compute = Arc::new(chip_compute::ComputeExecutor::new().with_opaque_assignment(
+        dealing.hash,
+        dealing.system_info,
+        dealing.selftest,
+    ));
     let builder = Agent::with_model(Arc::new(provider), model_name)
         .with_observer(Arc::new(ExecutionObserver))
         .with_local_reasoner(Arc::new(TestLocalReasoner::default()));
     let agent = if deterministic_executor {
+        // Descriptors only: nothing runs to describe them.
+        let descriptors = compute.capabilities().await.unwrap_or_default();
         builder
-            .with_capabilities(Arc::new(SelfTestCapability))
+            .with_capabilities(Arc::new(Reordered(
+                Arc::new(DeclaredCapabilities(descriptors)),
+                dealing.order,
+            )))
             .with_executor(Arc::new(CountingExecutor(
-                Arc::new(Fixed(ExecutionStatus::Success)),
+                Arc::new(DemoOutputs {
+                    hash_id: dealing.hash,
+                    system_info_id: dealing.system_info,
+                }),
                 execute_calls.clone(),
             )))
     } else {
         builder
-            .with_capabilities(compute.clone())
+            .with_capabilities(Arc::new(Reordered(compute.clone(), dealing.order)))
             .with_executor(Arc::new(CountingExecutor(compute, execute_calls.clone())))
     };
+    let mut offered = Vec::new();
     if let Ok(found) = agent.discover_capabilities().await.result {
         for capability in found {
+            offered.push(capability.descriptor.id.to_string());
             if let CapabilityAvailability::Unavailable(reason)
             | CapabilityAvailability::Misconfigured(reason) = capability.availability
             {
@@ -931,20 +1529,59 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
         max_turns: 4,
         max_executions: 2,
     };
-    let spec = WorkSpec::new(
-        WorkId::new("real-model-work"),
-        WorkGoal::new("Determine whether compute.selftest should be requested"),
-    )
-    .with_limits(limits);
-    let report = agent
-        .run_work(&spec, &AskModelFirst, &ModelDecisionBoundary)
-        .await;
+    let mut spec =
+        WorkSpec::new(WorkId::new("real-model-work"), WorkGoal::new(goal)).with_limits(limits);
+    if require_output {
+        spec = spec.with_required_output(chip_compute::HASH_EXPECTED_SHA256);
+    }
+    let forced_id: Option<&'static str> = force_wrong_first.then(|| match wrong_role {
+        Some("self-test") => dealing.selftest,
+        _ => dealing.system_info,
+    });
+    let forcing = ForcedFirstDecision {
+        forced: std::sync::Mutex::new(forced_id.map(|id| {
+            WorkDecision::RequestCapability(CapabilityRequest::new(
+                ExecutionId::new("forced-wrong-first"),
+                CapabilityId::new(id).expect("an opaque id is a valid capability id"),
+            ))
+        })),
+    };
+    let report = agent.run_work(&spec, &AskModelFirst, &forcing).await;
     let m = report.measurement();
     let violations = verify_trajectory(&report.events, &limits);
     let receipt = report
         .observations
-        .first()
+        .last()
         .and_then(|o| o.receipt_id.clone());
+
+    // What the model chose, and what reality answered. The expected digest is known
+    // independently of the model and of Compute.
+    let requested: Vec<String> = report
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            WorkEvent::CapabilityRequested { capability, .. } => Some(capability.to_string()),
+            _ => None,
+        })
+        .collect();
+    // With a forced first decision the capability that matters for selection is the recovery one.
+    let chosen = if force_wrong_first {
+        requested.last().cloned().filter(|_| requested.len() > 1)
+    } else {
+        requested.first().cloned()
+    };
+    let observed = report
+        .observations
+        .last()
+        .and_then(|o| o.output.as_deref())
+        .map(|o| o.trim().to_string());
+    let digest_ok = observed.as_deref() == Some(chip_compute::HASH_EXPECTED_SHA256)
+        && matches!(&report.outcome, WorkOutcome::Completed { summary }
+            if summary.contains(chip_compute::HASH_EXPECTED_SHA256));
+
+    let (selection, invocation, category) = capability_profile(&report, dealing.hash, digest_ok);
+    let (recovery, false_completion) =
+        recovery_profile(&report, forced_id, dealing.hash, require_output);
 
     if json {
         println!("{}", measurement_json("real-model", &m));
@@ -986,6 +1623,64 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             receipt.as_deref().unwrap_or("none")
         );
         print_escalation_context(&report, m.context_policy.as_deref());
+        println!("\nCapability selection");
+        println!("  goal variant:    {goal_label}");
+        println!("  permutation:     {}", dealing.label);
+        println!("  offered:         {}", offered.join(", "));
+        println!("  hash capability: {}", dealing.hash);
+        println!(
+            "  assignment:      digest={} runtime-info={} self-test={}",
+            dealing.hash, dealing.system_info, dealing.selftest
+        );
+        println!(
+            "  evidence recorded: {}",
+            report
+                .events
+                .iter()
+                .filter(|e| matches!(e, WorkEvent::EvidenceRecorded { .. }))
+                .count()
+        );
+        println!("  chosen:          {}", chosen.as_deref().unwrap_or("none"));
+        println!("  selection:       {selection}");
+        println!("  invocation:      {invocation}");
+        println!("  category:        {category}");
+        println!(
+            "  observed output: {}",
+            observed.as_deref().unwrap_or("none")
+        );
+        println!("  expected digest: {}", chip_compute::HASH_EXPECTED_SHA256);
+        println!(
+            "  digest from the Compute observation matches: {}",
+            if digest_ok { "yes" } else { "no" }
+        );
+        if require_output {
+            let evaluations: Vec<&str> = report
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    WorkEvent::GoalEvaluated { satisfied, .. } => Some(if *satisfied {
+                        "satisfied"
+                    } else {
+                        "not satisfied"
+                    }),
+                    _ => None,
+                })
+                .collect();
+            println!("\nRecovery");
+            println!("  requested:       {}", requested.join(", "));
+            println!(
+                "  first decision:  {}",
+                forced_id.map_or("the model's own".to_string(), |id| format!(
+                    "forced wrong ({id}); the model's first reply was overridden by the harness"
+                ))
+            );
+            println!("  goal evaluations: {}", evaluations.join(", "));
+            println!("  recovery:        {recovery}");
+            println!(
+                "  unauthorized completion: {}",
+                if false_completion { "YES" } else { "no" }
+            );
+        }
         println!("\nTrajectory:");
         for (i, event) in report.events.iter().enumerate() {
             println!("  {:>2}. {}", i + 1, describe(event));
@@ -1002,22 +1697,269 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             println!("\nModel reply:\n{reply}");
         }
     }
+    // Forced wrong first: a wrong execution, a recovery escalation, a right execution, then the
+    // local completion. Otherwise the single-decision shape of every earlier experiment.
+    let (turns, calls, execs) = if force_wrong_first {
+        (3, 2, 2)
+    } else {
+        (2, 1, 1)
+    };
     let as_expected = matches!(report.outcome, WorkOutcome::Completed { .. })
-        && m.turns == 2
+        && !false_completion
+        && m.turns as usize == turns
         && m.local_decisions == 1
         && (deterministic_executor || receipt.is_some())
-        && m.model_calls == 1
-        && m.model_escalations == 1
-        && m.executions == 1
-        && m.observations == 1;
+        && m.model_calls as usize == calls
+        && m.model_escalations as usize == calls
+        && m.executions as usize == execs
+        && m.observations as usize == execs
+        && chosen.as_deref() == Some(dealing.hash)
+        && digest_ok;
     if as_expected {
         0
     } else {
         eprintln!(
             "\nerror: the workload did not follow the expected trajectory (outcome: {:?}); \
-             the model was asked to request compute.selftest",
+             the model was asked to choose a capability that reports the SHA-256 digest of a \
+             known text (expected the capability described as producing the SHA-256 digest, answered by the Compute observation)",
             report.outcome
         );
         1
+    }
+}
+
+#[cfg(test)]
+mod pr37 {
+    //! PR37: the zero-overlap corpus, its vocabulary guard, and the balanced dealing.
+
+    use super::*;
+
+    /// Goals from earlier experiments. Each leaks vocabulary, which is why PR37 replaced them.
+    const LEAKY_GOALS: [&str; 5] = [
+        DEFAULT_GOAL,
+        "Produce the canonical fingerprint of the test payload.",
+        "Calculate the deterministic identity value for the supplied test data.",
+        "Return the standard cryptographic representation of the fixed payload.",
+        "Determine the SHA-256 digest of the fixed test input.",
+    ];
+
+    #[test]
+    fn the_corpus_is_large_distinct_and_clean() {
+        assert!(ZERO_OVERLAP_GOALS.len() >= 6);
+        for (i, goal) in ZERO_OVERLAP_GOALS.iter().enumerate() {
+            let violations = goal_vocabulary_violations(goal);
+            assert!(violations.is_empty(), "Z{}: {goal}: {violations:?}", i + 1);
+            assert!(
+                goal.ends_with('.') && goal.split_whitespace().count() >= 10,
+                "Z{}",
+                i + 1
+            );
+            for other in &ZERO_OVERLAP_GOALS[i + 1..] {
+                assert_ne!(goal, other, "duplicate goal");
+            }
+        }
+    }
+
+    #[test]
+    fn the_guard_rejects_every_leaky_goal_from_earlier_experiments() {
+        // The guard is what separates PR37 from PR35: it must fail on all of PR33/PR35's wording.
+        for goal in LEAKY_GOALS {
+            assert!(
+                !goal_vocabulary_violations(goal).is_empty(),
+                "the guard let through: {goal}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_guard_names_what_it_found() {
+        let found =
+            goal_vocabulary_violations("Determine the SHA-256 digest of the fixed test input.");
+        let text = found.join(" | ");
+        for word in ["sha", "digest", "fixed", "test", "input", "256"] {
+            assert!(
+                text.contains(&format!("'{word}'")),
+                "{word} not reported: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_guard_catches_stems_synonyms_and_every_capabilitys_words() {
+        for (goal, needle) in [
+            ("Compute the hashing of the sample.", "hashing"),
+            ("Give me a checksum of the sample.", "checksum"),
+            ("Give me a fingerprint of the sample.", "fingerprint"),
+            (
+                "Apply a cryptographic summary to the sample.",
+                "cryptographic",
+            ),
+            ("Determine a summary of the sample.", "determine"), // stem of "deterministic"
+            ("Running a summary of the sample.", "running"),     // begins with "run"
+            ("Report on the sample.", "report"),
+            ("Tell me the runtime of the sample.", "runtime"),
+            ("Show the information about the sample.", "information"),
+            ("Summarise the existing sample.", "existing"),
+            ("Use the self-test on the sample.", "self"),
+            ("Summarise the inputs.", "inputs"),
+            ("Summarise the tested sample.", "tested"),
+            ("Use compute.op_a on the sample.", "compute"),
+        ] {
+            let found = goal_vocabulary_violations(goal);
+            assert!(
+                found.iter().any(|f| f.contains(&format!("'{needle}'"))),
+                "{goal}: expected '{needle}' in {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clean_goal_is_not_rejected_so_the_guard_is_not_a_blanket_no() {
+        assert!(
+            goal_vocabulary_violations("Obtain a short code for the stored sample text.")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn reintroducing_any_shortcut_word_into_any_goal_is_caught() {
+        // A mutation check on the corpus itself: insert each naming word, and one word from each
+        // description, into each goal; the guard must object every time.
+        let mut words: Vec<&str> = NAMING_WORDS.to_vec();
+        words.extend([
+            "fixed",
+            "report",
+            "deterministic",
+            "runtime",
+            "existing",
+            "result",
+        ]);
+        for goal in ZERO_OVERLAP_GOALS {
+            for word in &words {
+                let mutated = format!("{goal} {word}");
+                assert!(
+                    !goal_vocabulary_violations(&mutated).is_empty(),
+                    "'{word}' slipped into: {goal}"
+                );
+            }
+        }
+    }
+
+    fn roles(d: &Dealing) -> [&'static str; 3] {
+        [d.hash, d.system_info, d.selftest]
+    }
+
+    fn position_of(d: &Dealing, id: &str) -> usize {
+        d.order.iter().position(|o| *o == id).unwrap()
+    }
+
+    #[test]
+    fn the_balanced_dealing_covers_every_assignment_order_and_position() {
+        for seed in [3201, 0, 1, 7, 42, 1_000_003, u64::MAX] {
+            let runs: Vec<Dealing> = (1..=6).map(|r| Dealing::balanced(seed, r)).collect();
+
+            // All six assignments of operations to ids, each once.
+            let mut assignments: Vec<[&str; 3]> = runs.iter().map(roles).collect();
+            assignments.sort();
+            assignments.dedup();
+            assert_eq!(assignments.len(), 6, "seed {seed}: assignments");
+
+            // All six presentation orders, each once; some are not in id order.
+            let mut orders: Vec<[&str; 3]> = runs.iter().map(|d| d.order).collect();
+            orders.sort();
+            orders.dedup();
+            assert_eq!(orders.len(), 6, "seed {seed}: orders");
+            assert!(runs.iter().any(|d| d.order != OPAQUE_IDS), "seed {seed}");
+
+            // Every operation sits in every position exactly twice.
+            for role in 0..3 {
+                let mut at = [0; 3];
+                for d in &runs {
+                    at[position_of(d, roles(d)[role])] += 1;
+                }
+                assert_eq!(at, [2, 2, 2], "seed {seed}: role {role} by position");
+            }
+            // Every id carries the digest exactly twice.
+            for id in OPAQUE_IDS {
+                assert_eq!(
+                    runs.iter().filter(|d| d.hash == id).count(),
+                    2,
+                    "seed {seed}: {id}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_shortcut_scores_exactly_one_third_on_a_balanced_dealing() {
+        let runs: Vec<Dealing> = (1..=6).map(|r| Dealing::balanced(3201, r)).collect();
+        let hits = |pick: &dyn Fn(&Dealing) -> &'static str| {
+            runs.iter().filter(|d| pick(d) == d.hash).count()
+        };
+        assert_eq!(hits(&|d| d.order[0]), 2, "always first presented");
+        assert_eq!(hits(&|d| d.order[1]), 2, "always second presented");
+        assert_eq!(hits(&|d| d.order[2]), 2, "always last presented");
+        for id in OPAQUE_IDS {
+            assert_eq!(hits(&|_| id), 2, "always {id}");
+        }
+        let mut sorted_first = 0;
+        for d in &runs {
+            let mut ids = d.order;
+            ids.sort();
+            sorted_first += usize::from(ids[0] == d.hash);
+        }
+        assert_eq!(sorted_first, 2, "first in identifier order");
+    }
+
+    #[test]
+    fn the_dealing_is_deterministic_and_the_seed_matters() {
+        for run in 1..=6 {
+            let a = Dealing::balanced(3201, run);
+            let b = Dealing::balanced(3201, run);
+            assert_eq!(
+                (roles(&a), a.order, a.label.clone()),
+                (roles(&b), b.order, b.label.clone())
+            );
+        }
+        let signature = |seed| -> Vec<([&'static str; 3], [&'static str; 3])> {
+            (1..=6)
+                .map(|r| {
+                    let d = Dealing::balanced(seed, r);
+                    (roles(&d), d.order)
+                })
+                .collect()
+        };
+        assert_ne!(signature(3201), signature(3202));
+        // Past six runs the deck repeats, it does not change.
+        assert_eq!(
+            roles(&Dealing::balanced(3201, 7)),
+            roles(&Dealing::balanced(3201, 1))
+        );
+    }
+
+    #[test]
+    fn ids_stay_opaque_in_every_dealing() {
+        for run in 1..=6 {
+            let d = Dealing::balanced(3201, run);
+            let mut ids = d.order.to_vec();
+            ids.sort();
+            assert_eq!(ids, OPAQUE_IDS);
+            for id in d.order {
+                for word in ["hash", "digest", "sha", "self", "test", "info", "system"] {
+                    assert!(!id.contains(word), "{id} reveals {word}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_earlier_dealing_is_unchanged() {
+        // PR33-PR36 results depend on it; PR37 adds a mode and leaves this one alone.
+        let d = Dealing::from_seed(3201, 1);
+        assert_eq!(d.order, ["compute.op_c", "compute.op_a", "compute.op_b"]);
+        assert_eq!(d.hash, "compute.op_b");
+        let d = Dealing::from_seed(3201, 6);
+        assert_eq!(d.order, ["compute.op_b", "compute.op_c", "compute.op_a"]);
+        assert_eq!(d.hash, "compute.op_b");
     }
 }

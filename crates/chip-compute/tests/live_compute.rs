@@ -5,7 +5,10 @@
 
 use std::sync::Arc;
 
-use chip_compute::{ComputeExecutor, SELFTEST_INTENT, SELFTEST_OUTPUT};
+use chip_compute::{
+    ComputeExecutor, HASH_EXPECTED_SHA256, HASH_INTENT, OP_A_INTENT, OP_C_INTENT, SELFTEST_INTENT,
+    SELFTEST_OUTPUT,
+};
 use chip_core::{
     Agent, ExecutionError, ExecutionId, ExecutionRequest, ExecutionStatus, Executor, TestExecutor,
 };
@@ -152,4 +155,80 @@ async fn live_bounded_work_loop() {
         "PASSED — real bounded work loop (receipt {receipt}; compute {:?} of {:?} total)",
         m.compute_latency, m.total_latency
     );
+}
+
+/// The digest is produced by real Compute and compared with a value known independently.
+#[tokio::test]
+async fn live_compute_hash_matches_the_known_digest() {
+    let executor = ComputeExecutor::new().with_standard_operations();
+    let request = ExecutionRequest::new(ExecutionId::new("live-hash"), HASH_INTENT);
+    match executor.execute(request).await {
+        Err(ExecutionError::ExecutorUnavailable(reason)) => {
+            eprintln!("SKIPPED — Compute-configured unavailable ({reason})");
+        }
+        Err(other) => panic!("real Compute execution failed: {other}"),
+        Ok(result) => {
+            assert_eq!(result.status, ExecutionStatus::Success, "{}", result.output);
+            assert_eq!(result.output, HASH_EXPECTED_SHA256);
+            let receipt = result.receipt_id.expect("Compute should return a receipt");
+            assert!(receipt.starts_with("sha256:"), "{receipt}");
+            eprintln!("PASSED — real Compute hash (receipt {receipt})");
+        }
+    }
+}
+
+/// The opaque ids run the same real operations: op_a is the digest, op_c is the self test.
+#[tokio::test]
+async fn live_compute_opaque_operations_run_their_described_operation() {
+    let executor = ComputeExecutor::new().with_opaque_operations();
+    for (id, want) in [
+        (OP_A_INTENT, HASH_EXPECTED_SHA256),
+        (OP_C_INTENT, SELFTEST_OUTPUT),
+    ] {
+        let request = ExecutionRequest::new(ExecutionId::new("live-opaque"), id);
+        match executor.execute(request).await {
+            Err(ExecutionError::ExecutorUnavailable(reason)) => {
+                eprintln!("SKIPPED — Compute-configured unavailable ({reason})");
+                return;
+            }
+            Err(other) => panic!("real Compute execution failed: {other}"),
+            Ok(result) => {
+                assert_eq!(result.status, ExecutionStatus::Success, "{}", result.output);
+                assert_eq!(result.output, want, "{id}");
+                assert!(result.receipt_id.is_some_and(|r| r.starts_with("sha256:")));
+            }
+        }
+    }
+}
+
+/// Every dealing of the ids runs the real operation its description promises: the id carrying the
+/// digest produces the independently known digest, the one carrying the self test, the self test.
+#[tokio::test]
+async fn live_compute_every_assignment_runs_the_described_operation() {
+    const IDS: [&str; 3] = ["compute.op_a", "compute.op_b", "compute.op_c"];
+    for [h, s, t] in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        let executor = ComputeExecutor::new().with_opaque_assignment(IDS[h], IDS[s], IDS[t]);
+        for (id, want) in [(IDS[h], HASH_EXPECTED_SHA256), (IDS[t], SELFTEST_OUTPUT)] {
+            let request = ExecutionRequest::new(ExecutionId::new("live-assign"), id);
+            match executor.execute(request).await {
+                Err(ExecutionError::ExecutorUnavailable(reason)) => {
+                    eprintln!("SKIPPED — Compute-configured unavailable ({reason})");
+                    return;
+                }
+                Err(other) => panic!("real Compute execution failed: {other}"),
+                Ok(result) => {
+                    assert_eq!(result.status, ExecutionStatus::Success, "{}", result.output);
+                    assert_eq!(result.output, want, "{id} in assignment {h}{s}{t}");
+                    assert!(result.receipt_id.is_some_and(|r| r.starts_with("sha256:")));
+                }
+            }
+        }
+    }
 }

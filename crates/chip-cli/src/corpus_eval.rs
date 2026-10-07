@@ -379,6 +379,7 @@ mod tests {
             let request = CapabilityRequest {
                 execution_id: ExecutionId::new("fixture"),
                 capability_id: case.input.capability.clone(),
+                inputs_present: !case.input.inputs.is_empty(),
                 inputs: case.input.inputs.clone(),
             };
             let (f1, f2) = (StateToken::new("F1"), StateToken::new("F2"));

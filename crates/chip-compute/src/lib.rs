@@ -34,6 +34,32 @@ pub const SELFTEST_INTENT: &str = "compute.selftest";
 /// Exact output produced by the built-in operation.
 pub const SELFTEST_OUTPUT: &str = "chip-compute selftest ok";
 
+/// Intent of the fixed-input hash operation (see [`ComputeExecutor::with_standard_operations`]).
+pub const HASH_INTENT: &str = "compute.hash";
+/// The text `compute.hash` digests. It is part of the operation, never supplied by a caller.
+pub const HASH_INPUT: &str = "chip pr31 capability selection";
+/// SHA-256 of [`HASH_INPUT`], known independently of Compute and of any model.
+pub const HASH_EXPECTED_SHA256: &str =
+    "5dc3ef3419c119833659d7288d246c87db93e4eeabb2b11126be581cb83c165f";
+/// Intent of the runtime-description operation.
+pub const SYSTEM_INFO_INTENT: &str = "compute.system_info";
+
+/// The opaque set: ids that say nothing about what the capability does (see
+/// [`ComputeExecutor::with_opaque_operations`]). Only the descriptions carry the meaning.
+pub const OP_A_INTENT: &str = "compute.op_a";
+pub const OP_B_INTENT: &str = "compute.op_b";
+pub const OP_C_INTENT: &str = "compute.op_c";
+/// What each opaque operation does, as a model is told. The description belongs to the operation,
+/// whichever opaque id carries it; the fixed input text is not part of it.
+pub const HASH_DESCRIPTION: &str = "Produce a SHA-256 digest of the fixed test input.";
+pub const SYSTEM_INFO_DESCRIPTION: &str =
+    "Report deterministic information about the Compute runtime.";
+pub const SELFTEST_DESCRIPTION: &str = "Run the existing Compute self-test and report its result.";
+/// The default assignment: op_a digests, op_b reports the runtime, op_c is the self test.
+pub const OP_A_DESCRIPTION: &str = HASH_DESCRIPTION;
+pub const OP_B_DESCRIPTION: &str = SYSTEM_INFO_DESCRIPTION;
+pub const OP_C_DESCRIPTION: &str = SELFTEST_DESCRIPTION;
+
 /// A semantic operation Compute can run: a runtime and the entrypoint source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComputeOperation {
@@ -76,6 +102,22 @@ impl ComputeOperation {
     }
 }
 
+fn selftest_operation() -> ComputeOperation {
+    ComputeOperation::python(format!("print(\"{SELFTEST_OUTPUT}\")\n"))
+}
+
+fn hash_operation() -> ComputeOperation {
+    ComputeOperation::python(format!(
+        "import hashlib\nprint(hashlib.sha256(b\"{HASH_INPUT}\").hexdigest())\n"
+    ))
+}
+
+fn system_info_operation() -> ComputeOperation {
+    ComputeOperation::python(
+        "import platform\nprint(f\"python {platform.python_version()} on {platform.system()}\")\n",
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct ComputeExecutor {
     binary: PathBuf,
@@ -101,10 +143,74 @@ impl ComputeExecutor {
         };
         executor.operations.insert(
             SELFTEST_INTENT.to_string(),
-            ComputeOperation::python(format!("print(\"{SELFTEST_OUTPUT}\")\n"))
+            selftest_operation()
                 .described("Compute Self Test", "Deterministic Compute execution test"),
         );
         executor
+    }
+
+    /// Registers `compute.hash` and `compute.system_info` beside the built-in self test. They are
+    /// opt-in so the default capability set stays the single self test.
+    pub fn with_standard_operations(mut self) -> Self {
+        self.operations.insert(
+            HASH_INTENT.to_string(),
+            hash_operation().described(
+                "Compute Hash",
+                format!("Compute the SHA-256 digest of the fixed text \"{HASH_INPUT}\""),
+            ),
+        );
+        self.operations.insert(
+            SYSTEM_INFO_INTENT.to_string(),
+            system_info_operation().described(
+                "Compute System Info",
+                "Report the Python runtime version and operating system Compute runs on",
+            ),
+        );
+        self
+    }
+
+    /// Drops the built-in operations, so only what is registered with
+    /// [`with_operation`](Self::with_operation) afterwards is a capability.
+    pub fn without_builtin_operations(mut self) -> Self {
+        self.operations.clear();
+        self
+    }
+
+    /// Replaces the whole operation set with `compute.op_a` (SHA-256 of [`HASH_INPUT`]),
+    /// `compute.op_b` (runtime information) and `compute.op_c` (the self test). The operations are
+    /// the same as the standard ones; only the ids differ, so a caller choosing among them has to
+    /// read the descriptions. The built-in `compute.selftest` is removed, not kept alongside:
+    /// its id would give op_c away.
+    pub fn with_opaque_operations(self) -> Self {
+        self.with_opaque_assignment(OP_A_INTENT, OP_B_INTENT, OP_C_INTENT)
+    }
+
+    /// The opaque set with the operations dealt to ids in any order: `hash_id` carries the digest,
+    /// `system_info_id` the runtime report and `selftest_id` the self test. Descriptions travel
+    /// with their operation, so the capability that answers a goal depends on the assignment.
+    /// The ids should be three distinct valid capability ids; an invalid one surfaces as an error
+    /// from `capabilities()`.
+    pub fn with_opaque_assignment(
+        mut self,
+        hash_id: &str,
+        system_info_id: &str,
+        selftest_id: &str,
+    ) -> Self {
+        self.operations.clear();
+        let name = |id: &str| format!("Compute Operation {}", id.rsplit('_').next().unwrap_or(id));
+        self.operations.insert(
+            hash_id.to_string(),
+            hash_operation().described(name(hash_id), HASH_DESCRIPTION),
+        );
+        self.operations.insert(
+            system_info_id.to_string(),
+            system_info_operation().described(name(system_info_id), SYSTEM_INFO_DESCRIPTION),
+        );
+        self.operations.insert(
+            selftest_id.to_string(),
+            selftest_operation().described(name(selftest_id), SELFTEST_DESCRIPTION),
+        );
+        self
     }
 
     /// Registers an operation under a capability id. The id must be a valid

@@ -3,6 +3,8 @@
 //! Provider-specific wire formats live in adapter modules; `HttpProvider`
 //! selects an adapter by `HttpProviderConfig::provider`.
 
+mod anthropic;
+mod ollama;
 mod openai_compatible;
 
 use std::fmt;
@@ -12,8 +14,24 @@ use fx_core::{FxError, ModelId, ModelProvider, ModelRequest, ModelResponse, Secr
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Name of the first (and currently only) adapter.
+/// Adapter for endpoints speaking the chat-completions wire format.
 pub const PROVIDER_OPENAI_COMPATIBLE: &str = "openai-compatible";
+
+/// Adapter for the Anthropic Messages API.
+pub const PROVIDER_ANTHROPIC: &str = "anthropic";
+
+/// Adapter for a local Ollama server. Needs no API key.
+pub const PROVIDER_OLLAMA: &str = "ollama";
+
+/// The endpoint a provider talks to when none is configured. Only providers with a single
+/// well-known endpoint have one; an OpenAI-compatible endpoint is always the caller's choice.
+pub fn default_endpoint(provider: &str) -> Option<&'static str> {
+    match provider {
+        PROVIDER_ANTHROPIC => Some(anthropic::DEFAULT_ENDPOINT),
+        PROVIDER_OLLAMA => Some(ollama::DEFAULT_ENDPOINT),
+        _ => None,
+    }
+}
 
 #[derive(Clone)]
 pub struct HttpProviderConfig {
@@ -21,6 +39,9 @@ pub struct HttpProviderConfig {
     pub model: ModelId,
     pub endpoint: String,
     pub api_key: Option<Secret>,
+    /// Sent as `anthropic-workspace-id` by the Anthropic adapter, which needs it for keys that
+    /// are not scoped to a workspace. Ignored by other adapters.
+    pub workspace_id: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub timeout: Duration,
@@ -37,6 +58,7 @@ impl HttpProviderConfig {
             model: ModelId::new(model),
             endpoint: endpoint.into(),
             api_key: None,
+            workspace_id: None,
             temperature: None,
             max_tokens: None,
             timeout: DEFAULT_TIMEOUT,
@@ -45,6 +67,11 @@ impl HttpProviderConfig {
 
     pub fn with_api_key(mut self, api_key: Secret) -> Self {
         self.api_key = Some(api_key);
+        self
+    }
+
+    pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.workspace_id = Some(workspace_id.into());
         self
     }
 
@@ -61,6 +88,7 @@ impl fmt::Debug for HttpProviderConfig {
             .field("model", &self.model)
             .field("endpoint", &self.endpoint)
             .field("api_key", &self.api_key)
+            .field("workspace_id", &self.workspace_id)
             .field("temperature", &self.temperature)
             .field("max_tokens", &self.max_tokens)
             .field("timeout", &self.timeout)
@@ -83,9 +111,15 @@ impl fmt::Debug for HttpProvider {
 
 impl HttpProvider {
     pub fn new(config: HttpProviderConfig) -> Result<Self, FxError> {
-        if config.provider != PROVIDER_OPENAI_COMPATIBLE {
+        if ![
+            PROVIDER_OPENAI_COMPATIBLE,
+            PROVIDER_ANTHROPIC,
+            PROVIDER_OLLAMA,
+        ]
+        .contains(&config.provider.as_str())
+        {
             return Err(FxError::Configuration(format!(
-                "unknown provider '{}' (supported: {PROVIDER_OPENAI_COMPATIBLE})",
+                "unknown provider '{}' (supported: {PROVIDER_OPENAI_COMPATIBLE}, {PROVIDER_ANTHROPIC}, {PROVIDER_OLLAMA})",
                 config.provider
             )));
         }
@@ -110,6 +144,29 @@ impl HttpProvider {
 impl ModelProvider for HttpProvider {
     /// Dropping the returned future cancels the in-flight HTTP request.
     async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
-        openai_compatible::complete(&self.client, &self.config, request).await
+        match self.config.provider.as_str() {
+            PROVIDER_ANTHROPIC => anthropic::complete(&self.client, &self.config, request).await,
+            PROVIDER_OLLAMA => ollama::complete(&self.client, &self.config, request).await,
+            _ => openai_compatible::complete(&self.client, &self.config, request).await,
+        }
     }
+}
+
+/// Maps reqwest errors without ever including the request (and its headers).
+pub(crate) fn transport_error(error: reqwest::Error) -> FxError {
+    if error.is_timeout() {
+        FxError::Timeout("request exceeded the configured timeout".into())
+    } else if error.is_connect() {
+        FxError::Http("failed to connect to endpoint".into())
+    } else {
+        FxError::Http("request failed".into())
+    }
+}
+
+/// Extracts `error.message` from a provider error body if present.
+pub(crate) fn error_detail(body: &[u8]) -> String {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| "no error detail".into())
 }

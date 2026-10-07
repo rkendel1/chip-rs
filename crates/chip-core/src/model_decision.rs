@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! (each object may also carry "schema":"chip.work-decision.v1")
-//! {"decision":"request_capability","capability":"<id>","inputs":{"<name>":<string|integer|boolean>}}
+//! {"decision":"request_capability","capability":"<id>","inputs":{"<name>":<string|integer|boolean>}}  ("inputs" optional; a capability that declares no inputs accepts none, not even {})
 //! {"decision":"complete","summary":"<text>"}
 //! {"decision":"escalate","reason":"<text>"}
 //! {"decision":"block","reason":"<text>"}
@@ -34,6 +34,10 @@ pub const WORK_DECISION_SCHEMA: &str = "chip.work-decision.v1";
 const MAX_REPLY_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 1024;
 const MAX_INPUTS: usize = 16;
+/// A JSON string can cost up to six bytes per byte it carries (`\u00xx`), so a capability that
+/// declares a larger text input raises the reply limit by that much and no more.
+const ESCAPE_EXPANSION: usize = 6;
+const MAX_DESCRIPTION_CHARS: usize = 160;
 
 /// Interprets a model reply under the `chip.work-decision.v1` contract.
 #[derive(Debug, Clone, Copy, Default)]
@@ -216,10 +220,10 @@ impl<'a> Parser<'a> {
 
 /// The reply as one object: trimmed, optionally unwrapped from a single code fence, and nothing
 /// after the closing brace.
-fn parse_reply(output: &str) -> Result<Vec<(String, Json)>, DecisionError> {
-    if output.len() > MAX_REPLY_BYTES {
+fn parse_reply(output: &str, limit: usize) -> Result<Vec<(String, Json)>, DecisionError> {
+    if output.len() > limit {
         return Err(invalid(format!(
-            "the reply is {} bytes; the limit is {MAX_REPLY_BYTES}",
+            "the reply is {} bytes; the limit is {limit}",
             output.len()
         )));
     }
@@ -287,7 +291,14 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
         response: &ModelResponse,
         capabilities: &[Capability],
     ) -> Result<WorkDecision, DecisionError> {
-        let mut fields = parse_reply(&response.output)?;
+        let reply_limit = capabilities
+            .iter()
+            .filter_map(|c| c.descriptor.max_input_bytes)
+            .max()
+            .map_or(MAX_REPLY_BYTES, |most| {
+                MAX_REPLY_BYTES + ESCAPE_EXPANSION * most
+            });
+        let mut fields = parse_reply(&response.output, reply_limit)?;
         // The schema marker is optional (models echo it when told the schema) but, if present,
         // it must name this contract.
         if fields.iter().any(|(k, _)| k == "schema") {
@@ -300,15 +311,25 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
         match decision.as_str() {
             "request_capability" => {
                 let capability = take_string(&mut fields, "capability")?;
+                let inputs_present = fields.iter().any(|(k, _)| k == "inputs");
+                // The size of a text input is the capability's to declare, not the requester's.
+                let input_limit = capabilities
+                    .iter()
+                    .find(|c| c.descriptor.id.as_str() == capability)
+                    .and_then(|c| c.descriptor.max_input_bytes)
+                    .unwrap_or(MAX_TEXT_BYTES);
                 let inputs = match fields.iter().position(|(k, _)| k == "inputs") {
                     None => BTreeMap::new(),
                     Some(i) => match fields.remove(i).1 {
                         Json::Object(entries) if entries.len() <= MAX_INPUTS => entries
                             .into_iter()
                             .map(|(name, value)| match value {
-                                Json::Str(s) if s.len() <= MAX_TEXT_BYTES => {
+                                Json::Str(s) if s.len() <= input_limit => {
                                     Ok((name, InputValue::Text(s)))
                                 }
+                                Json::Str(_) => Err(invalid(format!(
+                                    "input \"{name}\" is longer than the {input_limit} bytes this capability accepts"
+                                ))),
                                 Json::Int(n) => Ok((name, InputValue::Integer(n))),
                                 Json::Bool(b) => Ok((name, InputValue::Bool(b))),
                                 _ => Err(invalid(format!(
@@ -337,6 +358,7 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
                     execution_id: ExecutionId::new(format!("model-{}", identifier(&response.id))),
                     capability_id: id,
                     inputs,
+                    inputs_present,
                 }))
             }
             "complete" => {
@@ -361,8 +383,9 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
         }
     }
 
+    /// Capabilities are listed in the order the provider declared them.
     fn question(&self, capabilities: &[Capability]) -> String {
-        let mut available: Vec<String> = capabilities
+        let available: Vec<String> = capabilities
             .iter()
             .filter(|c| c.availability == CapabilityAvailability::Available)
             .map(|c| {
@@ -372,14 +395,28 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
                     .iter()
                     .map(|i| i.name.as_str())
                     .collect();
-                if inputs.is_empty() {
+                let head = if inputs.is_empty() {
                     c.descriptor.id.to_string()
                 } else {
                     format!("{} (inputs: {})", c.descriptor.id, inputs.join(", "))
+                };
+                // One line of Chip-declared text, so the model can tell capabilities apart.
+                let description: String = c
+                    .descriptor
+                    .description
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(MAX_DESCRIPTION_CHARS)
+                    .collect();
+                if description.is_empty() {
+                    head
+                } else {
+                    format!("{head} - {description}")
                 }
             })
             .collect();
-        available.sort();
         format!(
             "Decide the next step. Reply with exactly one JSON object and nothing else; it is read as data and never run. Every object carries \"schema\":\"{WORK_DECISION_SCHEMA}\" (optional) and one of: \
 {{\"decision\":\"request_capability\",\"capability\":\"<id>\",\"inputs\":{{\"<name>\":<string|integer|boolean>}}}} (inputs optional), \

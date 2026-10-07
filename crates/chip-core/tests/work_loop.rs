@@ -214,6 +214,7 @@ fn names(report: &WorkReport) -> Vec<String> {
         .events
         .iter()
         .map(|e| match e {
+            WorkEvent::GoalEvaluated { satisfied, .. } => format!("GoalEvaluated {satisfied}"),
             WorkEvent::WorkStarted { .. } => "WorkStarted".to_string(),
             WorkEvent::Capability(CapabilityEvent::CapabilitiesRequested) => {
                 "CapabilitiesRequested".into()

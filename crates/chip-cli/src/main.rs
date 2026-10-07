@@ -2,10 +2,15 @@ mod benchmark;
 mod corpus_eval;
 mod decision_state_cmd;
 mod graph_cmd;
+mod horizon;
 mod laya_eval;
 mod live_benchmark;
 mod local_model_bench;
 mod native;
+mod pax_work;
+mod provider_selection;
+mod software_work;
+mod verify;
 mod wasm_decision_bench;
 mod work_demo;
 
@@ -533,13 +538,25 @@ fn config_from_env(get: impl Fn(&str) -> Option<String>) -> Result<HttpProviderC
             .ok_or_else(|| FxError::Configuration(format!("{name} is not set")))
     };
     let provider = get("CHIP_PROVIDER").unwrap_or_else(|| PROVIDER_OPENAI_COMPATIBLE.to_string());
-    let mut config = HttpProviderConfig::new(
-        provider,
-        required("CHIP_MODEL")?,
-        required("CHIP_ENDPOINT")?,
-    );
+    // A provider with one well-known endpoint does not need CHIP_ENDPOINT.
+    let set = |name: &str| get(name).filter(|v| !v.trim().is_empty());
+    let endpoint = match (provider == fx_provider_http::PROVIDER_OLLAMA)
+        .then(|| set("CHIP_OLLAMA_ENDPOINT"))
+        .flatten()
+        .or_else(|| set("CHIP_ENDPOINT"))
+    {
+        Some(endpoint) => endpoint,
+        None => match fx_provider_http::default_endpoint(&provider) {
+            Some(endpoint) => endpoint.to_string(),
+            None => required("CHIP_ENDPOINT")?,
+        },
+    };
+    let mut config = HttpProviderConfig::new(provider, required("CHIP_MODEL")?, endpoint);
     if let Some(key) = get("CHIP_API_KEY").filter(|k| !k.is_empty()) {
         config = config.with_api_key(Secret::new(key));
+    }
+    if let Some(workspace) = get("CHIP_ANTHROPIC_WORKSPACE_ID").filter(|v| !v.trim().is_empty()) {
+        config = config.with_workspace_id(workspace);
     }
     Ok(config)
 }
@@ -566,6 +583,19 @@ async fn run_configured(prompt: String) -> Result<(), String> {
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
+        println!("chip-cli {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if args.len() > 1 && args[1] == "work" {
+        std::process::exit(software_work::work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "verify" {
+        std::process::exit(verify::verify(&args[2..]).await);
+    }
+
     if args.len() > 1 && args[1] == "init" {
         std::process::exit(graph_cmd::init(&args[2..]));
     }
@@ -584,6 +614,22 @@ async fn main() {
 
     if args.len() > 1 && args[1] == "--test-work" {
         std::process::exit(work_demo::test_work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "--horizon-matrix" {
+        std::process::exit(horizon::matrix(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "--test-pax-work" {
+        std::process::exit(pax_work::test_pax_work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "--utility-matrix" {
+        std::process::exit(horizon::utility_matrix(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "--test-horizon-live" {
+        std::process::exit(horizon::live(&args[2..]).await);
     }
 
     if args.len() > 1 && args[1] == "--test-real-model-work" {

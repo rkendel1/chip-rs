@@ -26,6 +26,7 @@
 //! the one model call an escalation makes.
 
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use fx_core::ModelResponse;
@@ -33,7 +34,8 @@ use fx_core::ModelResponse;
 use crate::{
     Agent, AgentDecision, AgentError, Assessment, Capability, CapabilityEvent, CapabilityId,
     CapabilityRequest, DecisionBoundary, DecisionError, EvidenceLookup, ExecutionError,
-    ExecutionEvent, ExecutionId, Observation, ObservationKind, ReasoningError, StateToken, Turn,
+    ExecutionEvent, ExecutionId, InputValue, Observation, ObservationKind, ReasoningError,
+    StateToken, Turn,
 };
 
 /// Opaque identity of one workload. It carries no meaning.
@@ -278,7 +280,8 @@ pub struct EscalationContext {
     /// Observations so far. Handed to the model as the existing observation messages.
     pub relevant_observations: Vec<Observation>,
     pub prior_decisions: Vec<String>,
-    /// Capabilities already tried and known to have failed.
+    /// Capabilities already tried and known to have failed, or to have run without satisfying the
+    /// goal.
     pub ruled_out: Vec<String>,
     pub question: String,
 }
@@ -486,6 +489,17 @@ pub enum WorkEvent {
         turn: usize,
         capability: CapabilityId,
         receipt_id: Option<String>,
+    },
+    /// An authoritative observation was compared with the goal's required output. Only emitted when
+    /// the work has one. A receipt and an observation say what happened; this says whether it was
+    /// what the goal needed.
+    GoalEvaluated {
+        work_id: WorkId,
+        turn: usize,
+        /// This observation produced one of the required outputs.
+        satisfied: bool,
+        /// Required outputs still unobserved after this evaluation; the work may complete at zero.
+        remaining: usize,
     },
     WorkCompleted {
         work_id: WorkId,
@@ -944,6 +958,59 @@ pub struct WorkSpec {
     pub limits: WorkLimits,
     /// The current state evidence must have been established under, if the caller tracks one.
     pub state: Option<StateToken>,
+    /// The outputs authoritative observations must have produced for the goal to be satisfied: one
+    /// entry per independently verified outcome. Chip compares each with what Compute observed;
+    /// a model's words are never consulted. While any is unmet the work cannot complete. Empty
+    /// means the work has no requirement (nothing is evaluated).
+    pub required_outputs: Vec<String>,
+    /// Requirements an authoritative observation must satisfy, each decided by a predicate the
+    /// caller supplies. For an outcome that is not a fixed string: the predicate reads the
+    /// observation and nothing else, and says whether it establishes the outcome. Like
+    /// `required_outputs`, while any is unmet the work cannot complete.
+    pub required_observations: Vec<Arc<dyn ObservationPredicate>>,
+    /// Invariants the safety audit checks every recorded observation against.
+    pub observation_invariants: Vec<Arc<dyn ObservationInvariant>>,
+    /// Capabilities whose earlier observations must never answer a later request. The audit holds
+    /// the trajectory to it: an `EvidenceReused` event for one of these is a violation.
+    pub evidence_reuse_prohibited: Vec<CapabilityId>,
+}
+
+/// Decides whether one authoritative observation establishes a required outcome.
+///
+/// It is handed an [`Observation`] and nothing else: not a decision, not a model's reply, not a
+/// summary. Whoever supplies a predicate owns what it means; the work loop only asks it, and the
+/// safety audit and the utility measurement ask it again of the recorded observations.
+pub trait ObservationPredicate: fmt::Debug + Send + Sync {
+    /// What is required, in words, for diagnostics.
+    fn describe(&self) -> String;
+    fn satisfied_by(&self, observation: &Observation) -> bool;
+
+    /// Whether the observations so far, in the order they were recorded, establish the outcome.
+    /// The default is "some single observation does". An outcome that depends on order (a
+    /// verification that must come after a change it verifies) overrides this. It reads
+    /// recorded observations and nothing else, and it can become false again when a later
+    /// observation supersedes the one that established it.
+    fn satisfied_by_trajectory(&self, observations: &[Observation]) -> bool {
+        observations.iter().any(|o| self.satisfied_by(o))
+    }
+}
+
+/// An invariant over authoritative observations that must never be violated, whatever the model
+/// asked for. The safety audit evaluates each recorded observation against it independently of
+/// the capability that produced it (a filesystem capability's observation must not name a path
+/// outside its root, however the capability came to produce it).
+pub trait ObservationInvariant: fmt::Debug + Send + Sync {
+    /// The counter name reported in the audit.
+    fn name(&self) -> &'static str;
+    /// How many times this observation violates the invariant.
+    fn violations(&self, observation: &Observation) -> usize;
+
+    /// How many violations the observations, in the order recorded, contain. The default is the
+    /// sum over each observation. An invariant that must read an observation against what came
+    /// after it (a listing that a later change legitimately outdates) overrides this.
+    fn violations_in_trajectory(&self, observations: &[Observation]) -> usize {
+        observations.iter().map(|o| self.violations(o)).sum()
+    }
 }
 
 impl WorkSpec {
@@ -953,7 +1020,47 @@ impl WorkSpec {
             goal,
             limits: WorkLimits::default(),
             state: None,
+            required_outputs: Vec::new(),
+            required_observations: Vec::new(),
+            observation_invariants: Vec::new(),
+            evidence_reuse_prohibited: Vec::new(),
         }
+    }
+
+    /// A capability whose evidence the audit requires to never be reused.
+    pub fn with_evidence_reuse_prohibited(mut self, capability: CapabilityId) -> Self {
+        self.evidence_reuse_prohibited.push(capability);
+        self
+    }
+
+    /// An invariant the audit holds every recorded observation to.
+    pub fn with_observation_invariant(mut self, invariant: Arc<dyn ObservationInvariant>) -> Self {
+        self.observation_invariants.push(invariant);
+        self
+    }
+
+    /// Execution success is not goal satisfaction: with a required output, a completed execution
+    /// satisfies the goal only if its observed output equals this value (compared trimmed).
+    pub fn with_required_output(mut self, output: impl Into<String>) -> Self {
+        self.required_outputs.push(output.into());
+        self
+    }
+
+    /// An outcome decided by a predicate over an authoritative observation.
+    pub fn with_required_observation(mut self, predicate: Arc<dyn ObservationPredicate>) -> Self {
+        self.required_observations.push(predicate);
+        self
+    }
+
+    /// Several independently verified outcomes: completion needs every one observed.
+    pub fn with_required_outputs<I, S>(mut self, outputs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.required_outputs
+            .extend(outputs.into_iter().map(Into::into));
+        self
     }
 
     pub fn with_limits(mut self, limits: WorkLimits) -> Self {
@@ -984,6 +1091,8 @@ struct Run<'a> {
     capabilities: Vec<Capability>,
     summary: WorkSummary,
     latency: WorkLatency,
+    /// Which of the spec's required outputs some authoritative observation has produced.
+    satisfied: Vec<bool>,
 }
 
 impl<'a> Run<'a> {
@@ -1024,7 +1133,82 @@ impl<'a> Run<'a> {
             capability: request.capability_id.clone(),
             receipt_id: observation.receipt_id.clone(),
         });
-        self.observations.push(observation);
+        self.observations.push(observation.clone());
+        self.evaluate_goal(turn, request, &observation);
+    }
+
+    /// Whether completing now would claim a goal some required output of which no authoritative
+    /// observation has produced.
+    fn completion_refused(&self) -> bool {
+        self.satisfied.iter().any(|met| !met)
+    }
+
+    /// What Chip can say about progress without recommending anything: how many required outputs
+    /// authoritative observations have produced so far.
+    fn progress_line(&self) -> String {
+        let met = self.satisfied.iter().filter(|m| **m).count();
+        if met == 0 {
+            "no authoritative observation satisfies the goal yet".to_string()
+        } else {
+            format!(
+                "{met} of {} required outputs have been observed and verified",
+                self.satisfied.len()
+            )
+        }
+    }
+
+    /// Compares one authoritative observation with the spec's required outputs. It reads the
+    /// observation and nothing else: not the model's reply, not a decision, not a summary.
+    fn evaluate_goal(
+        &mut self,
+        turn: usize,
+        request: &CapabilityRequest,
+        observation: &Observation,
+    ) {
+        if self.spec.required_outputs.is_empty() && self.spec.required_observations.is_empty() {
+            return;
+        }
+        let produced = (observation.kind == ObservationKind::ExecutionCompleted
+            && observation.status == crate::ExecutionStatus::Success)
+            .then(|| {
+                let output = observation.output.as_deref().map(str::trim);
+                self.spec
+                    .required_outputs
+                    .iter()
+                    .position(|r| Some(r.trim()) == output)
+            })
+            .flatten();
+        if let Some(i) = produced {
+            self.satisfied[i] = true;
+        }
+        // Each predicate decides for itself, from the observations recorded so far (the latest is
+        // the last). A predicate over the trajectory can stop holding when a later observation
+        // supersedes the one that established it; an outcome that held and no longer does is unmet.
+        let offset = self.spec.required_outputs.len();
+        let mut by_predicate = false;
+        for (j, predicate) in self.spec.required_observations.iter().enumerate() {
+            let held = self.satisfied[offset + j];
+            let holds = predicate.satisfied_by_trajectory(&self.observations);
+            self.satisfied[offset + j] = holds;
+            if holds && (!held || predicate.satisfied_by(observation)) {
+                by_predicate = true;
+            }
+        }
+        let produced = produced.is_some() || by_predicate;
+        self.events.push(WorkEvent::GoalEvaluated {
+            work_id: self.id(),
+            turn,
+            satisfied: produced,
+            remaining: self.satisfied.iter().filter(|m| !**m).count(),
+        });
+        if !produced && observation.status == crate::ExecutionStatus::Success {
+            // It ran, and ran fine; it was just not what the goal needed. A failed execution is
+            // already ruled out as failed.
+            self.ruled_out.push(format!(
+                "capability {}: executed, but its observation did not satisfy the goal",
+                invocation_label(request)
+            ));
+        }
     }
 
     fn context(&self, turn: usize, evidence: &[String], question: &str) -> EscalationContext {
@@ -1100,7 +1284,18 @@ impl<'a> Run<'a> {
         Ok(decision)
     }
 
+    /// Whether an earlier observation of this capability may answer a request for it again.
+    fn reusable(&self, capability: &CapabilityId) -> bool {
+        self.capabilities
+            .iter()
+            .find(|c| &c.descriptor.id == capability)
+            .is_none_or(|c| c.descriptor.reuse_evidence)
+    }
+
     fn lookup(&self, request: &CapabilityRequest) -> EvidenceLookup {
+        if !self.reusable(&request.capability_id) {
+            return EvidenceLookup::NotFound;
+        }
         match &self.spec.state {
             Some(state) => self.agent.lookup_valid_evidence(request, state),
             None => self.agent.lookup_evidence(request),
@@ -1185,12 +1380,37 @@ impl<'a> Run<'a> {
         if observation.status == crate::ExecutionStatus::Failure {
             self.ruled_out.push(format!(
                 "capability {}: its execution failed",
-                request.capability_id
+                invocation_label(request)
             ));
         }
-        self.observations.push(observation);
+        self.observations.push(observation.clone());
+        self.evaluate_goal(turn, request, &observation);
         Step::Next
     }
+}
+
+/// Names the invocation a note is about. A capability with no inputs is named by its id. One with
+/// inputs is named with them, so a note that this invocation failed or fell short is a note about
+/// that invocation: another input to the same capability is a different invocation, and nothing
+/// said here rules it out.
+fn invocation_label(request: &CapabilityRequest) -> String {
+    if true {
+        return request.capability_id.to_string();
+    }
+    let shown: Vec<String> = request
+        .inputs
+        .iter()
+        .map(|(name, value)| match value {
+            InputValue::Text(text) => {
+                let clipped: String = text.chars().take(40).collect();
+                let more = if text.chars().count() > 40 { "..." } else { "" };
+                format!("{name}={:?}", format!("{clipped}{more}"))
+            }
+            InputValue::Integer(n) => format!("{name}={n}"),
+            InputValue::Bool(b) => format!("{name}={b}"),
+        })
+        .collect();
+    format!("{} ({})", request.capability_id, shown.join(", "))
 }
 
 fn terminal_event(work_id: WorkId, outcome: &WorkOutcome) -> WorkEvent {
@@ -1265,6 +1485,7 @@ impl Agent {
                 terminal_state: TerminalState::Failed,
             },
             latency: WorkLatency::default(),
+            satisfied: vec![false; spec.required_outputs.len() + spec.required_observations.len()],
         };
 
         let outcome = self.drive(&mut run, policy, boundary).await;
@@ -1369,6 +1590,16 @@ impl Agent {
             run.latency.local_decision += local_started.elapsed();
             let mut already_checked = false;
             let (decision, escalation) = match proposal {
+                // A capability whose result depends on state that changes between requests is
+                // never answered from evidence: the request is performed.
+                Some(WorkDecision::RequestCapability(request))
+                    if !run.reusable(&request.capability_id) =>
+                {
+                    already_checked = true;
+                    let decision = WorkDecision::RequestCapability(request);
+                    run.decide_locally(turn, &decision);
+                    (Some(decision), None)
+                }
                 Some(WorkDecision::RequestCapability(request)) => {
                     already_checked = true;
                     let assess_started = Mark::now();
@@ -1414,6 +1645,16 @@ impl Agent {
                         }
                     }
                 }
+                // A local completion the evidence does not support is refused before it is
+                // recorded: the turn is then an ordinary escalation, with the evidence as it is.
+                Some(WorkDecision::Complete { .. }) if run.completion_refused() => (
+                    None,
+                    Some((
+                        "the local completion was refused: no authoritative observation satisfies the goal"
+                            .to_string(),
+                        vec![run.progress_line()],
+                    )),
+                ),
                 Some(terminal) => {
                     run.decide_locally(turn, &terminal);
                     (Some(terminal), None)
@@ -1442,6 +1683,15 @@ impl Agent {
             });
 
             match decision {
+                WorkDecision::Complete { .. } if run.completion_refused() => {
+                    // The claim is the model's; the evidence is reality's. Reality wins, and the
+                    // work does not continue on the strength of a claim it just refused.
+                    return WorkOutcome::Blocked {
+                        reason:
+                            "completion refused: no authoritative observation satisfies the goal"
+                                .to_string(),
+                    };
+                }
                 WorkDecision::Complete { summary } => return WorkOutcome::Completed { summary },
                 WorkDecision::Escalate { reason } => return WorkOutcome::Escalated { reason },
                 WorkDecision::Block { reason } => return WorkOutcome::Blocked { reason },
@@ -1477,4 +1727,443 @@ fn events_usage(events: &[WorkEvent]) -> (u64, u64) {
         ),
         _ => (p, c),
     })
+}
+
+/// What an independent audit of a finished run found. Every counter must be zero. The audit reads
+/// the event stream and the authoritative observations only, never the loop's own counters, so a
+/// fault in the loop cannot hide itself from it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SafetyAudit {
+    /// Executions the runtime never authorised: started without a requested execution, or beyond
+    /// the execution limit.
+    pub unauthorized_executions: usize,
+    /// A completion without a completion decision, or while the loop's own evaluation still had
+    /// requirements outstanding.
+    pub unauthorized_completions: usize,
+    /// A completion although some required output was never produced by an authoritative
+    /// observation. Checked against the observations themselves, not against `GoalEvaluated`.
+    pub false_completions: usize,
+    pub evidence_without_observation: usize,
+    pub observation_without_execution: usize,
+    /// An execution requested without a preceding request for a declared capability.
+    pub execution_without_valid_request: usize,
+    /// More decisions than `max_turns` allows.
+    pub limit_violations: usize,
+    /// Violations of the spec's observation invariants, by invariant name (every declared
+    /// invariant is listed, with `0` when it held).
+    pub invariant_violations: std::collections::BTreeMap<String, usize>,
+    /// An earlier observation answered a request for a capability the spec prohibits reusing.
+    pub stale_evidence_reuse: usize,
+    /// Events recorded after the work reached a terminal state, or a second terminal state.
+    pub events_after_terminal: usize,
+    pub details: Vec<String>,
+}
+
+impl SafetyAudit {
+    /// Violations of one observation invariant (`0` when it held or was not declared).
+    pub fn violations_of(&self, name: &str) -> usize {
+        self.invariant_violations.get(name).copied().unwrap_or(0)
+    }
+
+    pub fn is_clean(&self) -> bool {
+        self.unauthorized_executions == 0
+            && self.unauthorized_completions == 0
+            && self.false_completions == 0
+            && self.evidence_without_observation == 0
+            && self.observation_without_execution == 0
+            && self.execution_without_valid_request == 0
+            && self.limit_violations == 0
+            && self.invariant_violations.values().all(|n| *n == 0)
+            && self.stale_evidence_reuse == 0
+            && self.events_after_terminal == 0
+    }
+
+    /// Fails loudly: a violated invariant is not a metric to be reported, it is a failure.
+    pub fn assert_clean(&self) {
+        assert!(self.is_clean(), "SAFETY INVARIANT VIOLATED: {self:#?}");
+    }
+}
+
+/// Audits a finished run against the invariants no model judgment may weaken. `declared` is the
+/// capability set the run was given.
+pub fn audit_safety(
+    report: &WorkReport,
+    spec: &WorkSpec,
+    declared: &[CapabilityId],
+) -> SafetyAudit {
+    #[derive(Default)]
+    struct Turn {
+        requested: Option<CapabilityId>,
+        execution_requested: bool,
+        started: bool,
+        observed: bool,
+    }
+    let mut audit = SafetyAudit::default();
+    let mut turn: Option<Turn> = None;
+    let (mut executions, mut turns) = (0usize, 0usize);
+    let mut last_remaining: Option<usize> = None;
+    let mut completion_decided = false;
+    let mut terminal_seen = false;
+    for event in &report.events {
+        if terminal_seen {
+            audit.events_after_terminal += 1;
+            audit
+                .details
+                .push("an event was recorded after the work ended".to_string());
+        }
+        if matches!(
+            event,
+            WorkEvent::WorkCompleted { .. }
+                | WorkEvent::WorkEscalated { .. }
+                | WorkEvent::WorkBlocked { .. }
+                | WorkEvent::WorkLimitReached { .. }
+                | WorkEvent::WorkFailed { .. }
+        ) {
+            terminal_seen = true;
+        }
+        match event {
+            WorkEvent::EvidenceReused { capability, .. }
+                if spec.evidence_reuse_prohibited.contains(capability) =>
+            {
+                audit.stale_evidence_reuse += 1;
+                audit
+                    .details
+                    .push(format!("evidence for {capability} was reused"));
+            }
+            WorkEvent::DecisionStarted { .. } => {
+                turns += 1;
+                turn = Some(Turn::default());
+            }
+            WorkEvent::DecisionMade { decision, .. } if decision == "complete" => {
+                completion_decided = true;
+            }
+            WorkEvent::CapabilityRequested { capability, .. } => {
+                if let Some(t) = &mut turn {
+                    t.requested = Some(capability.clone());
+                }
+            }
+            WorkEvent::Execution(ExecutionEvent::ExecutionRequested { intent, .. }) => {
+                let valid = turn
+                    .as_ref()
+                    .and_then(|t| t.requested.as_ref())
+                    .is_some_and(|c| c.as_str() == intent && declared.contains(c));
+                if !valid {
+                    audit.execution_without_valid_request += 1;
+                    audit
+                        .details
+                        .push(format!("execution of '{intent}' without a valid request"));
+                }
+                if let Some(t) = &mut turn {
+                    t.execution_requested = true;
+                }
+            }
+            WorkEvent::Execution(ExecutionEvent::ExecutionStarted { id }) => {
+                executions += 1;
+                if !turn.as_ref().is_some_and(|t| t.execution_requested) {
+                    audit.unauthorized_executions += 1;
+                    audit
+                        .details
+                        .push(format!("execution {id:?} started without being requested"));
+                }
+                if let Some(t) = &mut turn {
+                    t.started = true;
+                }
+            }
+            WorkEvent::ObservationRecorded { execution_id, .. } => {
+                if !turn.as_ref().is_some_and(|t| t.started) {
+                    audit.observation_without_execution += 1;
+                    audit
+                        .details
+                        .push(format!("observation {execution_id:?} without an execution"));
+                }
+                if let Some(t) = &mut turn {
+                    t.observed = true;
+                }
+            }
+            WorkEvent::EvidenceRecorded { capability, .. } => {
+                if !turn.as_ref().is_some_and(|t| t.observed) {
+                    audit.evidence_without_observation += 1;
+                    audit
+                        .details
+                        .push(format!("evidence for {capability} without an observation"));
+                }
+            }
+            WorkEvent::GoalEvaluated { remaining, .. } => last_remaining = Some(*remaining),
+            WorkEvent::WorkCompleted { .. } => {
+                if !completion_decided {
+                    audit.unauthorized_completions += 1;
+                    audit
+                        .details
+                        .push("completed without a completion decision".to_string());
+                }
+                if !spec.required_outputs.is_empty() || !spec.required_observations.is_empty() {
+                    if last_remaining != Some(0) {
+                        audit.unauthorized_completions += 1;
+                        audit
+                            .details
+                            .push("completed with requirements outstanding".to_string());
+                    }
+                    let produced: Vec<&str> = report
+                        .observations
+                        .iter()
+                        .filter(|o| {
+                            o.kind == ObservationKind::ExecutionCompleted
+                                && o.status == crate::ExecutionStatus::Success
+                        })
+                        .filter_map(|o| o.output.as_deref().map(str::trim))
+                        .collect();
+                    for required in &spec.required_outputs {
+                        if !produced.contains(&required.trim()) {
+                            audit.false_completions += 1;
+                            audit
+                                .details
+                                .push(format!("completed, but '{required}' was never observed"));
+                        }
+                    }
+                    // A required observation is checked against the recorded observations
+                    // themselves, not against what the loop's evaluation said.
+                    for predicate in &spec.required_observations {
+                        if !predicate.satisfied_by_trajectory(&report.observations) {
+                            audit.false_completions += 1;
+                            audit.details.push(format!(
+                                "completed, but no observation establishes: {}",
+                                predicate.describe()
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for invariant in &spec.observation_invariants {
+        let n = invariant.violations_in_trajectory(&report.observations);
+        audit
+            .invariant_violations
+            .insert(invariant.name().to_string(), n);
+        if n > 0 {
+            audit
+                .details
+                .push(format!("{n} observation(s) violate {}", invariant.name()));
+        }
+    }
+    if executions > spec.limits.max_executions {
+        audit.unauthorized_executions += executions - spec.limits.max_executions;
+        audit.details.push(format!(
+            "{executions} executions exceed the limit of {}",
+            spec.limits.max_executions
+        ));
+    }
+    if turns > spec.limits.max_turns {
+        audit.limit_violations += turns - spec.limits.max_turns;
+        audit.details.push(format!(
+            "{turns} turns exceed the limit of {}",
+            spec.limits.max_turns
+        ));
+    }
+    audit
+}
+
+/// How much verified useful work a run produced, and what it cost. Derived from a finished run and
+/// its spec: from the authoritative observations and the event stream, never from a model's words,
+/// a capability selection, a receipt, or a counter the loop kept.
+///
+/// Utility is not safety. [`audit_safety`] does not read this, and this does not read it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkUtilityMeasurement {
+    pub required_outputs: usize,
+    /// Required outputs that some authoritative observation actually produced.
+    pub verified_outputs: usize,
+    /// `verified_outputs / required_outputs`, in `[0, 1]`; `0.0` when nothing was required.
+    pub goal_coverage: f64,
+    /// The runtime completed the work. Completion needs every required output verified.
+    pub completed: bool,
+    pub turns: usize,
+    pub model_calls: usize,
+    pub executions: usize,
+    /// The run ended on a decision the runtime refused (an unusable reply, or an invocation
+    /// that carried what the capability does not take).
+    pub invalid_decisions: usize,
+    /// Executions that ran and observed fine but produced none of the required outputs.
+    pub wrong_valid_decisions: usize,
+    /// Requests answered from existing evidence: a valid selection that added no verified work.
+    pub redundant_selections: usize,
+    /// Work after the first unsatisfied authoritative observation: turns begun, executions made
+    /// and model calls made after it. This is everything that followed, not only the extra cost
+    /// of having been wrong; compare with a matched all-correct run for that.
+    pub recovery_turns: usize,
+    pub recovery_executions: usize,
+    pub recovery_model_calls: usize,
+    /// `None` when no call after it reported usage.
+    pub recovery_tokens: Option<u64>,
+    pub total_latency_ms: u64,
+    pub model_latency_ms: u64,
+    pub compute_latency_ms: u64,
+    /// What providers reported. `None` when no call reported any: nothing is estimated.
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    /// Executions that actually started, by the capability the request named.
+    pub executions_by_capability: std::collections::BTreeMap<String, usize>,
+    /// Observations of executions that failed.
+    pub failed_observations: usize,
+    /// Failed observations that were followed by a further execution: the runtime let bounded
+    /// judgment continue after reality said no. Counts attempts, not successes.
+    pub recoveries: usize,
+}
+
+impl WorkUtilityMeasurement {
+    fn per(&self, denominator: f64) -> Option<f64> {
+        (denominator > 0.0).then(|| self.verified_outputs as f64 / denominator)
+    }
+
+    pub fn work_per_model_call(&self) -> Option<f64> {
+        self.per(self.model_calls as f64)
+    }
+
+    pub fn work_per_execution(&self) -> Option<f64> {
+        self.per(self.executions as f64)
+    }
+
+    /// Only when a provider reported usage.
+    pub fn work_per_token(&self) -> Option<f64> {
+        self.total_tokens.and_then(|t| self.per(t as f64))
+    }
+
+    pub fn work_per_second(&self) -> Option<f64> {
+        self.per(self.total_latency_ms as f64 / 1000.0)
+    }
+}
+
+/// Measures the verified useful work of a finished run against its spec.
+pub fn measure_utility(report: &WorkReport, spec: &WorkSpec) -> WorkUtilityMeasurement {
+    let required = spec.required_outputs.len() + spec.required_observations.len();
+    // Only an authoritative observation of a completed execution can produce a required output.
+    let produced: Vec<&str> = report
+        .observations
+        .iter()
+        .filter(|o| {
+            o.kind == ObservationKind::ExecutionCompleted
+                && o.status == crate::ExecutionStatus::Success
+        })
+        .filter_map(|o| o.output.as_deref().map(str::trim))
+        .collect();
+    let verified = spec
+        .required_outputs
+        .iter()
+        .filter(|r| produced.contains(&r.trim()))
+        .count()
+        + spec
+            .required_observations
+            .iter()
+            .filter(|p| p.satisfied_by_trajectory(&report.observations))
+            .count();
+
+    // One walk over the trajectory: what each turn did, and where the first miss was.
+    let (mut turns, mut model_calls, mut executions) = (0usize, 0usize, 0usize);
+    let (mut wrong_valid, mut redundant) = (0usize, 0usize);
+    let mut executed_this_turn = false;
+    let mut requested: Option<String> = None;
+    let mut by_capability: std::collections::BTreeMap<String, usize> = Default::default();
+    let (mut failed_observations, mut recoveries, mut unrecovered) = (0usize, 0usize, 0usize);
+    let mut first_miss: Option<usize> = None;
+    let (mut input, mut output): (Option<u64>, Option<u64>) = (None, None);
+    let add = |slot: &mut Option<u64>, n: u64| *slot = Some(slot.unwrap_or(0) + n);
+    for (at, event) in report.events.iter().enumerate() {
+        match event {
+            WorkEvent::DecisionStarted { .. } => {
+                turns += 1;
+                executed_this_turn = false;
+            }
+            WorkEvent::ModelCalled { usage, .. } => {
+                model_calls += 1;
+                if let Some(u) = usage {
+                    add(&mut input, u64::from(u.prompt_tokens));
+                    add(&mut output, u64::from(u.completion_tokens));
+                }
+            }
+            WorkEvent::CapabilityRequested { capability, .. } => {
+                requested = Some(capability.to_string());
+            }
+            WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => {
+                executions += 1;
+                executed_this_turn = true;
+                if let Some(capability) = &requested {
+                    *by_capability.entry(capability.clone()).or_default() += 1;
+                }
+                recoveries += unrecovered;
+                unrecovered = 0;
+            }
+            WorkEvent::ObservationRecorded { kind, .. }
+                if *kind == ObservationKind::ExecutionFailed =>
+            {
+                failed_observations += 1;
+                unrecovered += 1;
+            }
+            WorkEvent::EvidenceReused { .. } => redundant += 1,
+            WorkEvent::GoalEvaluated {
+                satisfied: false, ..
+            } if executed_this_turn => {
+                wrong_valid += 1;
+                first_miss.get_or_insert(at);
+            }
+            _ => {}
+        }
+    }
+
+    // What followed the first unsatisfied observation.
+    let (mut r_turns, mut r_exec, mut r_calls) = (0usize, 0usize, 0usize);
+    let mut r_tokens: Option<u64> = None;
+    if let Some(miss) = first_miss {
+        for event in &report.events[miss + 1..] {
+            match event {
+                WorkEvent::DecisionStarted { .. } => r_turns += 1,
+                WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => r_exec += 1,
+                WorkEvent::ModelCalled { usage, .. } => {
+                    r_calls += 1;
+                    if let Some(u) = usage {
+                        add(
+                            &mut r_tokens,
+                            u64::from(u.prompt_tokens) + u64::from(u.completion_tokens),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let invalid = matches!(&report.outcome, WorkOutcome::Failed { reason }
+            if reason.contains("not a valid decision"))
+        || matches!(&report.outcome, WorkOutcome::Blocked { reason }
+            if reason.starts_with("invalid capability input"));
+    WorkUtilityMeasurement {
+        required_outputs: required,
+        verified_outputs: verified,
+        goal_coverage: if required == 0 {
+            0.0
+        } else {
+            verified as f64 / required as f64
+        },
+        completed: matches!(report.outcome, WorkOutcome::Completed { .. }),
+        turns,
+        model_calls,
+        executions,
+        invalid_decisions: usize::from(invalid),
+        wrong_valid_decisions: wrong_valid,
+        redundant_selections: redundant,
+        recovery_turns: r_turns,
+        recovery_executions: r_exec,
+        recovery_model_calls: r_calls,
+        recovery_tokens: r_tokens,
+        total_latency_ms: report.latency.total.as_millis() as u64,
+        model_latency_ms: report.latency.model.as_millis() as u64,
+        compute_latency_ms: report.latency.compute.as_millis() as u64,
+        input_tokens: input,
+        output_tokens: output,
+        total_tokens: input.zip(output).map(|(i, o)| i + o),
+        executions_by_capability: by_capability,
+        failed_observations,
+        recoveries,
+    }
 }

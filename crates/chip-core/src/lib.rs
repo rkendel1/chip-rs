@@ -1,3 +1,4 @@
+mod capability_set;
 mod decision;
 mod decision_state;
 mod evidence;
@@ -6,10 +7,12 @@ mod observation;
 mod reasoning;
 mod work;
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+pub use capability_set::{CapabilityBackend, CapabilitySet};
 pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
@@ -29,10 +32,12 @@ pub use reasoning::{
 };
 pub use work::{
     ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, EscalationContextPolicy,
-    FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy, RespondCompletes,
-    ScriptedPolicy, TerminalState, TurnTrace, WorkDecision, WorkDecisionBoundary, WorkEvent,
-    WorkGoal, WorkId, WorkLatency, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec,
-    WorkState, WorkSummary, WorkTrajectory, WorkView, trace, verify_trajectory,
+    FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy,
+    ObservationInvariant, ObservationPredicate, RespondCompletes, SafetyAudit, ScriptedPolicy,
+    TerminalState, TurnTrace, WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId,
+    WorkLatency, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec, WorkState,
+    WorkSummary, WorkTrajectory, WorkUtilityMeasurement, WorkView, audit_safety, measure_utility,
+    trace, verify_trajectory,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +147,13 @@ pub struct CapabilityDescriptor {
     pub description: String,
     pub version: Option<String>,
     pub inputs: Vec<CapabilityInput>,
+    /// The largest a text input of this capability may be, in bytes. `None` is the boundary's
+    /// default (small). Declared by the capability, never by a requester.
+    pub max_input_bytes: Option<usize>,
+    /// Whether an earlier observation of this capability may answer a later identical request.
+    /// A capability whose result depends on state that changes between requests (a project's
+    /// files, for one) is always performed again: reality is asked, not remembered.
+    pub reuse_evidence: bool,
 }
 
 impl CapabilityDescriptor {
@@ -152,7 +164,20 @@ impl CapabilityDescriptor {
             description: description.into(),
             version: None,
             inputs: Vec::new(),
+            max_input_bytes: None,
+            reuse_evidence: true,
         }
+    }
+
+    pub fn with_max_input_bytes(mut self, bytes: usize) -> Self {
+        self.max_input_bytes = Some(bytes);
+        self
+    }
+
+    /// Marks the capability's observations as never reusable for a later request.
+    pub fn without_evidence_reuse(mut self) -> Self {
+        self.reuse_evidence = false;
+        self
     }
 }
 
@@ -206,6 +231,18 @@ pub trait CapabilityProvider: Send + Sync {
 
     /// Whether a described capability can currently be used. Must not perform it.
     async fn availability(&self, id: &CapabilityId) -> CapabilityAvailability;
+
+    /// Checks the values of a request's inputs against the capability's own rules (a path that
+    /// stays inside a root, a size limit), after the declared names and requiredness have been
+    /// checked. The capability owns what is acceptable; Chip runs this before anything executes,
+    /// so a rejected request never reaches an executor. Must not perform the capability.
+    async fn validate_inputs(
+        &self,
+        _id: &CapabilityId,
+        _inputs: &BTreeMap<String, InputValue>,
+    ) -> Result<(), CapabilityError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +280,9 @@ impl fmt::Display for ExecutionId {
 pub struct ExecutionRequest {
     pub id: ExecutionId,
     pub intent: String,
+    /// The typed inputs the capability declared and the request supplied, already validated
+    /// against the declaration. Empty for a capability that declares none.
+    pub inputs: BTreeMap<String, InputValue>,
 }
 
 impl ExecutionRequest {
@@ -250,7 +290,13 @@ impl ExecutionRequest {
         Self {
             id,
             intent: intent.into(),
+            inputs: BTreeMap::new(),
         }
+    }
+
+    pub fn with_inputs(mut self, inputs: BTreeMap<String, InputValue>) -> Self {
+        self.inputs = inputs;
+        self
     }
 }
 
@@ -437,6 +483,7 @@ pub struct Agent {
     observer: Option<Arc<dyn Observer>>,
     evidence: Mutex<evidence::EvidenceStore>,
     reasoner: Option<Arc<dyn LocalReasoner>>,
+    max_output_tokens: Option<u32>,
 }
 
 impl Agent {
@@ -454,7 +501,16 @@ impl Agent {
             observer: None,
             evidence: Mutex::new(evidence::EvidenceStore::default()),
             reasoner: None,
+            max_output_tokens: None,
         }
+    }
+
+    /// How many tokens a model may spend on one reply. A capability that takes a whole file as
+    /// input needs room for it; the default is the model boundary's small one. A budget, not an
+    /// authority: it changes how much a reply may say, never what it is allowed to do.
+    pub fn with_max_output_tokens(mut self, tokens: u32) -> Self {
+        self.max_output_tokens = Some(tokens);
+        self
     }
 
     /// Optionally injects a local reasoner for cheap judgments.
@@ -782,6 +838,13 @@ impl Agent {
                 )));
             }
         }
+        // The invocation shape is the capability's: one that declares no inputs takes no `inputs`
+        // member at all, so even an empty one is the requester redefining how it is invoked.
+        if request.inputs_present && descriptor.inputs.is_empty() {
+            return Err(CapabilityError::InvalidInput(
+                "capability takes no inputs; the request must not carry an `inputs` member".into(),
+            ));
+        }
         for input in descriptor.inputs.iter().filter(|i| i.required) {
             if !request.inputs.contains_key(&input.name) {
                 return Err(CapabilityError::InvalidInput(format!(
@@ -790,10 +853,13 @@ impl Agent {
                 )));
             }
         }
-        Ok(ExecutionRequest::for_capability(
-            request.execution_id.clone(),
-            &request.capability_id,
-        ))
+        provider
+            .validate_inputs(&request.capability_id, &request.inputs)
+            .await?;
+        Ok(
+            ExecutionRequest::for_capability(request.execution_id.clone(), &request.capability_id)
+                .with_inputs(request.inputs.clone()),
+        )
     }
 
     /// Validates, then executes, an explicit capability request. A request that
@@ -952,7 +1018,10 @@ impl Agent {
             .map(|observation| Message::new(MessageRole::System, observation.render()))
             .collect();
         messages.push(Message::new(MessageRole::User, turn.user_message.clone()));
-        let request = ModelRequest::new(self.model.clone(), messages);
+        let mut request = ModelRequest::new(self.model.clone(), messages);
+        if let Some(tokens) = self.max_output_tokens {
+            request.max_tokens = Some(tokens);
+        }
 
         let response = self
             .provider

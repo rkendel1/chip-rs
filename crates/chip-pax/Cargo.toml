@@ -1,13 +1,14 @@
 [package]
-name = "chip-compute"
+name = "chip-pax"
 version = "0.1.0"
 edition = "2024"
-description = "Executor adapter that runs Chip execution requests through the Compute CLI"
+description = "Executor adapter that runs the pax.test capability through an independently installed PAX binary"
 license = "MIT"
 
 [dependencies]
 chip-core = { path = "../chip-core" }
 async-trait = "0.1"
+serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "time"] }
 
@@ -15,4 +16,3 @@ tokio = { version = "1", features = ["process", "io-util", "time"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
 fx-core = { path = "../fx-core" }
 async-trait = "0.1"
-sha2 = "0.10"

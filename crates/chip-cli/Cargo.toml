@@ -18,6 +18,8 @@ chip-local-decision = { path = "../chip-local-decision" }
 chip-decision-corpus = { path = "../chip-decision-corpus" }
 fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
+chip-pax = { path = "../chip-pax" }
+chip-project = { path = "../chip-project" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-local-ml = { path = "../chip-local-ml", optional = true }
 chip-laya-reasoner = { path = "../chip-laya-reasoner", optional = true }
@@ -26,6 +28,8 @@ chip-wasm-decision = { path = "../chip-wasm-decision" }
 chip-wasm-decision-host = { path = "../chip-wasm-decision-host" }
 fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"
+sha2 = "0.10"
+serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]

@@ -267,6 +267,8 @@ dependencies = [
  "chip-laya-reasoner",
  "chip-local-decision",
  "chip-local-ml",
+ "chip-pax",
+ "chip-project",
  "chip-reasoning-corpus",
  "chip-wasm-decision",
  "chip-wasm-decision-host",
@@ -274,6 +276,7 @@ dependencies = [
  "fx-core",
  "fx-provider-http",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -285,6 +288,7 @@ dependencies = [
  "chip-core",
  "fx-core",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -367,6 +371,29 @@ dependencies = [
  "fx-core",
  "rust-ml-runtime",
  "serde_json",
+]
+
+[[package]]
+name = "chip-pax"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "fx-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "chip-project"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]
