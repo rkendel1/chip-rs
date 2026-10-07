@@ -7,6 +7,7 @@
 //! declared capability id and typed input values.
 //!
 //! ```text
+//! (each object may also carry "schema":"chip.work-decision.v1")
 //! {"decision":"request_capability","capability":"<id>","inputs":{"<name>":<string|integer|boolean>}}
 //! {"decision":"complete","summary":"<text>"}
 //! {"decision":"escalate","reason":"<text>"}
@@ -287,6 +288,14 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
         capabilities: &[Capability],
     ) -> Result<WorkDecision, DecisionError> {
         let mut fields = parse_reply(&response.output)?;
+        // The schema marker is optional (models echo it when told the schema) but, if present,
+        // it must name this contract.
+        if fields.iter().any(|(k, _)| k == "schema") {
+            let schema = take_string(&mut fields, "schema")?;
+            if schema != WORK_DECISION_SCHEMA {
+                return Err(invalid(format!("unsupported schema \"{schema}\"")));
+            }
+        }
         let decision = take_string(&mut fields, "decision")?;
         match decision.as_str() {
             "request_capability" => {
@@ -372,7 +381,7 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
             .collect();
         available.sort();
         format!(
-            "Decide the next step. Reply with exactly one JSON object and nothing else; it is read as data and never run. Schema {WORK_DECISION_SCHEMA}: \
+            "Decide the next step. Reply with exactly one JSON object and nothing else; it is read as data and never run. Every object carries \"schema\":\"{WORK_DECISION_SCHEMA}\" (optional) and one of: \
 {{\"decision\":\"request_capability\",\"capability\":\"<id>\",\"inputs\":{{\"<name>\":<string|integer|boolean>}}}} (inputs optional), \
 {{\"decision\":\"complete\",\"summary\":\"<text>\"}}, {{\"decision\":\"escalate\",\"reason\":\"<text>\"}} or {{\"decision\":\"block\",\"reason\":\"<text>\"}}. \
 Available capabilities: {}.",

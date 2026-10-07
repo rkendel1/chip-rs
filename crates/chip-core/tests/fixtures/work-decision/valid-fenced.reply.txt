@@ -1,0 +1,3 @@
+```json
+{"schema":"chip.work-decision.v1","decision":"request_capability","capability":"compute.selftest"}
+```

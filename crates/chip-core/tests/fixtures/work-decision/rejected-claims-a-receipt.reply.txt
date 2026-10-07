@@ -1,0 +1,1 @@
+{"decision":"request_capability","capability":"compute.selftest","status":"success","receipt":"r-1"}

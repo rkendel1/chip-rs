@@ -819,6 +819,25 @@ pub async fn test_real_work(args: &[String]) -> i32 {
     }
 }
 
+/// Keeps what the provider returned, so a successful reply can be saved as a regression
+/// fixture (`--print-reply`). It records only the model's output: no prompt, no credentials.
+struct RecordingProvider {
+    inner: fx_provider_http::HttpProvider,
+    replies: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl fx_core::ModelProvider for RecordingProvider {
+    async fn complete(
+        &self,
+        request: fx_core::ModelRequest,
+    ) -> Result<fx_core::ModelResponse, fx_core::FxError> {
+        let response = self.inner.complete(request).await?;
+        self.replies.lock().unwrap().push(response.output.clone());
+        Ok(response)
+    }
+}
+
 /// Escalates the very first decision to the model; afterwards reacts to what was observed.
 struct AskModelFirst;
 
@@ -859,6 +878,11 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             return 3;
         }
     };
+    let replies = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        inner: provider,
+        replies: replies.clone(),
+    };
 
     let execute_calls = Arc::new(AtomicUsize::new(0));
     let compute = Arc::new(chip_compute::ComputeExecutor::new());
@@ -894,7 +918,7 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
     };
     let spec = WorkSpec::new(
         WorkId::new("real-model-work"),
-        WorkGoal::new("Determine the next action for the compute.selftest capability"),
+        WorkGoal::new("Determine whether compute.selftest should be requested"),
     )
     .with_limits(limits);
     let report = agent
@@ -902,6 +926,10 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
         .await;
     let m = report.measurement();
     let violations = verify_trajectory(&report.events, &limits);
+    let receipt = report
+        .observations
+        .first()
+        .and_then(|o| o.receipt_id.clone());
 
     if json {
         println!("{}", measurement_json("real-model", &m));
@@ -922,22 +950,26 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             WorkOutcome::LimitReached { limit } => format!("LimitReached ({})", limit.name()),
             WorkOutcome::Failed { reason } => format!("Failed ({reason})"),
         };
-        println!("Outcome:       {outcome}");
-        println!("Turns:         {}", m.turns);
-        println!("Executions:    {}", m.executions);
-        println!("Observations:  {}", m.observations);
-        println!("Local:         {}", m.local_decisions);
-        println!("Escalations:   {}", m.model_escalations);
-        println!("Model calls:   {}", m.model_calls);
-        println!("Context:       {} bytes", m.context_bytes);
+        println!("Outcome:           {outcome}");
+        println!("Turns:             {}", m.turns);
+        println!("Executions:        {}", m.executions);
+        println!("Observations:      {}", m.observations);
+        println!("Local decisions:   {}", m.local_decisions);
+        println!("Model escalations: {}", m.model_escalations);
+        println!("Model calls:       {}", m.model_calls);
+        println!("Context bytes:     {}", m.context_bytes);
         println!(
-            "Model tokens:  {}",
+            "Model tokens:      {}",
             m.model_tokens
                 .map_or("not reported".to_string(), |t| t.to_string())
         );
-        println!("Model latency: {}", secs(m.model_latency));
-        println!("Compute:       {}", secs(m.compute_latency));
-        println!("Total:         {}", secs(m.total_latency));
+        println!("Model latency:     {}", secs(m.model_latency));
+        println!("Compute latency:   {}", secs(m.compute_latency));
+        println!("Total latency:     {}", secs(m.total_latency));
+        println!(
+            "Receipt:           {}",
+            receipt.as_deref().unwrap_or("none")
+        );
         println!("\nTrajectory:");
         for (i, event) in report.events.iter().enumerate() {
             println!("  {:>2}. {}", i + 1, describe(event));
@@ -948,7 +980,16 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
         eprintln!("\nerror: trajectory invariants violated: {violations:?}");
         return 1;
     }
+    if args.iter().any(|a| a == "--print-reply") {
+        // The model's own output, for saving as a sanitized fixture.
+        for reply in replies.lock().unwrap().iter() {
+            println!("\nModel reply:\n{reply}");
+        }
+    }
     let as_expected = matches!(report.outcome, WorkOutcome::Completed { .. })
+        && m.turns == 2
+        && m.local_decisions == 1
+        && (deterministic_executor || receipt.is_some())
         && m.model_calls == 1
         && m.model_escalations == 1
         && m.executions == 1

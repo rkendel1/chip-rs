@@ -75,7 +75,7 @@ async fn a_model_decision_drives_one_execution_and_the_loop_finishes_itself() {
     assert_eq!(field(&t, "Outcome:"), "Completed");
     assert_eq!(field(&t, "Executions:"), "1");
     assert_eq!(field(&t, "Observations:"), "1");
-    assert_eq!(field(&t, "Escalations:"), "1");
+    assert_eq!(field(&t, "Model escalations:"), "1");
     assert_eq!(field(&t, "Model calls:"), "1");
     assert_eq!(field(&t, "Model tokens:"), "137");
     let latency: u64 = field(&t, "Model latency:")
@@ -96,10 +96,7 @@ async fn a_model_decision_drives_one_execution_and_the_loop_finishes_itself() {
         .iter()
         .map(|m| m["content"].as_str().unwrap().len())
         .sum::<usize>();
-    let measured: usize = field(&t, "Context:")
-        .trim_end_matches(" bytes")
-        .parse()
-        .unwrap();
+    let measured: usize = field(&t, "Context bytes:").parse().unwrap();
     assert!(measured > 0);
     assert!(
         sent >= measured && sent - measured < 2048,
@@ -143,6 +140,10 @@ async fn invalid_decisions_fail_without_executing_or_retrying() {
         r#"{"decision":"request_capability","capability":"shell.exec"}"#,
         r#"{"decision":"request_capability"}"#,
         r#"{"decision":"request_capability","capability":"compute.selftest","extra":1}"#,
+        // The model claiming reality is not reality.
+        "The operation succeeded.",
+        r#"{"decision":"request_capability","capability":"compute.selftest","status":"success","receipt":"r-1"}"#,
+        r#"{"schema":"chip.work-decision.v2","decision":"request_capability","capability":"compute.selftest"}"#,
     ];
     for reply in replies {
         let server = common::start(200, &completion(reply, Some((10, 2))), Duration::ZERO).await;
@@ -152,6 +153,8 @@ async fn invalid_decisions_fail_without_executing_or_retrying() {
         assert_eq!(field(&t, "Model calls:"), "1", "{reply}");
         assert_eq!(field(&t, "Executions:"), "0", "{reply}");
         assert_eq!(field(&t, "Observations:"), "0", "{reply}");
+        assert_eq!(field(&t, "Receipt:"), "none", "{reply}");
+        assert!(!t.contains("EvidenceRecorded"), "{reply}");
         assert_eq!(server.captured.lock().await.len(), 1, "{reply}");
     }
 }
@@ -170,7 +173,9 @@ fn an_unconfigured_provider_is_skipped_not_failed() {
     assert!(text(&out).contains("SKIPPED: real model provider unavailable"));
 }
 
-/// Opt-in: talks to the provider named by `CHIP_*`. Skips unless `CHIP_TEST_REAL_MODEL=1`.
+/// Opt-in: talks to the provider named by `CHIP_*` and the real Compute. Skips unless
+/// `CHIP_TEST_REAL_MODEL=1` and the configuration exists; a provider that is configured but
+/// fails is a failure, never a skip.
 #[test]
 fn real_model_escalation() {
     if std::env::var("CHIP_TEST_REAL_MODEL").as_deref() != Ok("1") {
@@ -181,13 +186,48 @@ fn real_model_escalation() {
         .arg("--test-real-model-work")
         .output()
         .unwrap();
-    match out.status.code() {
-        Some(3) => eprintln!("SKIPPED: {}", text(&out).trim()),
-        _ => {
-            let t = text(&out);
-            assert!(out.status.success(), "{t}");
-            assert_eq!(field(&t, "Model calls:"), "1");
-            assert_eq!(field(&t, "Executions:"), "1");
+    let t = text(&out);
+    if out.status.code() == Some(3) {
+        assert!(t.contains("SKIPPED"), "{t}");
+        eprintln!("SKIPPED: {}", t.trim());
+        return;
+    }
+    assert!(out.status.success(), "{t}");
+
+    assert_eq!(field(&t, "Outcome:"), "Completed");
+    assert_eq!(field(&t, "Turns:"), "2");
+    assert_eq!(field(&t, "Model calls:"), "1");
+    assert_eq!(field(&t, "Model escalations:"), "1");
+    assert_eq!(field(&t, "Local decisions:"), "1");
+    assert_eq!(field(&t, "Executions:"), "1");
+    assert_eq!(field(&t, "Observations:"), "1");
+    assert_ne!(field(&t, "Receipt:"), "none", "{t}");
+    assert!(field(&t, "Context bytes:").parse::<u64>().unwrap() > 0);
+    let tokens = field(&t, "Model tokens:");
+    assert!(
+        tokens == "not reported" || tokens.parse::<u64>().unwrap() > 0,
+        "{t}"
+    );
+    for label in ["Model latency:", "Compute latency:"] {
+        assert!(!field(&t, label).starts_with("0 "), "{label} {t}");
+    }
+
+    // The next decision happens inside the loop, after the observation, with no caller turn.
+    let at = |needle: &str| {
+        t.find(needle)
+            .unwrap_or_else(|| panic!("no `{needle}` in:\n{t}"))
+    };
+    assert!(at("ModelCalled") < at("ExecutionStarted"));
+    assert!(at("ExecutionStarted") < at("ObservationRecorded"));
+    assert!(at("ObservationRecorded") < at("DecisionStarted (turn 2)"));
+    assert!(at("DecisionStarted (turn 2)") < at("LocalDecision: complete"));
+    assert!(at("LocalDecision: complete") < at("WorkCompleted"));
+
+    // Nothing sensitive in the output.
+    for var in ["CHIP_API_KEY"] {
+        if let Ok(secret) = std::env::var(var) {
+            assert!(!secret.is_empty() && !t.contains(&secret));
         }
     }
+    assert!(!t.contains("Decide the next step"), "prompt leaked");
 }
