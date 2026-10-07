@@ -334,6 +334,90 @@ impl EscalationContext {
     }
 }
 
+/// Where the workload stands, as the loop knows it.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkState<'a> {
+    pub goal: &'a str,
+    /// Zero-based turn of the decision being made.
+    pub turn: usize,
+    pub max_turns: usize,
+    pub executions: usize,
+    pub max_executions: usize,
+}
+
+/// What has happened so far, plus what this escalation is about.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkTrajectory<'a> {
+    pub observations: &'a [Observation],
+    pub decisions: &'a [DecisionRecord],
+    /// Capabilities already tried and known to have failed.
+    pub ruled_out: &'a [String],
+    /// What the evidence store said about the candidate this escalation is about.
+    pub evidence: &'a [String],
+    /// The boundary's question, which states the reply contract.
+    pub question: &'a str,
+}
+
+/// Chooses what one model escalation is told. Chip's opinion about relevance lives here, not in
+/// FX and not in the loop.
+///
+/// A policy is a pure function of what it is given: it cannot execute anything, observe anything
+/// or reach a provider, and it does not measure itself. Measurement counts the request that is
+/// actually serialized for the provider.
+pub trait EscalationContextPolicy: Send + Sync {
+    /// A stable, non-secret identifier (for example `full-v1`), recorded with every escalation.
+    fn id(&self) -> &'static str;
+
+    fn build(&self, state: &WorkState<'_>, trajectory: &WorkTrajectory<'_>) -> EscalationContext;
+}
+
+/// The default: everything the loop knows, in the order the loop has always sent it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FullEscalationContext;
+
+impl FullEscalationContext {
+    pub const ID: &'static str = "full-v1";
+}
+
+impl EscalationContextPolicy for FullEscalationContext {
+    fn id(&self) -> &'static str {
+        Self::ID
+    }
+
+    fn build(&self, state: &WorkState<'_>, trajectory: &WorkTrajectory<'_>) -> EscalationContext {
+        EscalationContext {
+            goal: state.goal.to_string(),
+            current_state: format!(
+                "turn {} of {}; executions {} of {}",
+                state.turn + 1,
+                state.max_turns,
+                state.executions,
+                state.max_executions
+            ),
+            relevant_evidence: trajectory.evidence.to_vec(),
+            relevant_observations: trajectory.observations.to_vec(),
+            prior_decisions: trajectory
+                .decisions
+                .iter()
+                .map(|d| {
+                    format!(
+                        "turn {} ({}): {}",
+                        d.turn + 1,
+                        if d.source == DecisionSource::Local {
+                            "local"
+                        } else {
+                            "model"
+                        },
+                        d.decision.label()
+                    )
+                })
+                .collect(),
+            ruled_out: trajectory.ruled_out.to_vec(),
+            question: trajectory.question.to_string(),
+        }
+    }
+}
+
 /// The ordered trajectory. Execution and capability events are the existing ones, wrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkEvent {
@@ -359,6 +443,8 @@ pub enum WorkEvent {
         work_id: WorkId,
         turn: usize,
         reason: String,
+        /// The identifier of the policy that chose this context. Never prompt text.
+        context_policy: String,
         context: ContextMetrics,
     },
     /// The one model call an escalation makes has returned or failed. `usage` is what the
@@ -490,6 +576,8 @@ pub struct WorkMeasurement {
     /// Bytes and characters sent to the model across all escalations.
     pub context_bytes: u64,
     pub context_chars: u64,
+    /// The policy that chose the escalation context; `None` when nothing escalated.
+    pub context_policy: Option<String>,
 
     pub model_calls: u32,
     /// Prompt plus completion tokens the provider reported. `None` when no call reported usage.
@@ -522,6 +610,7 @@ impl WorkMeasurement {
             model_escalations: 0,
             context_bytes: 0,
             context_chars: 0,
+            context_policy: None,
             model_calls: 0,
             model_tokens: None,
             model_latency: latency.model,
@@ -536,8 +625,14 @@ impl WorkMeasurement {
                 WorkEvent::ObservationRecorded { .. } => m.observations += 1,
                 WorkEvent::EvidenceReused { .. } => m.evidence_hits += 1,
                 WorkEvent::LocalDecision { .. } => m.local_decisions += 1,
-                WorkEvent::ModelEscalation { context, .. } => {
+                WorkEvent::ModelEscalation {
+                    context,
+                    context_policy,
+                    ..
+                } => {
                     m.model_escalations += 1;
+                    m.context_policy
+                        .get_or_insert_with(|| context_policy.clone());
                     m.context_bytes += context.bytes as u64;
                     m.context_chars += context.chars as u64;
                 }
@@ -880,6 +975,7 @@ enum Step {
 struct Run<'a> {
     agent: &'a Agent,
     spec: &'a WorkSpec,
+    context_policy: &'a dyn EscalationContextPolicy,
     events: Vec<WorkEvent>,
     observations: Vec<Observation>,
     decisions: Vec<DecisionRecord>,
@@ -931,37 +1027,23 @@ impl<'a> Run<'a> {
         self.observations.push(observation);
     }
 
-    fn context(&self, turn: usize, evidence: Vec<String>, question: String) -> EscalationContext {
-        EscalationContext {
-            goal: self.spec.goal.as_str().to_string(),
-            current_state: format!(
-                "turn {} of {}; executions {} of {}",
-                turn + 1,
-                self.spec.limits.max_turns,
-                self.summary.executions,
-                self.spec.limits.max_executions
-            ),
-            relevant_evidence: evidence,
-            relevant_observations: self.observations.clone(),
-            prior_decisions: self
-                .decisions
-                .iter()
-                .map(|d| {
-                    format!(
-                        "turn {} ({}): {}",
-                        d.turn + 1,
-                        if d.source == DecisionSource::Local {
-                            "local"
-                        } else {
-                            "model"
-                        },
-                        d.decision.label()
-                    )
-                })
-                .collect(),
-            ruled_out: self.ruled_out.clone(),
-            question,
-        }
+    fn context(&self, turn: usize, evidence: &[String], question: &str) -> EscalationContext {
+        self.context_policy.build(
+            &WorkState {
+                goal: self.spec.goal.as_str(),
+                turn,
+                max_turns: self.spec.limits.max_turns,
+                executions: self.summary.executions,
+                max_executions: self.spec.limits.max_executions,
+            },
+            &WorkTrajectory {
+                observations: &self.observations,
+                decisions: &self.decisions,
+                ruled_out: &self.ruled_out,
+                evidence,
+                question,
+            },
+        )
     }
 
     /// Makes the one model call an escalation allows, and interprets its response.
@@ -973,7 +1055,7 @@ impl<'a> Run<'a> {
         boundary: &dyn WorkDecisionBoundary,
     ) -> Result<WorkDecision, WorkOutcome> {
         let question = boundary.question(&self.capabilities);
-        let context = self.context(turn, evidence, question);
+        let context = self.context(turn, &evidence, &question);
         let metrics = context.metrics();
         self.summary.model_escalations += 1;
         self.summary.context_bytes += metrics.bytes;
@@ -982,6 +1064,7 @@ impl<'a> Run<'a> {
             work_id: self.id(),
             turn,
             reason,
+            context_policy: self.context_policy.id().to_string(),
             context: metrics,
         });
         let started = Mark::now();
@@ -1140,10 +1223,24 @@ impl Agent {
         policy: &dyn LocalWorkPolicy,
         boundary: &dyn WorkDecisionBoundary,
     ) -> WorkReport {
+        self.run_work_with_context_policy(spec, policy, boundary, &FullEscalationContext)
+            .await
+    }
+
+    /// [`run_work`](Self::run_work) with an explicit policy for what each escalation tells the
+    /// model. `run_work` itself uses [`FullEscalationContext`].
+    pub async fn run_work_with_context_policy(
+        &self,
+        spec: &WorkSpec,
+        policy: &dyn LocalWorkPolicy,
+        boundary: &dyn WorkDecisionBoundary,
+        context_policy: &dyn EscalationContextPolicy,
+    ) -> WorkReport {
         let started = Mark::now();
         let mut run = Run {
             agent: self,
             spec,
+            context_policy,
             events: vec![WorkEvent::WorkStarted {
                 work_id: spec.id.clone(),
                 goal: spec.goal.as_str().to_string(),

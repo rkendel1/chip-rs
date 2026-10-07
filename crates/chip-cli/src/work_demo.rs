@@ -219,6 +219,20 @@ fn ms(d: Duration) -> String {
     format!("{:.3}", d.as_secs_f64() * 1000.0)
 }
 
+/// One block per escalation: which policy chose the context, and what was actually sent.
+fn print_escalation_context(report: &WorkReport, policy: Option<&str>) {
+    for context in &report.escalations {
+        println!("\nEscalation context");
+        println!("  policy: {}", policy.unwrap_or("unknown"));
+        println!("  bytes: {}", context.bytes);
+        println!("  chars: {}", context.chars);
+        println!("  observations: {}", context.observations);
+        println!("  decisions: {}", context.decisions);
+        println!("  evidence: {}", context.evidence_items);
+        println!("  ruled-out: {}", context.ruled_out);
+    }
+}
+
 fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_calls: usize) {
     println!("{title}\n");
     println!("Trajectory:");
@@ -262,6 +276,7 @@ fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_ca
             println!("  outcome: {} limit reached", limit.name())
         }
     }
+    print_escalation_context(report, m.context_policy.as_deref());
 }
 
 /// The measurement as stable JSON: a fixed key order, no prompts, no secrets, no identifiers, no
@@ -970,6 +985,7 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             "Receipt:           {}",
             receipt.as_deref().unwrap_or("none")
         );
+        print_escalation_context(&report, m.context_policy.as_deref());
         println!("\nTrajectory:");
         for (i, event) in report.events.iter().enumerate() {
             println!("  {:>2}. {}", i + 1, describe(event));

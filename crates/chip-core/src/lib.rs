@@ -28,11 +28,11 @@ pub use reasoning::{
     TestLocalReasoner,
 };
 pub use work::{
-    ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, LimitKind, LocalWorkPolicy,
-    ModelUsage, NoLocalPolicy, RespondCompletes, ScriptedPolicy, TerminalState, TurnTrace,
-    WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLatency, WorkLimits,
-    WorkMeasurement, WorkOutcome, WorkReport, WorkSpec, WorkSummary, WorkView, trace,
-    verify_trajectory,
+    ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, EscalationContextPolicy,
+    FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy, RespondCompletes,
+    ScriptedPolicy, TerminalState, TurnTrace, WorkDecision, WorkDecisionBoundary, WorkEvent,
+    WorkGoal, WorkId, WorkLatency, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec,
+    WorkState, WorkSummary, WorkTrajectory, WorkView, trace, verify_trajectory,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

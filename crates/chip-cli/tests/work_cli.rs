@@ -478,3 +478,27 @@ fn real_compute_work_skips_cleanly_in_json_mode_too() {
     assert_eq!(out.status.code(), Some(3));
     assert!(text(&out).contains("SKIPPED"));
 }
+
+#[test]
+fn an_escalation_reports_its_context_policy_and_what_was_sent() {
+    let out = run(&["--test-work", "escalation"]);
+    assert!(out.status.success());
+    let t = text(&out);
+    let block = t
+        .split("Escalation context\n")
+        .nth(1)
+        .expect("an escalation context block");
+    for line in [
+        "  policy: full-v1",
+        "  bytes: ",
+        "  chars: ",
+        "  observations: ",
+        "  decisions: ",
+        "  evidence: ",
+        "  ruled-out: ",
+    ] {
+        assert!(block.contains(line), "missing `{line}` in:\n{block}");
+    }
+    // A workload that never escalates has no such block.
+    assert!(!text(&run(&["--test-work", "completion"])).contains("Escalation context"));
+}
