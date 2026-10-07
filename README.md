@@ -142,7 +142,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 ## Runtime service (`chip-cli serve`)
 
 `chip-cli serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]`
-(default `127.0.0.1:8765`, 2 works at once, 32 queued) exposes the same work runtime that
+(default `127.0.0.1:8765`; as many works at once as the environment can isolate, at most 2 by default, so 1 on the local machine; 32 queued) exposes the same work runtime that
 `chip-cli work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
 `WorkRuntime` (model, PAX, project root) and call `WorkRuntime::run`. The model comes from
 `CHIP_PROVIDER` / `CHIP_MODEL` / `CHIP_ENDPOINT` as for `work`; the project is the current directory.
@@ -195,7 +195,48 @@ decision.
   and `timing.model_ms` / `execution_ms` / `local_decision_ms` / `runtime_total_ms` / `turns` (the
   runtime's own measurements, copied from `result.measurement`). Observation is in-process and is not
   timed separately.
-- **One workspace.** Every work runs against the single project directory the service was started
-  in. The service does not clone, branch, lock or sandbox it, so concurrent work that writes the same
-  files can conflict, and its results then depend on timing. Run write-heavy jobs one at a time
-  (`--max-concurrent-work 1`) or in separate services over separate directories.
+- **One environment per work.** Each admitted work acquires exactly one environment, uses it for its
+  whole trajectory, and releases it when it ends (also if it panics). The local machine is one mutable
+  project directory, so it can be owned by one work at a time: the standalone service defaults to one
+  work at a time and refuses `--max-concurrent-work N` above what the environment can isolate
+  ("concurrent work requires isolated environments"). Chip does not clone, branch, lock or sandbox the
+  directory to get around that. If an environment cannot be acquired the work fails with no model
+  call, no execution and no observation; there is no fallback to a shared workspace.
+
+## Architecture: the environment boundary
+
+Chip is a standalone agent runtime. It does not own the machine or execution environment. Chip
+operates against an environment boundary that may be backed by the local machine or by an external
+runtime such as Compute. Compute is not a Chip dependency: Compute-configured can host Chip by
+providing an environment implementation.
+
+```
+             Intelligence
+                  |
+                  v
+              +-------+
+              | Chip  |
+              +---+---+
+                  |
+           Environment
+             boundary
+                  |
+          +-------+-------+
+          |               |
+        Local          External
+     environment      environment
+          |               |
+      machine           Compute
+```
+
+- The contract is in `chip-core` (`environment.rs`): `WorkEnvironment` (the capabilities it declares and
+  executes, the observation invariants that fit it, an opaque `EnvironmentId`), `EnvironmentProvider`
+  (`acquire` / `release` / `isolation_capacity`), and `Environments`, which enforces at the boundary that
+  a mutable environment has at most one owning work at a time whatever a provider does.
+- `chip-cli` ships one implementation, `LocalEnvironment` (`local_environment.rs`): the existing
+  project, Git and `pax.test` capabilities over the current directory. `chip work` and `chip serve`
+  use it by default and need no other service or network.
+- An environment provider from another runtime implements `EnvironmentProvider`; the tests in
+  `crates/chip-core/tests/environment.rs` state what it is held to. Chip contains no Compute client,
+  configuration or types, and discovers, starts and provisions nothing.
+- The model boundary (FX) is independent of the environment: neither implies the other.

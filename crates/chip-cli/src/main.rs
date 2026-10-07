@@ -8,6 +8,7 @@ mod graph_cmd;
 mod horizon;
 mod laya_eval;
 mod live_benchmark;
+mod local_environment;
 mod local_model_bench;
 mod native;
 mod pax_work;

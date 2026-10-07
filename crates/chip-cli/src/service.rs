@@ -30,17 +30,20 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Write as _;
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use chip_core::{CapabilityEvent, ExecutionEvent, WorkEvent, WorkId, WorkLimits};
+use chip_core::{
+    CapabilityEvent, EnvironmentDescription, EnvironmentError, Environments, ExecutionEvent,
+    WorkEvent, WorkId, WorkLimits,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::local_environment::LocalEnvironmentProvider;
 use crate::software_work::{
     DEFAULT_MAX_EXECUTIONS, DEFAULT_MAX_TURNS, RunControl, SoftwareWork, WorkRuntime,
     goal_is_acceptable, render_json,
@@ -106,6 +109,8 @@ struct Finished {
 
 struct Item {
     goal: String,
+    /// The opaque id of the environment this work acquired; unset until it has one. Never a path.
+    environment: Mutex<Option<String>>,
     submitted: Instant,
     control: Arc<RunControl>,
     phase: Mutex<Phase>,
@@ -129,6 +134,7 @@ fn ms(d: Duration) -> f64 {
 
 pub struct Service {
     runtime: Arc<WorkRuntime>,
+    environments: Arc<Environments>,
     limits: WorkLimits,
     capacity: Capacity,
     /// Lock order: `sched`, then `items` or one item's `phase`. `items` is never held while
@@ -143,13 +149,23 @@ pub struct Service {
 }
 
 impl Service {
+    /// Fails closed if more work may run at once than there are isolated environments for it.
     pub fn new(
         runtime: Arc<WorkRuntime>,
+        environments: Arc<Environments>,
         loopback_hosts_only: bool,
         capacity: Capacity,
-    ) -> Arc<Self> {
-        Arc::new(Self {
+    ) -> Result<Arc<Self>, String> {
+        let isolated = environments.isolation_capacity();
+        if capacity.max_concurrent > isolated {
+            return Err(format!(
+                "concurrent work requires isolated environments: {} may run at once but the environment provides {isolated}",
+                capacity.max_concurrent
+            ));
+        }
+        Ok(Arc::new(Self {
             runtime,
+            environments,
             limits: WorkLimits {
                 max_turns: DEFAULT_MAX_TURNS,
                 max_executions: DEFAULT_MAX_EXECUTIONS,
@@ -160,7 +176,7 @@ impl Service {
             rejected: AtomicU64::new(0),
             issued: AtomicU64::new(0),
             loopback_hosts_only,
-        })
+        }))
     }
 
     /// A Chip-owned id: never a client's, a provider's or a model's.
@@ -201,6 +217,7 @@ impl Service {
         let id = self.allocate_id();
         let item = Arc::new(Item {
             goal,
+            environment: Mutex::new(None),
             submitted: Instant::now(),
             control: Arc::new(RunControl::default()),
             phase: Mutex::new(Phase::Queued),
@@ -233,13 +250,27 @@ impl Service {
     /// `WorkRuntime`.
     fn spawn(self: &Arc<Self>, id: String, item: Arc<Item>) {
         let runtime = self.runtime.clone();
+        let environments = self.environments.clone();
         let (limits, control, goal) = (self.limits, item.control.clone(), item.goal.clone());
         let work_id = WorkId::new(id);
-        let task =
-            tokio::spawn(async move { runtime.run(work_id, &goal, limits, Some(control)).await.0 });
+        let owner = item.clone();
+        let task = tokio::spawn(async move {
+            // One environment for the whole trajectory, acquired before anything else happens: if
+            // there is none, there is no model call, no execution and no observation.
+            let owned = environments.acquire(work_id.clone()).await?;
+            *lock(&owner.environment) = Some(owned.id().to_string());
+            let work = runtime
+                .run(work_id, &goal, limits, Some(control), owned.environment())
+                .await
+                .0;
+            let description = owned.environment().description();
+            drop(owned);
+            Ok::<_, EnvironmentError>((work, description))
+        });
         let service = self.clone();
         // The inner task is the containment boundary: a panic in one work ends that work as
-        // `failed` and frees its slot. It never reaches the scheduler, another work, or the server.
+        // `failed`, releases its environment (the owner is dropped on unwind) and frees its slot.
+        // It never reaches the scheduler, another work, or the server.
         tokio::spawn(async move {
             let outcome = task.await;
             let ended = Instant::now();
@@ -248,7 +279,17 @@ impl Service {
                 _ => ended,
             };
             let mut finished = match outcome {
-                Ok(work) => finish(&work, &service.runtime),
+                Ok(Ok((work, description))) => finish(&work, &description),
+                // Never ran: the agent has no lifecycle and nothing was asked or executed.
+                Ok(Err(error)) => Finished {
+                    state: "failed",
+                    ran: false,
+                    result: json!({"outcome_reason": error.to_string()}),
+                    events: Vec::new(),
+                    queue_wait: Duration::ZERO,
+                    first_model_call: None,
+                    work_duration: None,
+                },
                 Err(_) => Finished {
                     state: "failed",
                     ran: true,
@@ -380,6 +421,7 @@ impl Service {
             }
         };
         body["work_id"] = json!(id);
+        body["environment_id"] = json!(lock(&item.environment).clone());
         body["goal"] = json!(item.goal);
         body["cancellation_requested"] = json!(item.control.cancel.load(Ordering::SeqCst));
         Response::ok(200, body)
@@ -580,9 +622,9 @@ fn parse_goal(body: &[u8]) -> Result<String, Response> {
 
 // ---- projecting the runtime's report ---------------------------------------------------------------
 
-fn finish(work: &SoftwareWork, runtime: &WorkRuntime) -> Finished {
+fn finish(work: &SoftwareWork, environment: &EnvironmentDescription) -> Finished {
     let result =
-        serde_json::from_str(&render_json(work, &runtime.pax)).expect("the work report is JSON");
+        serde_json::from_str(&render_json(work, environment)).expect("the work report is JSON");
     Finished {
         state: work.report.outcome.terminal_state().name(),
         ran: true,
@@ -900,9 +942,18 @@ fn usage() -> i32 {
     EXIT_USAGE
 }
 
-fn parse_args(args: &[String]) -> Result<(SocketAddr, Capacity), i32> {
+/// What the command line chose. `max_concurrent` is `None` until the environment says how much
+/// isolation there is to spend.
+#[derive(Debug, PartialEq, Eq)]
+struct ServeArgs {
+    addr: SocketAddr,
+    max_concurrent: Option<usize>,
+    max_queued: usize,
+}
+
+fn parse_args(args: &[String]) -> Result<ServeArgs, i32> {
     let (mut host, mut port) = (DEFAULT_HOST.to_string(), DEFAULT_PORT);
-    let mut capacity = Capacity::default();
+    let (mut max_concurrent, mut max_queued) = (None, DEFAULT_MAX_QUEUED_WORK);
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
@@ -921,7 +972,7 @@ fn parse_args(args: &[String]) -> Result<(SocketAddr, Capacity), i32> {
                 }
             },
             "--max-concurrent-work" => match given.parse::<usize>() {
-                Ok(n) if (1..=MAX_CONCURRENT_CEILING).contains(&n) => capacity.max_concurrent = n,
+                Ok(n) if (1..=MAX_CONCURRENT_CEILING).contains(&n) => max_concurrent = Some(n),
                 _ => {
                     eprintln!(
                         "error: --max-concurrent-work needs a number from 1 to {MAX_CONCURRENT_CEILING}"
@@ -930,7 +981,7 @@ fn parse_args(args: &[String]) -> Result<(SocketAddr, Capacity), i32> {
                 }
             },
             "--max-queued-work" => match given.parse::<usize>() {
-                Ok(n) if n <= MAX_QUEUED_CEILING => capacity.max_queued = n,
+                Ok(n) if n <= MAX_QUEUED_CEILING => max_queued = n,
                 _ => {
                     eprintln!(
                         "error: --max-queued-work needs a number from 0 to {MAX_QUEUED_CEILING}"
@@ -953,11 +1004,19 @@ fn parse_args(args: &[String]) -> Result<(SocketAddr, Capacity), i32> {
             usage()
         })?
     };
-    Ok((SocketAddr::new(ip, port), capacity))
+    Ok(ServeArgs {
+        addr: SocketAddr::new(ip, port),
+        max_concurrent,
+        max_queued,
+    })
 }
 
 pub async fn serve(args: &[String]) -> i32 {
-    let (addr, capacity) = match parse_args(args) {
+    let ServeArgs {
+        addr,
+        max_concurrent,
+        max_queued,
+    } = match parse_args(args) {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
@@ -972,11 +1031,40 @@ pub async fn serve(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     };
-    let runtime = match prepare(&root, context_budget).await {
-        Ok(runtime) => runtime,
+    let selection = crate::provider_selection::Selection::default();
+    let runtime = match WorkRuntime::prepare(&selection, context_budget) {
+        Ok(runtime) => Arc::new(runtime),
         Err(why) => {
             eprintln!("error: {why}");
             return EXIT_UNAVAILABLE;
+        }
+    };
+    // The environment is the local machine: this project directory, which is mutable.
+    let provider = match LocalEnvironmentProvider::prepare(&root).await {
+        Ok(provider) => provider,
+        Err(why) => {
+            eprintln!("error: {why}");
+            return EXIT_UNAVAILABLE;
+        }
+    };
+    let environments = Arc::new(Environments::new(Arc::new(provider)));
+    // Conservative by default, and never more than the environment can isolate.
+    let isolated = environments.isolation_capacity();
+    if let Some(n) = max_concurrent.filter(|n| *n > isolated) {
+        eprintln!(
+            "error: --max-concurrent-work {n} needs {n} isolated environments, but the local environment is one mutable project directory ({isolated}); concurrent work requires isolated environments. Use --max-concurrent-work 1"
+        );
+        return EXIT_USAGE;
+    }
+    let capacity = Capacity {
+        max_concurrent: max_concurrent.unwrap_or(DEFAULT_MAX_CONCURRENT_WORK.min(isolated)),
+        max_queued,
+    };
+    let service = match Service::new(runtime, environments, addr.ip().is_loopback(), capacity) {
+        Ok(service) => service,
+        Err(why) => {
+            eprintln!("error: {why}");
+            return EXIT_USAGE;
         }
     };
     let listener = match TcpListener::bind(addr).await {
@@ -1001,23 +1089,12 @@ pub async fn serve(args: &[String]) -> i32 {
     );
     let _ = writeln!(
         out,
-        "Admission: {} work at once, {} queued (FIFO). All work shares this one project directory; concurrent writes to the same files can conflict.",
-        capacity.max_concurrent, capacity.max_queued
+        "Admission: {} work at once, {} queued (FIFO). Environment: the local machine, {} isolated environment(s) (one mutable project directory).",
+        capacity.max_concurrent, capacity.max_queued, isolated
     );
     let _ = out.flush();
-    run(
-        listener,
-        Service::new(runtime, bound.ip().is_loopback(), capacity),
-    )
-    .await;
+    run(listener, service).await;
     0
-}
-
-async fn prepare(root: &Path, context_budget: Option<usize>) -> Result<Arc<WorkRuntime>, String> {
-    let selection = crate::provider_selection::Selection::default();
-    WorkRuntime::prepare(&selection, context_budget, root)
-        .await
-        .map(Arc::new)
 }
 
 #[cfg(test)]
@@ -1028,9 +1105,13 @@ mod tests {
     //! model call does not return until the test releases it.
 
     use std::io::{Read, Write};
-    use std::path::PathBuf;
 
-    use chip_pax::ResolvedPax;
+    use chip_core::{EnvironmentId, EnvironmentProvider, WorkEnvironment};
+    use chip_pax::PaxExecutor;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::AtomicUsize;
+
+    use crate::local_environment::LocalEnvironment;
     use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
     use tokio::sync::Semaphore;
 
@@ -1194,15 +1275,8 @@ mod tests {
         dir
     }
 
-    fn runtime(model: Arc<Model>, dir: &Path) -> Arc<WorkRuntime> {
-        Arc::new(WorkRuntime::for_test(
-            model,
-            dir,
-            ResolvedPax {
-                path: PathBuf::from("/nonexistent/pax"),
-                version: "0.0.0".into(),
-            },
-        ))
+    fn runtime(model: Arc<Model>) -> Arc<WorkRuntime> {
+        Arc::new(WorkRuntime::for_test(model))
     }
 
     fn cap(max_concurrent: usize, max_queued: usize) -> Capacity {
@@ -1212,17 +1286,134 @@ mod tests {
         }
     }
 
+    /// A local environment over `dir`, as `chip work` would have, with an opaque test id.
+    fn local(id: &str, dir: &Path) -> LocalEnvironment {
+        LocalEnvironment::new(
+            EnvironmentId::new(id),
+            dir,
+            PaxExecutor::new(dir),
+            EnvironmentDescription::default(),
+        )
+    }
+
+    /// Isolated environments for the tests: each is a real local environment over its own
+    /// directory. It is a test double for any provider that can isolate work; Chip itself ships
+    /// no such provider.
+    struct Pool {
+        roots: Vec<PathBuf>,
+        free: Mutex<Vec<usize>>,
+        capacity: usize,
+        /// Hands the first environment to everyone: a provider that does not isolate.
+        shares_first: bool,
+        /// Refuses every acquisition.
+        unavailable: bool,
+        acquired: AtomicUsize,
+        released: AtomicUsize,
+        holders: Mutex<Vec<(String, String)>>,
+    }
+
+    impl Pool {
+        fn isolated(tag: &str, n: usize) -> Arc<Self> {
+            let roots: Vec<PathBuf> = (0..n).map(|i| root(&format!("{tag}-{i}"))).collect();
+            Arc::new(Self {
+                free: Mutex::new((0..n).rev().collect()),
+                capacity: n,
+                roots,
+                shares_first: false,
+                unavailable: false,
+                acquired: AtomicUsize::new(0),
+                released: AtomicUsize::new(0),
+                holders: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn misbehaving(
+            tag: &str,
+            capacity: usize,
+            shares_first: bool,
+            unavailable: bool,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                roots: vec![root(tag)],
+                free: Mutex::new(Vec::new()),
+                capacity,
+                shares_first,
+                unavailable,
+                acquired: AtomicUsize::new(0),
+                released: AtomicUsize::new(0),
+                holders: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EnvironmentProvider for Pool {
+        fn isolation_capacity(&self) -> usize {
+            self.capacity
+        }
+
+        async fn acquire(
+            &self,
+            work: &WorkId,
+        ) -> Result<Arc<dyn WorkEnvironment>, EnvironmentError> {
+            if self.unavailable {
+                return Err(EnvironmentError::Unavailable(
+                    "no environment could be provisioned".into(),
+                ));
+            }
+            let index = if self.shares_first {
+                0
+            } else {
+                lock(&self.free)
+                    .pop()
+                    .ok_or_else(|| EnvironmentError::Unavailable("pool exhausted".into()))?
+            };
+            self.acquired.fetch_add(1, Ordering::SeqCst);
+            let id = format!("env_test_{index}");
+            lock(&self.holders).push((work.to_string(), id.clone()));
+            Ok(Arc::new(local(&id, &self.roots[index])))
+        }
+
+        fn release(&self, _work: &WorkId, environment: &EnvironmentId) {
+            self.released.fetch_add(1, Ordering::SeqCst);
+            if !self.shares_first {
+                let index = environment
+                    .as_str()
+                    .rsplit('_')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                lock(&self.free).push(index);
+            }
+        }
+    }
+
+    async fn start_pool(
+        model: Arc<Model>,
+        pool: Arc<Pool>,
+        capacity: Capacity,
+    ) -> (SocketAddr, Arc<Service>, PathBuf) {
+        let dir = pool.roots[0].clone();
+        let environments = Arc::new(Environments::new(pool));
+        let service = Service::new(runtime(model), environments, true, capacity).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(run(listener, service.clone()));
+        (addr, service, dir)
+    }
+
     async fn start_with(
         model: Arc<Model>,
         tag: &str,
         capacity: Capacity,
     ) -> (SocketAddr, Arc<Service>, PathBuf) {
-        let dir = root(tag);
-        let service = Service::new(runtime(model, &dir), true, capacity);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(run(listener, service.clone()));
-        (addr, service, dir)
+        start_pool(
+            model,
+            Pool::isolated(tag, capacity.max_concurrent),
+            capacity,
+        )
+        .await
     }
 
     async fn start(model: Arc<Model>, tag: &str) -> (SocketAddr, Arc<Service>, PathBuf) {
@@ -1330,7 +1521,11 @@ mod tests {
     #[test]
     fn the_defaults_are_loopback_8765_two_at_once_and_flags_override_them() {
         let none: Vec<String> = Vec::new();
-        let default = ("127.0.0.1:8765".parse().unwrap(), cap(2, 32));
+        let default = ServeArgs {
+            addr: "127.0.0.1:8765".parse().unwrap(),
+            max_concurrent: None,
+            max_queued: 32,
+        };
         assert_eq!(parse_args(&none), Ok(default));
         assert_eq!(DEFAULT_MAX_CONCURRENT_WORK, 2);
         assert_eq!(DEFAULT_MAX_QUEUED_WORK, 32);
@@ -1346,7 +1541,11 @@ mod tests {
                 "--max-queued-work",
                 "0"
             ])),
-            Ok(("127.0.0.1:9000".parse().unwrap(), cap(5, 0)))
+            Ok(ServeArgs {
+                addr: "127.0.0.1:9000".parse().unwrap(),
+                max_concurrent: Some(5),
+                max_queued: 0
+            })
         );
         for bad in [
             &["--port", "x"][..],
@@ -1592,7 +1791,7 @@ mod tests {
         );
 
         // The same runtime, called the way `chip work` calls it, records the same trajectory.
-        let direct = runtime(Model::new(script).arc(), &dir)
+        let direct = runtime(Model::new(script).arc())
             .run(
                 WorkId::new("direct"),
                 "ALPHA inspect the project",
@@ -1601,6 +1800,7 @@ mod tests {
                     max_executions: DEFAULT_MAX_EXECUTIONS,
                 },
                 None,
+                &local("env_direct", &dir),
             )
             .await
             .0;
@@ -2070,47 +2270,248 @@ mod tests {
         assert_eq!(m["active_work"], 0);
     }
 
+    // ---- the environment boundary ---------------------------------------------------------------
+
+    fn root_of(pool: &Pool, environment_id: &str) -> PathBuf {
+        let index: usize = environment_id.rsplit('_').next().unwrap().parse().unwrap();
+        pool.roots[index].clone()
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn concurrent_works_use_the_one_workspace_and_the_service_adds_none() {
+    async fn concurrent_works_operate_in_separate_environments_and_nothing_crosses() {
         let model = Model::new(&[("ALPHA", &[WRITE_A, BLOCK]), ("BRAVO", &[WRITE_B, BLOCK])])
             .gated(&["ALPHA", "BRAVO"])
             .arc();
-        let (addr, service, dir) = start_with(model.clone(), "workspace", cap(2, 4)).await;
+        let pool = Pool::isolated("isolated-envs", 2);
+        let (addr, _s, _d) = start_pool(model.clone(), pool.clone(), cap(2, 4)).await;
         let a = submit(addr, "ALPHA");
         let b = submit(addr, "BRAVO");
         until("both in the model", || {
             model.entered("ALPHA") == 1 && model.entered("BRAVO") == 1
         })
         .await;
+        // Each already has its own environment while running.
+        let (ga, gb) = (get(addr, &a), get(addr, &b));
+        let (ea, eb) = (
+            ga["environment_id"].as_str().unwrap().to_string(),
+            gb["environment_id"].as_str().unwrap().to_string(),
+        );
+        assert_ne!(ea, eb);
         model.release("ALPHA");
         model.release("BRAVO");
-        finished(addr, &a).await;
-        finished(addr, &b).await;
-        // Both wrote into the single root the runtime was given: no clone, no worktree, no
-        // per-work directory, and nothing outside it.
-        assert_eq!(service.runtime.root, dir);
+        let (da, db) = (finished(addr, &a).await, finished(addr, &b).await);
+        assert_eq!(
+            (da["environment_id"].as_str(), db["environment_id"].as_str()),
+            (Some(ea.as_str()), Some(eb.as_str()))
+        );
+
+        // Writes landed only in the writer's own environment.
+        let (ra, rb) = (root_of(&pool, &ea), root_of(&pool, &eb));
+        assert_ne!(ra, rb);
+        assert_eq!(
+            std::fs::read_to_string(ra.join("alpha.txt")).unwrap(),
+            "from alpha"
+        );
+        assert_eq!(
+            std::fs::read_to_string(rb.join("bravo.txt")).unwrap(),
+            "from bravo"
+        );
+        assert!(!ra.join("bravo.txt").exists() && !rb.join("alpha.txt").exists());
+
+        // Executions, observations and evidence are each work's own.
+        for (done, id, own) in [(&da, &a, "alpha"), (&db, &b, "bravo")] {
+            assert_eq!(done["result"]["measurement"]["executions"], 1);
+            assert_eq!(done["result"]["measurement"]["observations"], 1);
+            let ev = events(addr, id);
+            assert_eq!(execution_ids(&ev).len(), 1);
+            assert!(execution_ids(&ev)[0].contains(own), "{ev:?}");
+            assert_eq!(
+                kinds(&ev)
+                    .iter()
+                    .filter(|k| *k == "EvidenceRecorded")
+                    .count(),
+                1
+            );
+        }
+
+        // Nothing the model was shown, and nothing the service says, names a host path; the
+        // environment identity is opaque.
+        for (marker, root) in [("ALPHA", &ra), ("BRAVO", &rb)] {
+            let shown = model.texts(marker).join("\n");
+            for r in [&ra, &rb] {
+                assert!(
+                    !shown.contains(r.to_str().unwrap()),
+                    "{marker} was shown a host path"
+                );
+            }
+            assert!(
+                !shown.contains("env_test"),
+                "{marker} was shown an environment id"
+            );
+            let _ = root;
+        }
+        let all = format!("{}{}", da, db);
+        assert!(!all.contains(ra.to_str().unwrap()) && !all.contains(rb.to_str().unwrap()));
+        assert!(ea.starts_with("env_test_") && !ea.contains('/'));
+        assert_eq!(pool.acquired.load(Ordering::SeqCst), 2);
+        assert_eq!(pool.released.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_provider_that_shares_one_environment_cannot_make_two_works_collide() {
+        let model = Model::new(&[("ALPHA", &[WRITE_A, BLOCK]), ("BRAVO", &[WRITE_B, BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
+        let pool = Pool::misbehaving("shared", 4, true, false);
+        let (addr, _s, dir) = start_pool(model.clone(), pool.clone(), cap(2, 4)).await;
+        let a = submit(addr, "ALPHA");
+        until("A in the model", || model.entered("ALPHA") == 1).await;
+        let b = submit(addr, "BRAVO");
+
+        // B was handed A's environment; the boundary refuses it before anything happens.
+        let refused = finished(addr, &b).await;
+        assert_eq!(refused["status"], "failed");
+        assert_eq!(refused["lifecycle"], Value::Null, "the agent never started");
+        assert_eq!(refused["environment_id"], Value::Null);
+        let reason = refused["result"]["outcome_reason"].as_str().unwrap();
+        assert!(reason.contains("never shared"), "{reason}");
+        assert_eq!(model.entered("BRAVO"), 0, "no model call");
+        assert_eq!(events(addr, &b), Vec::<Value>::new());
+        assert!(!dir.join("bravo.txt").exists(), "nothing was executed");
+        assert_eq!(
+            get(addr, &a)["status"],
+            "running",
+            "the owner was not disturbed"
+        );
+
+        model.release("ALPHA");
+        assert_eq!(finished(addr, &a).await["status"], "blocked");
         assert_eq!(
             std::fs::read_to_string(dir.join("alpha.txt")).unwrap(),
             "from alpha"
         );
+        // Only the accepted ownership was ever released.
+        assert_eq!(pool.released.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_environment_is_reused_by_a_later_work_once_it_is_released() {
+        let model = Model::new(&[("ALPHA", &[WRITE_A, BLOCK]), ("BRAVO", &[WRITE_B, BLOCK])]).arc();
+        let pool = Pool::misbehaving("sequential", 1, true, false);
+        let (addr, _s, dir) = start_pool(model.clone(), pool.clone(), cap(1, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let da = finished(addr, &a).await;
+        let b = submit(addr, "BRAVO");
+        let db = finished(addr, &b).await;
+        assert_eq!(da["environment_id"], "env_test_0");
         assert_eq!(
-            std::fs::read_to_string(dir.join("bravo.txt")).unwrap(),
-            "from bravo"
+            db["environment_id"], "env_test_0",
+            "the same environment, one owner at a time"
         );
-        let prefix = format!("chip-serve-{}-workspace", std::process::id());
-        let ours = std::fs::read_dir(dir.parent().unwrap())
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
-            .count();
-        assert_eq!(ours, 1, "no per-work or sibling workspace was created");
-        let mut files: Vec<String> = std::fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-        files.sort();
-        assert_eq!(files, ["alpha.txt", "bravo.txt", "src"]);
+        assert_eq!(
+            (da["status"].as_str(), db["status"].as_str()),
+            (Some("blocked"), Some("blocked"))
+        );
+        assert!(dir.join("alpha.txt").exists() && dir.join("bravo.txt").exists());
+        assert_eq!(pool.released.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn work_with_no_environment_fails_without_a_model_call_or_execution() {
+        let model = Model::new(&[("ALPHA", &[WRITE_A, BLOCK]), ("BRAVO", &[BLOCK])]).arc();
+        let pool = Pool::misbehaving("unavailable", 2, false, true);
+        let (addr, _s, dir) = start_pool(model.clone(), pool.clone(), cap(1, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        for id in [&a, &b] {
+            let done = finished(addr, id).await;
+            assert_eq!(done["status"], "failed");
+            assert_eq!(done["lifecycle"], Value::Null);
+            assert_eq!(done["environment_id"], Value::Null);
+            assert!(
+                done["result"]["outcome_reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("environment unavailable")
+            );
+            assert!(
+                done["result"].get("measurement").is_none(),
+                "no run, no measurement"
+            );
+            assert_eq!(events(addr, id), Vec::<Value>::new());
+        }
+        // No fallback, nothing asked, nothing run, no completion, and the slot was not leaked.
+        assert_eq!(model.total_entered(), 0);
+        assert!(!dir.join("alpha.txt").exists());
+        let m = metrics(addr);
+        assert_eq!(
+            (
+                m["failed_work"].as_u64(),
+                m["started_work"].as_u64(),
+                m["completed_work"].as_u64(),
+                m["active_work"].as_u64()
+            ),
+            (Some(2), Some(0), Some(0), Some(0))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queued_work_cancelled_before_admission_never_acquires_an_environment() {
+        let model = Model::new(&[("ALPHA", &[BLOCK]), ("BRAVO", &[BLOCK])])
+            .gated(&["ALPHA"])
+            .arc();
+        let pool = Pool::isolated("noacquire", 1);
+        let (addr, _s, _d) = start_pool(model.clone(), pool.clone(), cap(1, 4)).await;
+        let a = submit(addr, "ALPHA");
+        until("A in the model", || model.entered("ALPHA") == 1).await;
+        let b = submit(addr, "BRAVO");
+        assert_eq!(
+            call(addr, "POST", &format!("/v1/work/{b}/cancel"), None).status,
+            200
+        );
+        model.release("ALPHA");
+        finished(addr, &a).await;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(
+            pool.acquired.load(Ordering::SeqCst),
+            1,
+            "only A ever acquired one"
+        );
+        assert_eq!(get(addr, &b)["environment_id"], Value::Null);
+        assert_eq!(model.entered("BRAVO"), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_work_that_panics_still_releases_its_environment() {
+        let model = Model::new(&[("ALPHA", &[BLOCK]), ("BRAVO", &[BLOCK])])
+            .panicking(&["ALPHA"])
+            .arc();
+        let pool = Pool::isolated("panic-release", 1);
+        let (addr, _s, _d) = start_pool(model.clone(), pool.clone(), cap(1, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let b = submit(addr, "BRAVO");
+        assert_eq!(finished(addr, &a).await["status"], "failed");
+        assert_eq!(
+            finished(addr, &b).await["status"],
+            "blocked",
+            "the environment was free again"
+        );
+        assert_eq!(pool.acquired.load(Ordering::SeqCst), 2);
+        assert_eq!(pool.released.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn more_concurrent_work_than_isolated_environments_is_refused_up_front() {
+        let pool = Pool::misbehaving("capacity", 1, false, false);
+        let err = Service::new(
+            runtime(Model::new(&[]).arc()),
+            Arc::new(Environments::new(pool)),
+            true,
+            cap(2, 4),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("requires isolated environments"), "{err}");
     }
 
     // ---- cancellation of running work -----------------------------------------------------------

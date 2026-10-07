@@ -225,6 +225,47 @@ fn without_a_model_or_pax_nothing_listens() {
     assert!(out.stdout.is_empty());
 }
 
+/// The standalone service runs on the local machine and needs nothing else. It has one mutable
+/// project directory, so asking it for concurrent work is refused up front rather than allowed to
+/// collide.
+#[cfg(unix)]
+#[test]
+fn concurrent_work_on_the_one_local_directory_is_refused_at_startup() {
+    let dir = project("concurrency");
+    let shim = pax_shim("concurrency");
+    for n in ["2", "8"] {
+        let out = command(&dir, "http://127.0.0.1:1", &shim)
+            .args(["--port", "0", "--max-concurrent-work", n])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{n}");
+        assert!(out.stdout.is_empty(), "it must not claim to be listening");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("concurrent work requires isolated environments"),
+            "{err}"
+        );
+        assert!(err.contains("--max-concurrent-work 1"), "{err}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn the_local_environment_defaults_to_one_work_at_a_time_and_says_so() {
+    let dir = project("onework");
+    let shim = pax_shim("onework");
+    let mut server = launch(
+        command(&dir, "http://127.0.0.1:1", &shim),
+        &["--port", "0", "--max-concurrent-work", "1"],
+    );
+    let (status, _, m) = http(&server.addr, "GET", "/v1/metrics", None);
+    assert_eq!((status, m["max_concurrent_work"].as_u64()), (200, Some(1)));
+    let mut rest = String::new();
+    server._stdout.read_line(&mut rest).unwrap();
+    server._stdout.read_line(&mut rest).unwrap();
+    assert!(rest.contains("1 isolated environment"), "{rest}");
+}
+
 #[cfg(unix)]
 #[test]
 fn usage_errors_are_exit_2() {
@@ -299,7 +340,7 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
             .env("CHIP_MODEL", "mock-model")
             .env("CHIP_ENDPOINT", &url)
             .env("CHIP_API_KEY", "sk-serve-secret-never-printed");
-        let server = launch(c, &["--port", "0", "--max-concurrent-work", "2"]);
+        let server = launch(c, &["--port", "0"]);
         let addr = server.addr.clone();
         let (_, _, body) = http(
             &addr,
@@ -344,7 +385,10 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
             "{state}"
         );
         let (_, _, m) = http(&addr, "GET", "/v1/metrics", None);
-        assert_eq!(m["max_concurrent_work"], 2);
+        assert_eq!(
+            m["max_concurrent_work"], 1,
+            "one mutable local directory: one work at a time"
+        );
         assert_eq!(m["started_work"], 1);
     })
     .await

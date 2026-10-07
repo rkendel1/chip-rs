@@ -16,28 +16,28 @@
 //! escalated); 2 usage; 3 required infrastructure unavailable (no provider, no usable PAX; nothing
 //! ran); 4 runtime failure or a violated safety invariant.
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chip_core::{
-    Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, CapabilitySet, ContextReport,
-    DeduplicatedEscalationContext, ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary,
-    Observation, ObservationPredicate, SafetyAudit, TestLocalReasoner, WorkDecision, WorkEvent,
-    WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement,
-    WorkView, audit_safety, context_report, measure_utility, verify_trajectory,
+    Agent, CapabilityId, ContextReport, DeduplicatedEscalationContext, EnvironmentDescription,
+    Environments, ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary, Observation,
+    ObservationInvariant, ObservationPredicate, SafetyAudit, TestLocalReasoner, WorkDecision,
+    WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
+    WorkUtilityMeasurement, WorkView, audit_safety, context_report, measure_utility,
+    verify_trajectory,
 };
-use chip_pax::{PAX_TEST_CAPABILITY, PaxExecutor, PaxTestPassed, ResolvedPax};
+#[cfg(test)]
+use chip_pax::PaxExecutor;
+use chip_pax::{PAX_TEST_CAPABILITY, PaxTestPassed};
 use chip_project::{
     GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
-    PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor,
-    git_observation_invariant, git_scope_invariant, host_path_leak_invariant,
-    navigation_mismatch_invariant, out_of_root_write_invariant, path_escape_invariant,
-    write_summary,
+    PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, write_summary,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 use crate::horizon::Recording;
+use crate::local_environment::LocalEnvironmentProvider;
 use crate::verify::{
     EXIT_NOT_VERIFIED, EXIT_RUNTIME_FAILURE, EXIT_UNAVAILABLE, EXIT_USAGE, EXIT_VERIFIED,
 };
@@ -106,16 +106,20 @@ impl LocalWorkPolicy for CompleteWhenVerified {
 }
 
 /// The one supported piece of work, over one project.
-pub fn spec(id: WorkId, goal: &str, root: &std::path::Path, limits: WorkLimits) -> WorkSpec {
+pub fn spec(
+    id: WorkId,
+    goal: &str,
+    invariants: Vec<Arc<dyn ObservationInvariant>>,
+    limits: WorkLimits,
+) -> WorkSpec {
     let mut spec = WorkSpec::new(id, WorkGoal::new(goal_text(goal)))
         .with_limits(limits)
-        .with_required_observation(Arc::new(VerifiedChange))
-        .with_observation_invariant(path_escape_invariant(root))
-        .with_observation_invariant(out_of_root_write_invariant(root))
-        .with_observation_invariant(host_path_leak_invariant(root))
-        .with_observation_invariant(navigation_mismatch_invariant(root))
-        .with_observation_invariant(git_scope_invariant())
-        .with_observation_invariant(git_observation_invariant(root))
+        .with_required_observation(Arc::new(VerifiedChange));
+    // The environment says what its observations must satisfy; Chip applies it.
+    for invariant in invariants {
+        spec = spec.with_observation_invariant(invariant);
+    }
+    let mut spec = spec
         // The project changes between requests, so none of these may ever be answered from memory.
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_LIST).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_SEARCH).unwrap())
@@ -244,7 +248,8 @@ impl SoftwareWork {
     }
 }
 
-/// Runs the work through the existing loop with the project, PAX and the given model.
+/// Runs the work through the existing loop with the project, PAX and the given model. Builds a
+/// local environment over `root` for the one run.
 #[cfg(test)]
 pub async fn run_software_work(
     model: Arc<dyn ModelProvider>,
@@ -255,12 +260,17 @@ pub async fn run_software_work(
     limits: WorkLimits,
     policy: &dyn LocalWorkPolicy,
 ) -> SoftwareWork {
+    let environment = crate::local_environment::LocalEnvironment::new(
+        crate::local_environment::opaque_id(root),
+        root,
+        pax,
+        EnvironmentDescription::default(),
+    );
     run_software_work_with_budget(
         WorkId::new("work"),
         model,
         model_name,
-        root,
-        pax,
+        &environment,
         goal,
         limits,
         policy,
@@ -269,32 +279,27 @@ pub async fn run_software_work(
     .await
 }
 
-/// [`run_software_work`] with the model's context budget in bytes, when one was given. A request
-/// over it is never sent.
+/// [`run_software_work`] in the given environment, with the model's context budget in bytes when
+/// one was given. A request over it is never sent. The one environment serves the whole run.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_software_work_with_budget(
     id: WorkId,
     model: Arc<dyn ModelProvider>,
     model_name: String,
-    root: &std::path::Path,
-    pax: PaxExecutor,
+    environment: &dyn WorkEnvironment,
     goal: &str,
     limits: WorkLimits,
     policy: &dyn LocalWorkPolicy,
     context_budget_bytes: Option<usize>,
 ) -> SoftwareWork {
-    let set = Arc::new(
-        CapabilitySet::new()
-            .with(Arc::new(ProjectExecutor::new(root)))
-            .with(Arc::new(pax)),
-    );
+    let set = environment.capabilities();
     let agent = Agent::with_model(model, model_name)
         .with_capabilities(set.clone())
         .with_executor(set)
         .with_observer(Arc::new(ExecutionObserver))
         .with_local_reasoner(Arc::new(TestLocalReasoner::default()))
         .with_max_output_tokens(WORK_MAX_OUTPUT_TOKENS);
-    let mut spec = spec(id, goal, root, limits);
+    let mut spec = spec(id, goal, environment.observation_invariants(), limits);
     if let Some(bytes) = context_budget_bytes {
         spec = spec.with_context_budget_bytes(bytes);
     }
@@ -378,7 +383,7 @@ fn by_capability(work: &SoftwareWork) -> String {
     }
 }
 
-pub fn render_human(w: &SoftwareWork, pax: &ResolvedPax) -> String {
+pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
     let m = w.report.measurement();
     let u = &w.utility;
     let mut out = String::new();
@@ -447,7 +452,11 @@ pub fn render_human(w: &SoftwareWork, pax: &ResolvedPax) -> String {
     line(
         "Evidence: observations of real operations; no cryptographic execution receipt".to_string(),
     );
-    line(format!("PAX: {} ({})", pax.version, pax.path.display()));
+    line(format!(
+        "PAX: {} ({})",
+        env.verifier_version.as_deref().unwrap_or("unknown"),
+        env.diagnostic.as_deref().unwrap_or("-")
+    ));
     if w.invariants_hold() {
         line("Audit: clean".to_string());
     } else {
@@ -520,7 +529,7 @@ fn context_json(c: &ContextReport) -> serde_json::Value {
     })
 }
 
-pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
+pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
     let m = w.report.measurement();
     let u = &w.utility;
     let last = last_pax(w);
@@ -557,7 +566,7 @@ pub fn render_json(w: &SoftwareWork, pax: &ResolvedPax) -> String {
         "useful_work_per_model_call": u.work_per_model_call(),
         "useful_work_per_execution": u.work_per_execution(),
         "pax": {
-            "version": pax.version,
+            "version": env.verifier_version,
             "last_status": last.as_ref().map(|r| r.status.as_str()),
             "last_reason": last.as_ref().map(|r| r.reason.as_str()),
             "last_exit_code": last.as_ref().and_then(|r| r.exit_code),
@@ -696,24 +705,21 @@ impl ModelProvider for CancelBeforeModelCall {
     }
 }
 
-/// The configured model, a usable PAX and the project root. The single entry point to the work
-/// loop: `chip work` and `chip serve` both prepare one and call [`WorkRuntime::run`].
+/// The configured model and the work's limits on context. The single entry point to the work
+/// loop: `chip work` and `chip serve` both prepare one and call [`WorkRuntime::run`] with the
+/// environment the work acquired. It holds no environment of its own.
 pub struct WorkRuntime {
     model: Arc<dyn ModelProvider>,
     model_name: String,
     pub identity: Identity,
-    pub root: PathBuf,
-    pub pax: ResolvedPax,
     context_budget: Option<usize>,
 }
 
 impl WorkRuntime {
-    /// Selects the model, finds PAX and checks the project capabilities. Fails closed with the
-    /// reason; nothing has run when it does.
-    pub async fn prepare(
+    /// Selects the model. Fails closed with the reason; nothing has run when it does.
+    pub fn prepare(
         selection: &crate::provider_selection::Selection,
         context_budget: Option<usize>,
-        root: &Path,
     ) -> Result<Self, String> {
         let config = crate::provider_selection::resolve(selection, |name| std::env::var(name).ok())
             .map_err(|e| format!("no model is selected ({e}); nothing was run"))?;
@@ -728,32 +734,17 @@ impl WorkRuntime {
         };
         let provider = fx_provider_http::HttpProvider::new(config)
             .map_err(|e| format!("the model provider is unusable ({e}); nothing was run"))?;
-        // Verification is how the goal is established, so without a usable PAX nothing is attempted.
-        let pax = PaxExecutor::new(root)
-            .resolve()
-            .await
-            .map_err(|why| format!("PAX unavailable ({why}); nothing was run"))?;
-        let project = ProjectExecutor::new(root);
-        for id in [PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ, PROJECT_WRITE] {
-            let ready = project.availability(&CapabilityId::new(id).unwrap()).await;
-            if !matches!(ready, CapabilityAvailability::Available) {
-                return Err(format!("{id} is unavailable; nothing was run"));
-            }
-        }
         Ok(Self {
             model: Arc::new(provider),
             model_name,
             identity,
-            root: root.to_path_buf(),
-            pax,
             context_budget,
         })
     }
 
-    /// A runtime over an already-chosen model and an already-resolved PAX. Tests only: it skips
-    /// the checks `prepare` makes, so nothing here is evidence about a real PAX.
+    /// A runtime over an already-chosen model. Tests only.
     #[cfg(test)]
-    pub fn for_test(model: Arc<dyn ModelProvider>, root: &Path, pax: ResolvedPax) -> Self {
+    pub fn for_test(model: Arc<dyn ModelProvider>) -> Self {
         Self {
             model,
             model_name: "scripted".into(),
@@ -762,8 +753,6 @@ impl WorkRuntime {
                 model: "scripted".into(),
                 endpoint: "none".into(),
             },
-            root: root.to_path_buf(),
-            pax,
             context_budget: None,
         }
     }
@@ -776,6 +765,7 @@ impl WorkRuntime {
         goal: &str,
         limits: WorkLimits,
         control: Option<Arc<RunControl>>,
+        environment: &dyn WorkEnvironment,
     ) -> (SoftwareWork, Vec<String>) {
         let replies = Arc::new(Mutex::new(Vec::new()));
         let inner = match control {
@@ -793,8 +783,7 @@ impl WorkRuntime {
             id,
             model,
             self.model_name.clone(),
-            &self.root,
-            PaxExecutor::new(&self.root),
+            environment,
             goal,
             limits,
             &CompleteWhenVerified,
@@ -886,10 +875,29 @@ pub async fn work(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     };
-    let runtime = match WorkRuntime::prepare(&selection, context_budget, &root).await {
+    let runtime = match WorkRuntime::prepare(&selection, context_budget) {
         Ok(runtime) => runtime,
         Err(why) => {
             eprintln!("error: {why}");
+            return EXIT_UNAVAILABLE;
+        }
+    };
+    // The local machine is the environment: one project directory, owned by this one work.
+    let provider = match LocalEnvironmentProvider::prepare(&root).await {
+        Ok(provider) => provider,
+        Err(why) => {
+            eprintln!("error: {why}");
+            return EXIT_UNAVAILABLE;
+        }
+    };
+    let work_id = WorkId::new("work");
+    let environment = match Environments::new(Arc::new(provider))
+        .acquire(work_id.clone())
+        .await
+    {
+        Ok(environment) => environment,
+        Err(why) => {
+            eprintln!("error: {why}; nothing was run");
             return EXIT_UNAVAILABLE;
         }
     };
@@ -897,8 +905,13 @@ pub async fn work(args: &[String]) -> i32 {
         max_turns,
         max_executions,
     };
-    let (result, replies) = runtime.run(WorkId::new("work"), &goal, limits, None).await;
-    let (identity, resolved) = (runtime.identity.clone(), &runtime.pax);
+    let (result, replies) = runtime
+        .run(work_id, &goal, limits, None, environment.environment())
+        .await;
+    let (identity, resolved) = (
+        runtime.identity.clone(),
+        environment.environment().description(),
+    );
     // The selected model is the only one ever asked. If it cannot answer, the run says so and stops:
     // no other provider or model is tried.
     let calls: Vec<bool> = result
@@ -921,9 +934,9 @@ pub async fn work(args: &[String]) -> i32 {
         }
     }
     if json {
-        println!("{}", render_json(&result, resolved));
+        println!("{}", render_json(&result, &resolved));
     } else {
-        print!("{}", render_human(&result, resolved));
+        print!("{}", render_human(&result, &resolved));
     }
     if print_reply {
         for reply in replies.iter() {
@@ -949,7 +962,8 @@ mod tests {
     use std::collections::{BTreeMap, VecDeque};
     use std::path::{Path, PathBuf};
 
-    use chip_core::{ExecutionEvent, ObservationKind};
+    use chip_core::{CapabilityProvider, CapabilitySet, ExecutionEvent, ObservationKind};
+    use chip_project::ProjectExecutor;
     use fx_core::{FxError, ModelRequest, ModelResponse, Usage};
 
     use super::*;
@@ -1158,10 +1172,10 @@ mod tests {
         assert_eq!(w.audit.events_after_terminal, 0);
     }
 
-    fn resolved_pax() -> ResolvedPax {
-        ResolvedPax {
-            path: PathBuf::from("/usr/local/bin/pax"),
-            version: "0.3.0".into(),
+    fn resolved_pax() -> EnvironmentDescription {
+        EnvironmentDescription {
+            verifier_version: Some("0.3.0".into()),
+            diagnostic: Some("/usr/local/bin/pax".into()),
         }
     }
 

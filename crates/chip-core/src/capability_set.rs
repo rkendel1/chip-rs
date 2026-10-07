@@ -1,7 +1,7 @@
 //! A set of capability backends presented to the agent as one provider and one executor.
 //!
 //! The agent takes a single provider and a single executor. A `CapabilitySet` lets several
-//! backends (PAX, project files, Compute) each own their capabilities without any of them knowing
+//! backends (a test runner, project files, an external executor) each own their capabilities without any of them knowing
 //! about the others. Routing is by declared capability id and nothing else: a request is executed
 //! by the backend that declared the id, or by none. There is no fallback to another backend, and
 //! two backends declaring the same id is a configuration error that fails closed.

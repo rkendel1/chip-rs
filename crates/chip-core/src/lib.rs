@@ -1,6 +1,7 @@
 mod capability_set;
 mod decision;
 mod decision_state;
+mod environment;
 mod evidence;
 mod model_decision;
 mod observation;
@@ -19,6 +20,10 @@ pub use decision::{
 };
 pub use decision_state::{
     CapabilityDecisionState, DECISION_SCHEMA, DecisionStateError, GraphStateToken, ImpactState,
+};
+pub use environment::{
+    EnvironmentDescription, EnvironmentError, EnvironmentId, EnvironmentProvider, Environments,
+    OwnedEnvironment, WorkEnvironment,
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
