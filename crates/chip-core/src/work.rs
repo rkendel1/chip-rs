@@ -351,6 +351,13 @@ pub enum WorkEvent {
         reason: String,
         context: ContextMetrics,
     },
+    /// The one model call an escalation makes has returned (or failed). `usage` is what the
+    /// provider reported, `None` when the call failed.
+    ModelCalled {
+        work_id: WorkId,
+        turn: usize,
+        usage: Option<ModelUsage>,
+    },
     DecisionMade {
         work_id: WorkId,
         turn: usize,
@@ -402,6 +409,374 @@ pub enum WorkEvent {
     },
 }
 
+/// Token usage as the provider reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+}
+
+/// Where the wall-clock time went. Latency is observed, never derived from events, and is
+/// excluded from every determinism comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WorkLatency {
+    /// Time inside the model call, summed over escalations.
+    pub model: Duration,
+    /// Time inside the executor, summed over executions.
+    pub compute: Duration,
+    /// Time in the local policy and the local reasoner (the evidence assessment included).
+    pub local_decision: Duration,
+    pub total: Duration,
+}
+
+/// A stopwatch that does nothing on wasm32, where `Instant::now` is unavailable.
+#[derive(Clone, Copy)]
+struct Mark {
+    #[cfg(not(target_arch = "wasm32"))]
+    at: std::time::Instant,
+}
+
+impl Mark {
+    fn now() -> Mark {
+        Mark {
+            #[cfg(not(target_arch = "wasm32"))]
+            at: std::time::Instant::now(),
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.at.elapsed()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Duration::ZERO
+        }
+    }
+}
+
+/// The canonical measurement of one workload. Every count is derived from the event trajectory
+/// ([`WorkMeasurement::derive`]) and nothing else, so it cannot disagree with what happened;
+/// only the latencies come from outside it. A metric that cannot be measured is an explicit
+/// `None`, never an invented value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkMeasurement {
+    pub work_id: WorkId,
+    pub outcome: WorkOutcome,
+
+    pub turns: u32,
+    /// Executions the executor was actually asked to perform.
+    pub executions: u32,
+    pub observations: u32,
+
+    pub evidence_hits: u32,
+    pub local_decisions: u32,
+    pub model_escalations: u32,
+
+    /// Bytes and characters sent to the model across all escalations.
+    pub context_bytes: u64,
+    pub context_chars: u64,
+
+    pub model_calls: u32,
+    /// Prompt plus completion tokens the provider reported. `None` when no call reported usage.
+    pub model_tokens: Option<u64>,
+
+    pub model_latency: Duration,
+    pub compute_latency: Duration,
+    /// Local policy and reasoner time. Attribution, not a microbenchmark.
+    pub local_decision_latency: Duration,
+    pub total_latency: Duration,
+}
+
+impl WorkMeasurement {
+    /// Counts what the trajectory contains. `executions` counts `ExecutionStarted`, which is
+    /// emitted only when the executor is actually invoked.
+    pub fn derive(
+        work_id: WorkId,
+        outcome: WorkOutcome,
+        events: &[WorkEvent],
+        latency: WorkLatency,
+    ) -> WorkMeasurement {
+        let mut m = WorkMeasurement {
+            work_id,
+            outcome,
+            turns: 0,
+            executions: 0,
+            observations: 0,
+            evidence_hits: 0,
+            local_decisions: 0,
+            model_escalations: 0,
+            context_bytes: 0,
+            context_chars: 0,
+            model_calls: 0,
+            model_tokens: None,
+            model_latency: latency.model,
+            compute_latency: latency.compute,
+            local_decision_latency: latency.local_decision,
+            total_latency: latency.total,
+        };
+        for event in events {
+            match event {
+                WorkEvent::DecisionStarted { .. } => m.turns += 1,
+                WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => m.executions += 1,
+                WorkEvent::ObservationRecorded { .. } => m.observations += 1,
+                WorkEvent::EvidenceReused { .. } => m.evidence_hits += 1,
+                WorkEvent::LocalDecision { .. } => m.local_decisions += 1,
+                WorkEvent::ModelEscalation { context, .. } => {
+                    m.model_escalations += 1;
+                    m.context_bytes += context.bytes as u64;
+                    m.context_chars += context.chars as u64;
+                }
+                WorkEvent::ModelCalled { usage, .. } => {
+                    m.model_calls += 1;
+                    if let Some(u) = usage {
+                        m.model_tokens = Some(
+                            m.model_tokens.unwrap_or(0)
+                                + u64::from(u.prompt_tokens)
+                                + u64::from(u.completion_tokens),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        m
+    }
+
+    pub fn terminal_state(&self) -> TerminalState {
+        self.outcome.terminal_state()
+    }
+}
+
+/// Checks the invariants optimization must never silently break. Returns every violation; an
+/// empty list means the trajectory is sound.
+///
+/// * the run starts with `WorkStarted` and ends with exactly one terminal event;
+/// * turns and executions stay within the limits, and turns are numbered in order;
+/// * each turn has at most one decision, one capability request and one execution;
+/// * a turn that reused evidence performed no execution;
+/// * every observation follows an execution in its own turn, and every piece of evidence follows
+///   an observation: nothing is believed without an execution;
+/// * every escalation is exactly one model call.
+pub fn verify_trajectory(events: &[WorkEvent], limits: &WorkLimits) -> Vec<String> {
+    let mut violations = Vec::new();
+    if !matches!(events.first(), Some(WorkEvent::WorkStarted { .. })) {
+        violations.push("the trajectory does not start with WorkStarted".to_string());
+    }
+    let terminal = |e: &WorkEvent| {
+        matches!(
+            e,
+            WorkEvent::WorkCompleted { .. }
+                | WorkEvent::WorkEscalated { .. }
+                | WorkEvent::WorkBlocked { .. }
+                | WorkEvent::WorkLimitReached { .. }
+                | WorkEvent::WorkFailed { .. }
+        )
+    };
+    let terminals = events.iter().filter(|e| terminal(e)).count();
+    if terminals != 1 {
+        violations.push(format!(
+            "expected exactly one terminal event, found {terminals}"
+        ));
+    }
+    if !events.last().is_some_and(terminal) {
+        violations.push("the last event is not terminal".to_string());
+    }
+
+    #[derive(Default, Clone)]
+    struct Turn {
+        decision_makers: usize,
+        decisions_made: usize,
+        requests: usize,
+        executions: usize,
+        observations: usize,
+        evidence_recorded: usize,
+        reused: usize,
+        escalations: usize,
+        model_calls: usize,
+    }
+    let mut turns: Vec<Turn> = Vec::new();
+    let mut current: Option<usize> = None;
+    let (mut executions, mut observations) = (0usize, 0usize);
+    for event in events {
+        match event {
+            WorkEvent::DecisionStarted { turn, .. } => {
+                if *turn != turns.len() {
+                    violations.push(format!(
+                        "turn {turn} is out of order (expected {})",
+                        turns.len()
+                    ));
+                }
+                turns.push(Turn::default());
+                current = Some(turns.len() - 1);
+            }
+            _ => {
+                let Some(i) = current else { continue };
+                let t = &mut turns[i];
+                match event {
+                    WorkEvent::LocalDecision { .. } => t.decision_makers += 1,
+                    WorkEvent::ModelEscalation { .. } => {
+                        t.decision_makers += 1;
+                        t.escalations += 1;
+                    }
+                    WorkEvent::ModelCalled { .. } => t.model_calls += 1,
+                    WorkEvent::DecisionMade { .. } => t.decisions_made += 1,
+                    WorkEvent::CapabilityRequested { .. } => t.requests += 1,
+                    WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => {
+                        t.executions += 1;
+                        executions += 1;
+                    }
+                    WorkEvent::ObservationRecorded { .. } => {
+                        if t.executions == 0 {
+                            violations.push(format!(
+                                "turn {}: an observation without an execution",
+                                i + 1
+                            ));
+                        }
+                        t.observations += 1;
+                        observations += 1;
+                    }
+                    WorkEvent::EvidenceRecorded { .. } => {
+                        if t.observations == 0 {
+                            violations
+                                .push(format!("turn {}: evidence without an observation", i + 1));
+                        }
+                        t.evidence_recorded += 1;
+                    }
+                    WorkEvent::EvidenceReused { .. } => t.reused += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    for (i, t) in turns.iter().enumerate() {
+        let n = i + 1;
+        if t.decision_makers > 1 || t.decisions_made > 1 {
+            violations.push(format!("turn {n}: more than one decision"));
+        }
+        if t.requests > 1 {
+            violations.push(format!("turn {n}: more than one capability request"));
+        }
+        if t.executions > 1 {
+            violations.push(format!("turn {n}: more than one execution"));
+        }
+        if t.reused > 0 && t.executions > 0 {
+            violations.push(format!(
+                "turn {n}: evidence was reused and an execution was performed"
+            ));
+        }
+        if t.escalations != t.model_calls {
+            violations.push(format!(
+                "turn {n}: {} escalations but {} model calls",
+                t.escalations, t.model_calls
+            ));
+        }
+    }
+    if turns.len() > limits.max_turns {
+        violations.push(format!(
+            "{} turns exceed the limit of {}",
+            turns.len(),
+            limits.max_turns
+        ));
+    }
+    if executions > limits.max_executions {
+        violations.push(format!(
+            "{executions} executions exceed the limit of {}",
+            limits.max_executions
+        ));
+    }
+    if observations > executions {
+        violations.push(format!(
+            "{observations} observations from {executions} executions"
+        ));
+    }
+    violations
+}
+
+/// One iteration, structurally: what was decided and by whom, whether anything was executed,
+/// observed or reused, and what an escalation sent. There is no prompt text here, only shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnTrace {
+    /// Zero-based.
+    pub turn: usize,
+    /// `RequestCapability`, `Complete`, `Escalate` or `Block`; `None` if the turn ended before a
+    /// decision (a failed escalation).
+    pub decision: Option<&'static str>,
+    pub capability: Option<CapabilityId>,
+    pub source: Option<DecisionSource>,
+    /// The executor was invoked this turn.
+    pub executed: bool,
+    pub evidence_reused: bool,
+    pub evidence_recorded: bool,
+    /// `None` when nothing was observed or reused; otherwise whether a receipt was present.
+    pub receipt_present: Option<bool>,
+    pub observed: bool,
+    /// Present when this turn escalated to the model.
+    pub context: Option<ContextMetrics>,
+    pub escalation_reason: Option<String>,
+    pub model_called: bool,
+}
+
+/// The structural trajectory of a run, turn by turn, derived from its events.
+pub fn trace(events: &[WorkEvent]) -> Vec<TurnTrace> {
+    let mut turns: Vec<TurnTrace> = Vec::new();
+    for event in events {
+        if let WorkEvent::DecisionStarted { turn, .. } = event {
+            turns.push(TurnTrace {
+                turn: *turn,
+                decision: None,
+                capability: None,
+                source: None,
+                executed: false,
+                evidence_reused: false,
+                evidence_recorded: false,
+                receipt_present: None,
+                observed: false,
+                context: None,
+                escalation_reason: None,
+                model_called: false,
+            });
+            continue;
+        }
+        let Some(t) = turns.last_mut() else { continue };
+        match event {
+            WorkEvent::LocalDecision { .. } => t.source = Some(DecisionSource::Local),
+            WorkEvent::ModelEscalation {
+                reason, context, ..
+            } => {
+                t.source = Some(DecisionSource::Model);
+                t.context = Some(*context);
+                t.escalation_reason = Some(reason.clone());
+            }
+            WorkEvent::ModelCalled { .. } => t.model_called = true,
+            WorkEvent::DecisionMade { decision, .. } => {
+                t.decision = Some(match decision.split(' ').next() {
+                    Some("request") => "RequestCapability",
+                    Some("complete") => "Complete",
+                    Some("escalate") => "Escalate",
+                    _ => "Block",
+                });
+            }
+            WorkEvent::CapabilityRequested { capability, .. } => {
+                t.capability = Some(capability.clone())
+            }
+            WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => t.executed = true,
+            WorkEvent::ObservationRecorded { receipt_id, .. } => {
+                t.observed = true;
+                t.receipt_present = Some(receipt_id.is_some());
+            }
+            WorkEvent::EvidenceRecorded { .. } => t.evidence_recorded = true,
+            WorkEvent::EvidenceReused { receipt_id, .. } => {
+                t.evidence_reused = true;
+                t.receipt_present = Some(receipt_id.is_some());
+            }
+            _ => {}
+        }
+    }
+    turns
+}
+
 /// A baseline, not an optimization target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkSummary {
@@ -432,6 +807,25 @@ pub struct WorkReport {
     pub observations: Vec<Observation>,
     /// The measurements of every escalation, in order.
     pub escalations: Vec<ContextMetrics>,
+    /// Observed wall-clock attribution.
+    pub latency: WorkLatency,
+}
+
+impl WorkReport {
+    /// The structural trajectory, turn by turn.
+    pub fn trace(&self) -> Vec<TurnTrace> {
+        trace(&self.events)
+    }
+
+    /// The canonical measurement, derived from this report's event trajectory.
+    pub fn measurement(&self) -> WorkMeasurement {
+        WorkMeasurement::derive(
+            self.work_id.clone(),
+            self.outcome.clone(),
+            &self.events,
+            self.latency,
+        )
+    }
 }
 
 /// Everything `Agent::run_work` needs to know about one workload.
@@ -480,6 +874,7 @@ struct Run<'a> {
     escalations: Vec<ContextMetrics>,
     capabilities: Vec<Capability>,
     summary: WorkSummary,
+    latency: WorkLatency,
 }
 
 impl<'a> Run<'a> {
@@ -577,15 +972,23 @@ impl<'a> Run<'a> {
             reason,
             context: metrics,
         });
-        let (_, response) = self
+        let started = Mark::now();
+        let called = self
             .agent
             .model_turn(Turn::new(context.render()), &context.relevant_observations)
-            .await
-            .map_err(|e| WorkOutcome::Failed {
-                reason: format!("model escalation failed: {e}"),
-            })?;
-        self.summary.prompt_tokens += u64::from(response.usage.prompt_tokens);
-        self.summary.completion_tokens += u64::from(response.usage.completion_tokens);
+            .await;
+        self.latency.model += started.elapsed();
+        self.events.push(WorkEvent::ModelCalled {
+            work_id: self.id(),
+            turn,
+            usage: called.as_ref().ok().map(|(_, r)| ModelUsage {
+                prompt_tokens: r.usage.prompt_tokens,
+                completion_tokens: r.usage.completion_tokens,
+            }),
+        });
+        let (_, response) = called.map_err(|e| WorkOutcome::Failed {
+            reason: format!("model escalation failed: {e}"),
+        })?;
         let decision = boundary
             .interpret(&response, &self.capabilities)
             .map_err(|e| WorkOutcome::Failed {
@@ -621,8 +1024,18 @@ impl<'a> Run<'a> {
                 });
             }
         };
-        self.summary.executions += 1;
+        let started = Mark::now();
         let report = self.agent.execute(execution).await;
+        self.latency.compute += started.elapsed();
+        // An execution counts when the executor was actually invoked, which is what
+        // `ExecutionStarted` records; an unavailable executor performed nothing.
+        if report
+            .events
+            .iter()
+            .any(|e| matches!(e, ExecutionEvent::ExecutionStarted { .. }))
+        {
+            self.summary.executions += 1;
+        }
         self.events
             .extend(report.events.into_iter().map(WorkEvent::Execution));
         let result = match report.result {
@@ -712,8 +1125,7 @@ impl Agent {
         policy: &dyn LocalWorkPolicy,
         boundary: &dyn WorkDecisionBoundary,
     ) -> WorkReport {
-        #[cfg(not(target_arch = "wasm32"))]
-        let started = std::time::Instant::now();
+        let started = Mark::now();
         let mut run = Run {
             agent: self,
             spec,
@@ -740,24 +1152,61 @@ impl Agent {
                 elapsed: Duration::ZERO,
                 terminal_state: TerminalState::Failed,
             },
+            latency: WorkLatency::default(),
         };
 
         let outcome = self.drive(&mut run, policy, boundary).await;
 
         run.events.push(terminal_event(spec.id.clone(), &outcome));
-        run.summary.terminal_state = outcome.terminal_state();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            run.summary.elapsed = started.elapsed();
-        }
+        run.latency.total = started.elapsed();
+        let latency = run.latency;
+
+        // The summary is the measurement, derived from the events. The counters the loop kept
+        // while running (they drive its limits) must agree with it.
+        let measurement =
+            WorkMeasurement::derive(spec.id.clone(), outcome.clone(), &run.events, latency);
+        debug_assert_eq!(measurement.turns as usize, run.summary.turns);
+        debug_assert_eq!(measurement.executions as usize, run.summary.executions);
+        debug_assert_eq!(measurement.observations as usize, run.summary.observations);
+        debug_assert_eq!(
+            measurement.evidence_hits as usize,
+            run.summary.evidence_hits
+        );
+        debug_assert_eq!(
+            measurement.local_decisions as usize,
+            run.summary.local_decisions
+        );
+        debug_assert_eq!(
+            measurement.model_escalations as usize,
+            run.summary.model_escalations
+        );
+        debug_assert_eq!(
+            measurement.context_bytes as usize,
+            run.summary.context_bytes
+        );
+        let tokens = events_usage(&run.events);
+        let summary = WorkSummary {
+            turns: measurement.turns as usize,
+            executions: measurement.executions as usize,
+            observations: measurement.observations as usize,
+            evidence_hits: measurement.evidence_hits as usize,
+            local_decisions: measurement.local_decisions as usize,
+            model_escalations: measurement.model_escalations as usize,
+            context_bytes: measurement.context_bytes as usize,
+            prompt_tokens: tokens.0,
+            completion_tokens: tokens.1,
+            elapsed: latency.total,
+            terminal_state: outcome.terminal_state(),
+        };
         WorkReport {
             work_id: spec.id.clone(),
             outcome,
-            summary: run.summary,
+            summary,
             events: run.events,
             decisions: run.decisions,
             observations: run.observations,
             escalations: run.escalations,
+            latency,
         }
     }
 
@@ -803,12 +1252,17 @@ impl Agent {
             });
 
             // 1. Local: a proposal, assessed by the evidence machinery when it is a request.
+            let local_started = Mark::now();
             let proposal = policy.propose(&run.view(turn));
+            run.latency.local_decision += local_started.elapsed();
             let mut already_checked = false;
             let (decision, escalation) = match proposal {
                 Some(WorkDecision::RequestCapability(request)) => {
                     already_checked = true;
-                    match self.assess_evidence(&request, spec.state.as_ref()) {
+                    let assess_started = Mark::now();
+                    let assessed = self.assess_evidence(&request, spec.state.as_ref());
+                    run.latency.local_decision += assess_started.elapsed();
+                    match assessed {
                         Ok(Assessment::Reuse(observation)) => {
                             let decision = WorkDecision::RequestCapability(request.clone());
                             run.decide_locally(turn, &decision);
@@ -900,4 +1354,15 @@ impl Agent {
             }
         }
     }
+}
+
+/// Prompt and completion tokens the provider reported, summed over the trajectory.
+fn events_usage(events: &[WorkEvent]) -> (u64, u64) {
+    events.iter().fold((0, 0), |(p, c), e| match e {
+        WorkEvent::ModelCalled { usage: Some(u), .. } => (
+            p + u64::from(u.prompt_tokens),
+            c + u64::from(u.completion_tokens),
+        ),
+        _ => (p, c),
+    })
 }

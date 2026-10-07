@@ -137,5 +137,19 @@ async fn live_bounded_work_loop() {
         .clone()
         .expect("Compute returns a receipt");
     assert!(receipt.starts_with("sha256:"), "{receipt}");
-    eprintln!("PASSED — real bounded work loop (receipt {receipt})");
+
+    // The measurement of the real run: Compute latency is observed separately and is real.
+    let m = report.measurement();
+    assert_eq!((m.executions, m.observations, m.model_calls), (1, 1, 0));
+    assert!(
+        m.compute_latency > std::time::Duration::ZERO,
+        "a real execution takes measurable time"
+    );
+    assert!(m.total_latency >= m.compute_latency);
+    assert_eq!(m.model_latency, std::time::Duration::ZERO);
+    assert!(chip_core::verify_trajectory(&report.events, &spec.limits).is_empty());
+    eprintln!(
+        "PASSED — real bounded work loop (receipt {receipt}; compute {:?} of {:?} total)",
+        m.compute_latency, m.total_latency
+    );
 }

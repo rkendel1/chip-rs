@@ -27,9 +27,10 @@ pub use reasoning::{
 };
 pub use work::{
     ContextMetrics, DecisionRecord, DecisionSource, EscalationContext, LimitKind, LocalWorkPolicy,
-    NoLocalPolicy, RespondCompletes, ScriptedPolicy, TerminalState, WorkDecision,
-    WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport,
-    WorkSpec, WorkSummary, WorkView,
+    ModelUsage, NoLocalPolicy, RespondCompletes, ScriptedPolicy, TerminalState, TurnTrace,
+    WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLatency, WorkLimits,
+    WorkMeasurement, WorkOutcome, WorkReport, WorkSpec, WorkSummary, WorkView, trace,
+    verify_trajectory,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

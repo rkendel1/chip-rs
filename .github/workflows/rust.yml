@@ -74,3 +74,8 @@ jobs:
           for scenario in completion failure limit turn-limit evidence escalation; do
             cargo run -p chip-cli -- --test-work $scenario
           done
+
+      - name: Autonomous work benchmark (canonical workloads)
+        run: |
+          cargo run -p chip-cli -- --benchmark-work
+          cargo run -p chip-cli -- --benchmark-work --json

@@ -225,6 +225,7 @@ fn names(report: &WorkReport) -> Vec<String> {
             WorkEvent::DecisionStarted { turn, .. } => format!("DecisionStarted {turn}"),
             WorkEvent::LocalDecision { decision, .. } => format!("LocalDecision {decision}"),
             WorkEvent::ModelEscalation { .. } => "ModelEscalation".into(),
+            WorkEvent::ModelCalled { .. } => "ModelCalled".into(),
             WorkEvent::DecisionMade { decision, .. } => format!("DecisionMade {decision}"),
             WorkEvent::CapabilityRequested { capability, .. } => {
                 format!("CapabilityRequested {capability}")
@@ -963,7 +964,8 @@ async fn an_escalation_makes_exactly_one_model_call_and_measures_what_it_sent() 
     let n = names(&report);
     let i = n.iter().position(|x| x == "ModelEscalation").unwrap();
     assert_eq!(n[i - 1], "DecisionStarted 0");
-    assert_eq!(n[i + 1], "DecisionMade request compute.selftest");
+    assert_eq!(n[i + 1], "ModelCalled", "the one model call");
+    assert_eq!(n[i + 2], "DecisionMade request compute.selftest");
 
     // The recorded measurement matches the bytes the provider actually received.
     let sent = fx.seen.lock().unwrap()[0].clone();

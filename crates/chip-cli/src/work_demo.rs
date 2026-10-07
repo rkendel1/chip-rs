@@ -6,14 +6,16 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use chip_core::{
     Agent, Capability, CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
-    CapabilityProvider, CapabilityRequest, DecisionError, EvidenceState, ExecutionError,
-    ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor,
-    LimitKind, LocalReasoningResult, LocalWorkPolicy, ObservationKind, ScriptedPolicy,
-    TerminalState, TestLocalReasoner, WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal,
-    WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkView,
+    CapabilityProvider, CapabilityRequest, DecisionError, DecisionSource, EvidenceState,
+    ExecutionError, ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, Executor, LimitKind, LocalReasoningResult, LocalWorkPolicy, ObservationKind,
+    ScriptedPolicy, TerminalState, TestLocalReasoner, WorkDecision, WorkDecisionBoundary,
+    WorkEvent, WorkGoal, WorkId, WorkLimits, WorkMeasurement, WorkOutcome, WorkReport, WorkSpec,
+    WorkView, verify_trajectory,
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
@@ -174,6 +176,13 @@ fn describe(event: &WorkEvent) -> String {
             "ModelEscalation: {reason} (context {} bytes, {} observations, {} decisions)",
             context.bytes, context.observations, context.decisions
         ),
+        WorkEvent::ModelCalled { usage, .. } => match usage {
+            Some(u) => format!(
+                "ModelCalled (tokens: prompt {}, completion {})",
+                u.prompt_tokens, u.completion_tokens
+            ),
+            None => "ModelCalled (failed)".to_string(),
+        },
         WorkEvent::DecisionMade { decision, .. } => format!("DecisionMade: {decision}"),
         WorkEvent::CapabilityRequested { capability, .. } => {
             format!("CapabilityRequested: {capability}")
@@ -186,7 +195,9 @@ fn describe(event: &WorkEvent) -> String {
             kind.as_str(),
             receipt_id.as_deref().unwrap_or("none")
         ),
-        WorkEvent::EvidenceRecorded { capability, .. } => format!("EvidenceRecorded: {capability}"),
+        WorkEvent::EvidenceRecorded { capability, .. } => {
+            format!("EvidenceRecorded: {capability}")
+        }
         WorkEvent::EvidenceReused {
             capability,
             receipt_id,
@@ -198,9 +209,15 @@ fn describe(event: &WorkEvent) -> String {
         WorkEvent::WorkCompleted { .. } => "WorkCompleted".to_string(),
         WorkEvent::WorkEscalated { reason, .. } => format!("WorkEscalated: {reason}"),
         WorkEvent::WorkBlocked { reason, .. } => format!("WorkBlocked: {reason}"),
-        WorkEvent::WorkLimitReached { limit, .. } => format!("WorkLimitReached: {}", limit.name()),
+        WorkEvent::WorkLimitReached { limit, .. } => {
+            format!("WorkLimitReached: {}", limit.name())
+        }
         WorkEvent::WorkFailed { reason, .. } => format!("WorkFailed: {reason}"),
     }
+}
+
+fn ms(d: Duration) -> String {
+    format!("{:.3}", d.as_secs_f64() * 1000.0)
 }
 
 fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_calls: usize) {
@@ -210,6 +227,7 @@ fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_ca
         println!("  {:>2}. {}", i + 1, describe(event));
     }
     let s = &report.summary;
+    let m = report.measurement();
     println!("\nSummary:");
     println!("  turns: {}", s.turns);
     println!(
@@ -229,6 +247,12 @@ fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_ca
         s.prompt_tokens, s.completion_tokens
     );
     println!("  elapsed_time: {:?}", s.elapsed);
+    println!("  model_latency: {} ms", ms(m.model_latency));
+    println!("  compute_latency: {} ms", ms(m.compute_latency));
+    println!(
+        "  local_decision_latency: {} ms",
+        ms(m.local_decision_latency)
+    );
     println!("  terminal_state: {}", s.terminal_state.name());
     match &report.outcome {
         WorkOutcome::Completed { summary } => println!("  outcome: {summary}"),
@@ -241,6 +265,103 @@ fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_ca
     }
 }
 
+/// The measurement as stable JSON: a fixed key order, no prompts, no secrets, no identifiers, no
+/// timestamps. Latencies are the only non-deterministic values, and carry an `_ms` suffix.
+pub fn measurement_json(workload: &str, m: &WorkMeasurement) -> String {
+    format!(
+        "{{\"workload\":\"{workload}\",\"outcome\":\"{}\",\"turns\":{},\"executions\":{},\"observations\":{},\"evidence_hits\":{},\"local_decisions\":{},\"model_escalations\":{},\"context_bytes\":{},\"context_chars\":{},\"model_calls\":{},\"model_tokens\":{},\"model_latency_ms\":{},\"compute_latency_ms\":{},\"local_decision_latency_ms\":{},\"total_latency_ms\":{}}}",
+        m.terminal_state().name(),
+        m.turns,
+        m.executions,
+        m.observations,
+        m.evidence_hits,
+        m.local_decisions,
+        m.model_escalations,
+        m.context_bytes,
+        m.context_chars,
+        m.model_calls,
+        m.model_tokens.map_or("null".to_string(), |t| t.to_string()),
+        ms(m.model_latency),
+        ms(m.compute_latency),
+        ms(m.local_decision_latency),
+        ms(m.total_latency),
+    )
+}
+
+/// The structural trajectory, turn by turn. No prompt text.
+pub fn render_trace(report: &WorkReport) -> String {
+    let mut out = String::new();
+    for t in report.trace() {
+        out.push_str(&format!("TURN {}\n", t.turn + 1));
+        out.push_str(&format!("  decision: {}\n", t.decision.unwrap_or("none")));
+        if let Some(c) = &t.capability {
+            out.push_str(&format!("  capability: {c}\n"));
+        }
+        if let Some(source) = t.source {
+            out.push_str(&format!(
+                "  source: {}\n",
+                if source == DecisionSource::Local {
+                    "local"
+                } else {
+                    "model"
+                }
+            ));
+        }
+        if t.decision == Some("RequestCapability") {
+            out.push_str(&format!(
+                "  execution: {}\n",
+                if t.executed {
+                    "yes"
+                } else if t.evidence_reused {
+                    "no (evidence reused)"
+                } else {
+                    "no"
+                }
+            ));
+        }
+        if let Some(receipt) = t.receipt_present {
+            out.push_str(&format!(
+                "  receipt: {}\n",
+                if receipt { "present" } else { "absent" }
+            ));
+        }
+        if t.decision == Some("RequestCapability") {
+            out.push_str(&format!(
+                "  observation: {}\n",
+                if t.observed { "present" } else { "none" }
+            ));
+            if t.evidence_recorded {
+                out.push_str("  evidence: recorded\n");
+            }
+        }
+        if let Some(c) = t.context {
+            out.push_str("  context:\n");
+            out.push_str(&format!("    observations: {}\n", c.observations));
+            out.push_str(&format!("    evidence: {}\n", c.evidence_items));
+            out.push_str(&format!("    decisions: {}\n", c.decisions));
+            out.push_str(&format!("    ruled_out: {}\n", c.ruled_out));
+            out.push_str(&format!("    bytes: {}\n", c.bytes));
+            out.push_str(&format!(
+                "  model: {}\n",
+                if t.model_called {
+                    "called"
+                } else {
+                    "not called"
+                }
+            ));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "OUTCOME\n  {}\n",
+        match &report.outcome {
+            WorkOutcome::LimitReached { limit } => format!("limit_reached ({})", limit.name()),
+            other => other.terminal_state().name().to_string(),
+        }
+    ));
+    out
+}
+
 struct Scenario {
     title: &'static str,
     goal: &'static str,
@@ -248,8 +369,8 @@ struct Scenario {
     limits: WorkLimits,
     policy: Box<dyn LocalWorkPolicy>,
     model_decisions: Vec<WorkDecision>,
-    /// Local reasoning verdict for unknown evidence.
-    reasoner_continues: bool,
+    /// Establish valid evidence with one real prior execution, outside the measured work.
+    seed_evidence: bool,
     expect: fn(&WorkReport) -> bool,
 }
 
@@ -267,7 +388,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             limits,
             policy: Box::new(ReactToObservation),
             model_decisions: vec![],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
                     && r.summary.executions == 1
@@ -281,9 +402,10 @@ fn scenario(name: &str) -> Option<Scenario> {
             limits,
             policy: Box::new(ReactToObservation),
             model_decisions: vec![],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Blocked { .. })
+                    && r.summary.executions == 1
                     && r.observations[0].kind == ObservationKind::ExecutionFailed
             },
         },
@@ -292,18 +414,19 @@ fn scenario(name: &str) -> Option<Scenario> {
             goal,
             status: ExecutionStatus::Success,
             limits: WorkLimits {
-                max_turns: 10,
-                max_executions: 3,
+                max_turns: 6,
+                max_executions: 4,
             },
             policy: Box::new(Insatiable),
             model_decisions: vec![],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 r.outcome
                     == WorkOutcome::LimitReached {
                         limit: LimitKind::Executions,
                     }
-                    && r.summary.executions == 3
+                    && r.summary.executions == 4
+                    && r.summary.turns == 5
             },
         },
         "turn-limit" => Scenario {
@@ -316,7 +439,7 @@ fn scenario(name: &str) -> Option<Scenario> {
             },
             policy: Box::new(Repeating),
             model_decisions: vec![],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 r.outcome
                     == WorkOutcome::LimitReached {
@@ -328,7 +451,27 @@ fn scenario(name: &str) -> Option<Scenario> {
             },
         },
         "evidence" => Scenario {
-            title: "Bounded autonomous work: valid evidence prevents a second execution",
+            title: "Bounded autonomous work: existing valid evidence, so nothing is executed",
+            goal,
+            status: ExecutionStatus::Success,
+            limits,
+            policy: Box::new(ScriptedPolicy::new(vec![
+                Some(WorkDecision::RequestCapability(request("again"))),
+                Some(WorkDecision::Complete {
+                    summary: "the existing evidence answered the request".into(),
+                }),
+            ])),
+            model_decisions: vec![],
+            seed_evidence: true,
+            expect: |r| {
+                matches!(r.outcome, WorkOutcome::Completed { .. })
+                    && r.summary.executions == 0
+                    && r.summary.evidence_hits == 1
+                    && r.summary.model_escalations == 0
+            },
+        },
+        "evidence-in-loop" => Scenario {
+            title: "Bounded autonomous work: evidence established and reused inside one workload",
             goal,
             status: ExecutionStatus::Success,
             limits,
@@ -340,12 +483,11 @@ fn scenario(name: &str) -> Option<Scenario> {
                 }),
             ])),
             model_decisions: vec![],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
                     && r.summary.executions == 1
                     && r.summary.evidence_hits == 1
-                    && r.summary.model_escalations == 0
             },
         },
         "escalation" => Scenario {
@@ -360,7 +502,7 @@ fn scenario(name: &str) -> Option<Scenario> {
                 }),
             ])),
             model_decisions: vec![WorkDecision::RequestCapability(request("asked-by-model"))],
-            reasoner_continues: true,
+            seed_evidence: false,
             expect: |r| {
                 matches!(r.outcome, WorkOutcome::Completed { .. })
                     && r.summary.model_escalations == 1
@@ -371,37 +513,37 @@ fn scenario(name: &str) -> Option<Scenario> {
     })
 }
 
-pub const SCENARIOS: [&str; 6] = [
+/// The fixed baseline suite that future optimization is measured against.
+pub const CANONICAL: [&str; 5] = ["completion", "failure", "evidence", "limit", "escalation"];
+
+pub const SCENARIOS: [&str; 7] = [
     "completion",
     "failure",
-    "limit",
-    "turn-limit",
     "evidence",
+    "limit",
     "escalation",
+    "turn-limit",
+    "evidence-in-loop",
 ];
 
-/// Returns the process exit code.
-pub async fn test_work(args: &[String]) -> i32 {
-    let name = args.first().map(String::as_str).unwrap_or("completion");
-    let Some(s) = scenario(name) else {
-        eprintln!(
-            "unknown scenario {name:?}; choose one of: {}",
-            SCENARIOS.join(", ")
-        );
-        return 2;
-    };
+struct Finished {
+    title: &'static str,
+    report: WorkReport,
+    limits: WorkLimits,
+    model_calls: usize,
+    executor_calls: usize,
+    reached_expected: bool,
+}
+
+/// Runs one scenario to its end. The trajectory invariants are checked for every run.
+async fn run_scenario(name: &str) -> Option<Finished> {
+    let s = scenario(name)?;
     let model_calls = Arc::new(AtomicUsize::new(0));
     let execute_calls = Arc::new(AtomicUsize::new(0));
     let reasoner = TestLocalReasoner::default().on(
         EvidenceState::Unknown,
-        if s.reasoner_continues {
-            LocalReasoningResult::Continue {
-                rationale: "the demo continues".into(),
-            }
-        } else {
-            LocalReasoningResult::Escalate {
-                reason: "the demo escalates".into(),
-            }
+        LocalReasoningResult::Continue {
+            rationale: "the demo continues".into(),
         },
     );
     let agent = Agent::new(Arc::new(StandInModel(model_calls.clone())))
@@ -412,6 +554,14 @@ pub async fn test_work(args: &[String]) -> i32 {
         )))
         .with_observer(Arc::new(ExecutionObserver))
         .with_local_reasoner(Arc::new(reasoner));
+    if s.seed_evidence {
+        // A real prior execution, not part of the measured work.
+        agent
+            .obtain_evidence(&request("seed"))
+            .await
+            .expect("seeding evidence");
+    }
+    let before = execute_calls.load(Ordering::SeqCst);
     let spec = WorkSpec::new(WorkId::new(format!("demo-{name}")), WorkGoal::new(s.goal))
         .with_limits(s.limits);
     let report = agent
@@ -421,19 +571,53 @@ pub async fn test_work(args: &[String]) -> i32 {
             &ModelDecisions(s.model_decisions, AtomicUsize::new(0)),
         )
         .await;
-    print_report(
-        s.title,
-        &report,
-        model_calls.load(Ordering::SeqCst),
-        execute_calls.load(Ordering::SeqCst),
-    );
-    let bounded = report.summary.turns <= s.limits.max_turns
-        && report.summary.executions <= s.limits.max_executions;
-    if bounded && (s.expect)(&report) {
-        println!(
-            "\nExpected terminal state reached: {}",
-            report.summary.terminal_state.name()
+    let violations = verify_trajectory(&report.events, &s.limits);
+    for v in &violations {
+        eprintln!("invariant violated: {v}");
+    }
+    let reached_expected = violations.is_empty() && (s.expect)(&report);
+    Some(Finished {
+        title: s.title,
+        limits: s.limits,
+        model_calls: model_calls.load(Ordering::SeqCst),
+        executor_calls: execute_calls.load(Ordering::SeqCst) - before,
+        reached_expected,
+        report,
+    })
+}
+
+/// `--test-work [scenario] [--json] [--trace]`. Returns the process exit code.
+pub async fn test_work(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
+    let trace = args.iter().any(|a| a == "--trace");
+    let name = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("completion");
+    let Some(run) = run_scenario(name).await else {
+        eprintln!(
+            "unknown scenario {name:?}; choose one of: {}",
+            SCENARIOS.join(", ")
         );
+        return 2;
+    };
+    if json {
+        println!("{}", measurement_json(name, &run.report.measurement()));
+    } else if trace {
+        print!("{}", render_trace(&run.report));
+    } else {
+        print_report(run.title, &run.report, run.model_calls, run.executor_calls);
+    }
+    let bounded = run.report.summary.turns <= run.limits.max_turns
+        && run.report.summary.executions <= run.limits.max_executions;
+    if bounded && run.reached_expected {
+        if !json && !trace {
+            println!(
+                "\nExpected terminal state reached: {}",
+                run.report.summary.terminal_state.name()
+            );
+        }
         0
     } else {
         eprintln!("\nFAILED: the workload did not reach its expected terminal state");
@@ -441,8 +625,72 @@ pub async fn test_work(args: &[String]) -> i32 {
     }
 }
 
+/// `--benchmark-work [--json]`: the canonical suite, as a table or a JSON array.
+pub async fn benchmark_work(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
+    let mut rows = Vec::new();
+    let mut ok = true;
+    for name in CANONICAL {
+        let run = run_scenario(name).await.expect("canonical workloads exist");
+        ok &= run.reached_expected
+            && run.report.summary.turns <= run.limits.max_turns
+            && run.report.summary.executions <= run.limits.max_executions
+            && run.model_calls == run.report.summary.model_escalations
+            && run.executor_calls == run.report.summary.executions;
+        rows.push((name, run.report.measurement()));
+    }
+    if json {
+        let items: Vec<String> = rows.iter().map(|(n, m)| measurement_json(n, m)).collect();
+        println!("[{}]", items.join(",\n "));
+    } else {
+        println!(
+            "{:<12} {:>5} {:>5} {:>5} {:>5} {:>8} {:>8}  {:<14} {:>9} {:>10} {:>9}",
+            "Workload",
+            "Turns",
+            "Execs",
+            "Local",
+            "Model",
+            "Evidence",
+            "Context",
+            "Outcome",
+            "Model ms",
+            "Compute ms",
+            "Total ms"
+        );
+        for (name, m) in &rows {
+            println!(
+                "{:<12} {:>5} {:>5} {:>5} {:>5} {:>8} {:>8}  {:<14} {:>9} {:>10} {:>9}",
+                name,
+                m.turns,
+                m.executions,
+                m.local_decisions,
+                m.model_escalations,
+                m.evidence_hits,
+                m.context_bytes,
+                m.terminal_state().name(),
+                ms(m.model_latency),
+                ms(m.compute_latency),
+                ms(m.total_latency),
+            );
+        }
+        println!(
+            "\nEvery run satisfied the trajectory invariants (bounds, one decision and at most one execution per turn,"
+        );
+        println!(
+            "evidence reuse without execution, observations only from executions, one model call per escalation)."
+        );
+    }
+    if ok {
+        0
+    } else {
+        eprintln!("FAILED: a canonical workload did not behave as specified");
+        1
+    }
+}
+
 /// Real Compute, never a fallback. Exit 3 means skipped.
-pub async fn test_real_work() -> i32 {
+pub async fn test_real_work(args: &[String]) -> i32 {
+    let json = args.iter().any(|a| a == "--json");
     let compute = Arc::new(chip_compute::ComputeExecutor::new());
     let model_calls = Arc::new(AtomicUsize::new(0));
     let execute_calls = Arc::new(AtomicUsize::new(0));
@@ -466,14 +714,15 @@ pub async fn test_real_work() -> i32 {
             }
         }
     }
+    let limits = WorkLimits {
+        max_turns: 6,
+        max_executions: 2,
+    };
     let spec = WorkSpec::new(
         WorkId::new("real-work"),
         WorkGoal::new("Run the Compute self test and determine whether it succeeded"),
     )
-    .with_limits(WorkLimits {
-        max_turns: 6,
-        max_executions: 2,
-    });
+    .with_limits(limits);
     let report = agent
         .run_work(
             &spec,
@@ -481,35 +730,49 @@ pub async fn test_real_work() -> i32 {
             &ModelDecisions(vec![], AtomicUsize::new(0)),
         )
         .await;
-    print_report(
-        "Bounded autonomous work (real Compute)",
-        &report,
-        model_calls.load(Ordering::SeqCst),
-        execute_calls.load(Ordering::SeqCst),
-    );
+    let m = report.measurement();
+    let violations = verify_trajectory(&report.events, &limits);
     let receipt = report
         .observations
         .first()
         .and_then(|o| o.receipt_id.clone());
-    if let Some(WorkEvent::ObservationRecorded {
-        kind: ObservationKind::ExecutionFailed,
-        ..
-    }) = report
-        .events
-        .iter()
-        .find(|e| matches!(e, WorkEvent::ObservationRecorded { .. }))
-    {
-        eprintln!("\nerror: the real execution failed");
+    if json {
+        // No receipt: it is a per-run identifier.
+        println!("{}", measurement_json("real-compute", &m));
+    } else {
+        print_report(
+            "Bounded autonomous work (real Compute)",
+            &report,
+            model_calls.load(Ordering::SeqCst),
+            execute_calls.load(Ordering::SeqCst),
+        );
+        println!("\nMeasurement (real Compute):");
+        println!("  compute_latency: {} ms", ms(m.compute_latency));
+        println!("  executions: {}", m.executions);
+        println!("  receipt: {}", receipt.as_deref().unwrap_or("none"));
+        println!(
+            "  observation: {}",
+            report
+                .observations
+                .first()
+                .map_or("none", |o| o.kind.as_str())
+        );
+        println!("  total_latency: {} ms", ms(m.total_latency));
+    }
+    if !violations.is_empty() {
+        eprintln!("\nerror: trajectory invariants violated: {violations:?}");
         return 1;
     }
     if report.summary.terminal_state == TerminalState::Completed
         && report.summary.executions == 1
         && receipt.is_some()
     {
-        println!(
-            "\nExpected terminal state reached: completed (receipt {})",
-            receipt.unwrap()
-        );
+        if !json {
+            println!(
+                "\nExpected terminal state reached: completed (receipt {})",
+                receipt.unwrap()
+            );
+        }
         0
     } else {
         eprintln!(
