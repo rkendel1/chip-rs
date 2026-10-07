@@ -16,6 +16,8 @@
 //! escalated); 2 usage; 3 required infrastructure unavailable (no provider, no usable PAX; nothing
 //! ran); 4 runtime failure or a violated safety invariant.
 
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chip_core::{
@@ -33,7 +35,7 @@ use chip_project::{
     navigation_mismatch_invariant, out_of_root_write_invariant, path_escape_invariant,
     write_summary,
 };
-use fx_core::ModelProvider;
+use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 use crate::horizon::Recording;
 use crate::verify::{
@@ -47,6 +49,13 @@ const MAX_GOAL_BYTES: usize = 2000;
 
 /// What the model is told about how work is judged: Chip-owned text, not something it can edit.
 const RULES: &str = "Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). The repository's state can be observed, never changed, with project.git.status, project.git.diff, project.git.diff_stat and project.git.log; the working tree may already hold changes that are not yours, and they must be preserved. Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes.";
+
+/// What a goal may be, from any surface: non-empty after trimming, plain text, bounded.
+pub fn goal_is_acceptable(goal: &str) -> bool {
+    !goal.trim().is_empty()
+        && goal.len() <= MAX_GOAL_BYTES
+        && !goal.chars().any(|c| c.is_control() && c != '\n')
+}
 
 pub fn goal_text(goal: &str) -> String {
     format!("{} {RULES}", goal.trim())
@@ -97,8 +106,8 @@ impl LocalWorkPolicy for CompleteWhenVerified {
 }
 
 /// The one supported piece of work, over one project.
-pub fn spec(goal: &str, root: &std::path::Path, limits: WorkLimits) -> WorkSpec {
-    let mut spec = WorkSpec::new(WorkId::new("work"), WorkGoal::new(goal_text(goal)))
+pub fn spec(id: WorkId, goal: &str, root: &std::path::Path, limits: WorkLimits) -> WorkSpec {
+    let mut spec = WorkSpec::new(id, WorkGoal::new(goal_text(goal)))
         .with_limits(limits)
         .with_required_observation(Arc::new(VerifiedChange))
         .with_observation_invariant(path_escape_invariant(root))
@@ -246,13 +255,25 @@ pub async fn run_software_work(
     limits: WorkLimits,
     policy: &dyn LocalWorkPolicy,
 ) -> SoftwareWork {
-    run_software_work_with_budget(model, model_name, root, pax, goal, limits, policy, None).await
+    run_software_work_with_budget(
+        WorkId::new("work"),
+        model,
+        model_name,
+        root,
+        pax,
+        goal,
+        limits,
+        policy,
+        None,
+    )
+    .await
 }
 
 /// [`run_software_work`] with the model's context budget in bytes, when one was given. A request
 /// over it is never sent.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_software_work_with_budget(
+    id: WorkId,
     model: Arc<dyn ModelProvider>,
     model_name: String,
     root: &std::path::Path,
@@ -273,7 +294,7 @@ pub async fn run_software_work_with_budget(
         .with_observer(Arc::new(ExecutionObserver))
         .with_local_reasoner(Arc::new(TestLocalReasoner::default()))
         .with_max_output_tokens(WORK_MAX_OUTPUT_TOKENS);
-    let mut spec = spec(goal, root, limits);
+    let mut spec = spec(id, goal, root, limits);
     if let Some(bytes) = context_budget_bytes {
         spec = spec.with_context_budget_bytes(bytes);
     }
@@ -605,6 +626,14 @@ fn budget(value: Option<&str>, name: &str) -> Result<usize, i32> {
     }
 }
 
+/// `CHIP_CONTEXT_BUDGET_BYTES`, when set. Shared by every surface that runs work.
+pub fn context_budget_from_env() -> Result<Option<usize>, i32> {
+    match std::env::var("CHIP_CONTEXT_BUDGET_BYTES") {
+        Ok(given) => budget(Some(given.as_str()), "CHIP_CONTEXT_BUDGET_BYTES").map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
 fn value(args: &[String], at: usize, flag: &str) -> Result<String, i32> {
     match args.get(at).map(|v| v.trim()) {
         Some(v) if !v.is_empty() && !v.starts_with("--") => Ok(v.to_string()),
@@ -612,6 +641,145 @@ fn value(args: &[String], at: usize, flag: &str) -> Result<String, i32> {
             eprintln!("error: {flag} needs a value");
             Err(usage())
         }
+    }
+}
+
+struct Shared(Arc<dyn ModelProvider>);
+
+#[async_trait::async_trait]
+impl ModelProvider for Shared {
+    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
+        self.0.complete(request).await
+    }
+}
+
+/// Refuses the next model request once cancellation has been requested. The loop then ends the
+/// work the way it ends it for any model that cannot answer; nothing in flight is interrupted.
+struct CancelBeforeModelCall {
+    inner: Arc<dyn ModelProvider>,
+    cancel: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl ModelProvider for CancelBeforeModelCall {
+    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
+        if self.cancel.load(Ordering::SeqCst) {
+            return Err(FxError::Provider(
+                "cancellation was requested; no further model call was made".into(),
+            ));
+        }
+        self.inner.complete(request).await
+    }
+}
+
+/// The configured model, a usable PAX and the project root. The single entry point to the work
+/// loop: `chip work` and `chip serve` both prepare one and call [`WorkRuntime::run`].
+pub struct WorkRuntime {
+    model: Arc<dyn ModelProvider>,
+    model_name: String,
+    pub identity: Identity,
+    pub root: PathBuf,
+    pub pax: ResolvedPax,
+    context_budget: Option<usize>,
+}
+
+impl WorkRuntime {
+    /// Selects the model, finds PAX and checks the project capabilities. Fails closed with the
+    /// reason; nothing has run when it does.
+    pub async fn prepare(
+        selection: &crate::provider_selection::Selection,
+        context_budget: Option<usize>,
+        root: &Path,
+    ) -> Result<Self, String> {
+        let config = crate::provider_selection::resolve(selection, |name| std::env::var(name).ok())
+            .map_err(|e| format!("no model is selected ({e}); nothing was run"))?;
+        // Every reply must be one JSON object: ask the endpoint for that in the request. The reply
+        // is still parsed strictly and never repaired.
+        let config = config.with_json_object_output();
+        let model_name = config.model.to_string();
+        let identity = Identity {
+            provider: config.provider.clone(),
+            model: model_name.clone(),
+            endpoint: crate::provider_selection::endpoint_identity(&config.endpoint),
+        };
+        let provider = fx_provider_http::HttpProvider::new(config)
+            .map_err(|e| format!("the model provider is unusable ({e}); nothing was run"))?;
+        // Verification is how the goal is established, so without a usable PAX nothing is attempted.
+        let pax = PaxExecutor::new(root)
+            .resolve()
+            .await
+            .map_err(|why| format!("PAX unavailable ({why}); nothing was run"))?;
+        let project = ProjectExecutor::new(root);
+        for id in [PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ, PROJECT_WRITE] {
+            let ready = project.availability(&CapabilityId::new(id).unwrap()).await;
+            if !matches!(ready, CapabilityAvailability::Available) {
+                return Err(format!("{id} is unavailable; nothing was run"));
+            }
+        }
+        Ok(Self {
+            model: Arc::new(provider),
+            model_name,
+            identity,
+            root: root.to_path_buf(),
+            pax,
+            context_budget,
+        })
+    }
+
+    /// A runtime over an already-chosen model and an already-resolved PAX. Tests only: it skips
+    /// the checks `prepare` makes, so nothing here is evidence about a real PAX.
+    #[cfg(test)]
+    pub fn for_test(model: Arc<dyn ModelProvider>, root: &Path, pax: ResolvedPax) -> Self {
+        Self {
+            model,
+            model_name: "scripted".into(),
+            identity: Identity {
+                provider: "scripted".into(),
+                model: "scripted".into(),
+                endpoint: "none".into(),
+            },
+            root: root.to_path_buf(),
+            pax,
+            context_budget: None,
+        }
+    }
+
+    /// Runs one piece of work through the loop. Returns what it established and the model's raw
+    /// replies. `cancel`, when set, stops further model calls (see [`CancelBeforeModelCall`]).
+    pub async fn run(
+        &self,
+        id: WorkId,
+        goal: &str,
+        limits: WorkLimits,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> (SoftwareWork, Vec<String>) {
+        let replies = Arc::new(Mutex::new(Vec::new()));
+        let inner = match cancel {
+            Some(cancel) => Arc::new(CancelBeforeModelCall {
+                inner: self.model.clone(),
+                cancel,
+            }) as Arc<dyn ModelProvider>,
+            None => self.model.clone(),
+        };
+        let model = Arc::new(Recording {
+            inner: Shared(inner),
+            replies: replies.clone(),
+        });
+        let mut result = run_software_work_with_budget(
+            id,
+            model,
+            self.model_name.clone(),
+            &self.root,
+            PaxExecutor::new(&self.root),
+            goal,
+            limits,
+            &CompleteWhenVerified,
+            self.context_budget,
+        )
+        .await;
+        result.identity = Some(self.identity.clone());
+        let replies = replies.lock().unwrap().clone();
+        (result, replies)
     }
 }
 
@@ -674,18 +842,16 @@ pub async fn work(args: &[String]) -> i32 {
     }
     // The command line wins over the environment; with neither, no budget is known and none is assumed.
     if context_budget.is_none() {
-        if let Ok(given) = std::env::var("CHIP_CONTEXT_BUDGET_BYTES") {
-            match budget(Some(given.as_str()), "CHIP_CONTEXT_BUDGET_BYTES") {
-                Ok(n) => context_budget = Some(n),
-                Err(code) => return code,
-            }
+        match context_budget_from_env() {
+            Ok(from_env) => context_budget = from_env,
+            Err(code) => return code,
         }
     }
     let Some(goal) = goal.filter(|g| !g.trim().is_empty()) else {
         eprintln!("error: a goal is required");
         return usage();
     };
-    if goal.len() > MAX_GOAL_BYTES || goal.chars().any(|c| c.is_control() && c != '\n') {
+    if !goal_is_acceptable(&goal) {
         eprintln!("error: the goal must be plain text of at most {MAX_GOAL_BYTES} bytes");
         return usage();
     }
@@ -696,69 +862,19 @@ pub async fn work(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     };
-    let config =
-        match crate::provider_selection::resolve(&selection, |name| std::env::var(name).ok()) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("error: no model is selected ({e}); nothing was run");
-                return EXIT_UNAVAILABLE;
-            }
-        };
-    // Every reply to `work` must be one JSON object: ask the endpoint for that in the request. The
-    // reply is still parsed strictly and never repaired.
-    let config = config.with_json_object_output();
-    let model_name = config.model.to_string();
-    let identity = Identity {
-        provider: config.provider.clone(),
-        model: model_name.clone(),
-        endpoint: crate::provider_selection::endpoint_identity(&config.endpoint),
-    };
-    let provider = match fx_provider_http::HttpProvider::new(config) {
-        Ok(provider) => provider,
-        Err(e) => {
-            eprintln!("error: the model provider is unusable ({e}); nothing was run");
-            return EXIT_UNAVAILABLE;
-        }
-    };
-    // Verification is how the goal is established, so without a usable PAX nothing is attempted.
-    let pax = PaxExecutor::new(&root);
-    let resolved = match pax.resolve().await {
-        Ok(resolved) => resolved,
+    let runtime = match WorkRuntime::prepare(&selection, context_budget, &root).await {
+        Ok(runtime) => runtime,
         Err(why) => {
-            eprintln!("error: PAX unavailable ({why}); nothing was run");
+            eprintln!("error: {why}");
             return EXIT_UNAVAILABLE;
         }
     };
-    let project = ProjectExecutor::new(&root);
-    for id in [PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ, PROJECT_WRITE] {
-        let ready = project.availability(&CapabilityId::new(id).unwrap()).await;
-        if !matches!(ready, CapabilityAvailability::Available) {
-            eprintln!("error: {id} is unavailable; nothing was run");
-            return EXIT_UNAVAILABLE;
-        }
-    }
-
-    let replies = Arc::new(Mutex::new(Vec::new()));
-    let model = Arc::new(Recording {
-        inner: provider,
-        replies: replies.clone(),
-    });
     let limits = WorkLimits {
         max_turns,
         max_executions,
     };
-    let mut result = run_software_work_with_budget(
-        model,
-        model_name,
-        &root,
-        pax,
-        &goal,
-        limits,
-        &CompleteWhenVerified,
-        context_budget,
-    )
-    .await;
-    result.identity = Some(identity.clone());
+    let (result, replies) = runtime.run(WorkId::new("work"), &goal, limits, None).await;
+    let (identity, resolved) = (runtime.identity.clone(), &runtime.pax);
     // The selected model is the only one ever asked. If it cannot answer, the run says so and stops:
     // no other provider or model is tried.
     let calls: Vec<bool> = result
@@ -781,12 +897,12 @@ pub async fn work(args: &[String]) -> i32 {
         }
     }
     if json {
-        println!("{}", render_json(&result, &resolved));
+        println!("{}", render_json(&result, resolved));
     } else {
-        print!("{}", render_human(&result, &resolved));
+        print!("{}", render_human(&result, resolved));
     }
     if print_reply {
-        for reply in replies.lock().unwrap().iter() {
+        for reply in replies.iter() {
             eprintln!("Model reply:\n{reply}");
         }
     }

@@ -138,3 +138,42 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 * Requirements as for `verify`: a model provider behind FX and PAX 0.3.0 or later (`PAX_BIN` to
   select it); Compute is not required. PAX's own test diagnostics are shown to the model as PAX
   wrote them and can include host paths.
+
+## Runtime service (`chip-cli serve`)
+
+`chip-cli serve [--host ADDR] [--port PORT]` (default `127.0.0.1:8765`) exposes the same work runtime
+that `chip-cli work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
+`WorkRuntime` (model, PAX, project root) and call `WorkRuntime::run`. The model comes from
+`CHIP_PROVIDER` / `CHIP_MODEL` / `CHIP_ENDPOINT` as for `work`; the project is the current directory.
+If no model is selected or PAX is unusable, nothing listens (exit 3).
+
+> **Chip Runtime Service is currently a local trusted-client interface. Remote exposure and
+> authentication are intentionally out of scope.** It binds to loopback by default, has no
+> authentication and no CORS, answers only loopback `Host` names when bound to loopback, and is not
+> production-ready for remote or multi-user use. Work is held **in memory for the life of the
+> process only**: nothing is persisted, and a restart forgets every work item.
+
+| Route | |
+| --- | --- |
+| `GET /health` | `{"status":"ok"}`: service health only |
+| `POST /v1/work` | `{"goal": "..."}` -> 202 `{"work_id","status":"running"}`; the id is Chip's |
+| `GET /v1/work/{id}` | `status` (`running` or the terminal state), `lifecycle`, `goal`, `cancellation_requested`, and once ended `result` (the CLI's `--json` report) |
+| `GET /v1/work/{id}/events` | `{"work_id","complete","events":[...]}` the runtime's recorded trajectory |
+| `POST /v1/work/{id}/cancel` | 200 `cancellation_requested`, or 409 if the work already ended |
+
+The only accepted body field is `goal`. A body naming anything else (ids, receipts, observations,
+evidence, executable, argv, cwd, workspace root, capability, provider, model, endpoint...) is
+rejected with 400 `unknown_field`. Errors are `{"error":{"code","message"}}`.
+
+Semantics worth knowing:
+
+- **Lifecycle** is a projection: `executing` while the loop runs, then the runtime's own terminal
+  state (`completed`, `escalated`, `blocked`, `limit_reached`, `failed`). `completed` is runtime
+  completion; whether the goal was satisfied is in `result.verified` / `result.goal_satisfied`.
+- **Events** are available when the work ends: the loop returns its trajectory then, so a running
+  work reports `"complete": false` and no events. None are invented in the meantime.
+- **Cancellation is advisory.** It stops the *next* model call. A model call or execution already in
+  flight is not interrupted, the runtime may still complete the work, and the outcome is whatever
+  the runtime then establishes. The status is never `cancelled`.
+- All works run against the one project root the service was started in; their runtime state is
+  isolated, their filesystem is not. At most 8 works run at once (429 beyond that).

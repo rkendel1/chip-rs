@@ -12,6 +12,7 @@ mod local_model_bench;
 mod native;
 mod pax_work;
 mod provider_selection;
+mod service;
 mod software_work;
 mod verify;
 mod wasm_decision_bench;
@@ -605,6 +606,10 @@ async fn main() {
 
     if args.len() > 1 && args[1] == "work" {
         std::process::exit(software_work::work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "serve" {
+        std::process::exit(service::serve(&args[2..]).await);
     }
 
     if args.len() > 1 && args[1] == "verify" {

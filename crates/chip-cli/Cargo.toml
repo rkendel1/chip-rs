@@ -30,7 +30,7 @@ fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"
 sha2 = "0.10"
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
