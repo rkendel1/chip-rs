@@ -1,5 +1,6 @@
 mod benchmark;
 mod corpus_eval;
+mod decision_state_cmd;
 mod graph_cmd;
 mod laya_eval;
 mod live_benchmark;
@@ -564,6 +565,14 @@ async fn main() {
 
     if args.len() > 1 && args[1] == "init" {
         std::process::exit(graph_cmd::init(&args[2..]));
+    }
+
+    if args.len() > 1 && args[1] == "decision-state" {
+        std::process::exit(decision_state_cmd::decision_state(&args[2..]));
+    }
+
+    if args.len() > 1 && args[1] == "--benchmark-decision-state" {
+        std::process::exit(decision_state_cmd::benchmark(&args[2..]));
     }
 
     if args.len() > 1 && args[1] == "slice" {

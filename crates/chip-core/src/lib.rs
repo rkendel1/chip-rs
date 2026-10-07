@@ -1,4 +1,5 @@
 mod decision;
+mod decision_state;
 mod evidence;
 mod observation;
 mod reasoning;
@@ -10,6 +11,9 @@ use std::sync::{Arc, Mutex};
 pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
+};
+pub use decision_state::{
+    CapabilityDecisionState, DECISION_SCHEMA, DecisionStateError, GraphStateToken, ImpactState,
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};

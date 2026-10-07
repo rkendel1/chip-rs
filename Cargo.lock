@@ -290,6 +290,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "fx-core",
+ "serde_json",
+ "sha2",
  "tokio",
 ]
 
