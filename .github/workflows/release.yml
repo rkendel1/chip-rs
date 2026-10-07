@@ -43,6 +43,13 @@ jobs:
           cargo check -p chip-core --target wasm32-unknown-unknown
           cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
 
+      - name: Install PAX (pinned release v0.3.0, the minimum Chip requires)
+        run: |
+          git clone --depth 1 --branch v0.3.0 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
+          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 3bf88b884f2abecf17e21175e5ce2dd6c52c7e8f
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/pax/Cargo.toml"
+          echo "$RUNNER_TEMP/pax/target/release" >> "$GITHUB_PATH"
+
       - name: Full test suite
         run: cargo test --workspace --locked
 
