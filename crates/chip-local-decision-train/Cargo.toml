@@ -1,0 +1,14 @@
+[package]
+name = "chip-local-decision-train"
+version = "0.1.0"
+edition = "2024"
+description = "Development-only training and evaluation of the tiny local decision model (never part of the runtime)"
+license = "MIT"
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-decision-corpus = { path = "../chip-decision-corpus" }
+chip-local-decision = { path = "../chip-local-decision" }
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+chip-wasm-decision = { path = "../chip-wasm-decision" }
+sha2 = "0.10"

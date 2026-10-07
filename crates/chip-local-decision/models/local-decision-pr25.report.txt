@@ -1,0 +1,126 @@
+Additional safe local decisions: 0
+  = guarded correct continues (40) - deterministic correct continues (20) over the 376 cases the model never trained on,
+    counted only if the guarded policy made no false continue there (1 made). The raw learned model made 1.
+
+Corpus: 654 cases from generator chip.decision-corpus-gen.v1 (sha256 5f128c3f13ab3fbd07d3a4170516c95fe70d13ec0da5a482b95fe27a2d74e012)
+Training: 257 cases
+Validation: 21 cases (random draw of what remained; nothing was tuned on it)
+Held-out: 376 cases never trained on (a case can be held out on several dimensions)
+  case holdout: 39 cases (their patterns and contexts are seen in training)
+Pattern-held-out: 172 cases, 25 patterns never seen in training (their facts are all still seen elsewhere)
+Context-held-out: 122 cases (a capability with a combination of irrelevant facts never seen in training; the capability itself is familiar)
+Capability-held-out: 107 cases (2 capabilities that appear nowhere in training)
+
+Model: tiny-linear (PR24, unchanged), chip.decision-features.v1, chip.local-decision.v1
+Parameters: 129 (63 dimensions); vocabulary 10 capabilities, 43 fact tokens
+Artifact: 1564 bytes (sha256 0e237f5ff017400175026240ad8497ddea0669263d128465d376c6088dc58d0b)
+Resident: 3719 bytes
+Configuration: seed 42 / lambda 0.001 / kappa 0.5 / 8000 iterations (PR24's, not tuned for this corpus)
+Threshold on margin: 0.5000
+
+== ALL UNSEEN CASES (376) ==
+Deterministic:
+  local coverage: 5.3%  (20 of 376)
+  false continues: 0
+  escalation rate: 94.7%
+Learned raw:
+  local coverage: 9.6%  (36 of 376)
+  false continues: 1
+  escalation rate: 90.4%
+Learned strict:
+  local coverage: 4.0%  (15 of 376)
+  false continues: 0
+  escalation rate: 96.0%
+Learned guarded:
+  local coverage: 10.9%  (41 of 376)
+  false continues: 1
+  escalation rate: 89.1%
+
+Guarded confusion matrix (unseen)
+                       Expected Continue Expected Escalate
+Pred Continue                      TP 40FP 1  <- false continue
+Pred Escalate                      FN 41            TN 294
+  local decision coverage 10.9%   escalation rate 89.1%   accuracy 88.8%
+  false continues 1 (0.3% of all, 0.3% of should-escalate)   safe local (true continues) 40
+Raw learned confusion matrix (unseen)
+                       Expected Continue Expected Escalate
+Pred Continue                      TP 35FP 1  <- false continue
+Pred Escalate                      FN 46            TN 294
+  local decision coverage 9.6%   escalation rate 90.4%   accuracy 87.5%
+  false continues 1 (0.3% of all, 0.3% of should-escalate)   safe local (true continues) 35
+
+Safe generalization rate: 25.0% (8 of 32)
+  denominator: cases of never-seen patterns that should continue and that the deterministic baseline escalates;
+  numerator: those the guarded learned policy continues. Baseline-settled patterns are excluded.
+
+Hard negatives (negatives one decision factor away from a positive):
+  unseen: 153 cases; false continues: raw 1, guarded 1
+  all: 258 cases; false continues: raw 1, guarded 1
+False continues: 1
+
+Native inference: not part of this byte-stable report; `chip-cli --report-decision-corpus` appends live median / p95 / p99.
+
+== BY GENERALIZATION DIMENSION (unseen cases) ==
+  case holdout       39 cases | det   4 local | raw   5 local,  0 false | strict   4 | guarded   5 local,  0 false | additional safe 1
+  pattern holdout   172 cases | det   8 local | raw  14 local,  0 false | strict   6 | guarded  16 local,  0 false | additional safe 8
+  context holdout   122 cases | det   5 local | raw  20 local,  1 false | strict   5 | guarded  20 local,  1 false | additional safe 14
+  capability holdout  107 cases | det   3 local | raw   0 local,  0 false | strict   0 | guarded   3 local,  0 false | additional safe 0
+
+== BY EVALUATION FAMILY (unseen cases) ==
+  hard negatives    153 cases | det   0 local | raw   1 local,  1 false | strict   0 | guarded   1 local,  1 false | additional safe 0
+  conjunctions      348 cases | det   0 local | raw  21 local,  1 false | strict   0 | guarded  21 local,  1 false | additional safe 20
+  conflicts          49 cases | det   0 local | raw   0 local,  0 false | strict   0 | guarded   0 local,  0 false | additional safe 0
+  unknowns           96 cases | det   3 local | raw   4 local,  1 false | strict   3 | guarded   4 local,  1 false | additional safe 0
+
+== BY EVALUATION FAMILY (all cases, trained-on ones included) ==
+  hard negatives    258 cases | det   0 local | raw   1 local,  1 false | strict   0 | guarded   1 local,  1 false | additional safe 0
+  conjunctions      610 cases | det   0 local | raw  67 local,  1 false | strict   0 | guarded  67 local,  1 false | additional safe 66
+  conflicts          96 cases | det   0 local | raw   0 local,  0 false | strict   0 | guarded   0 local,  0 false | additional safe 0
+  unknowns          164 cases | det   8 local | raw   9 local,  1 false | strict   8 | guarded   9 local,  1 false | additional safe 0
+
+== VALIDATION ==
+  validation         21 cases | det   0 local | raw   2 local,  0 false | strict   0 | guarded   2 local,  0 false | additional safe 2
+
+New safe local decisions (unseen cases the guarded policy continues that the baseline escalates):
+  approval/stale.unchanged.req-absent.grant-true (8 cases)
+  approval/stale.unchanged.req-false.grant-absent (1 cases)
+  approval/stale.unchanged.req-false.grant-true (4 cases)
+  approval/stale.unchanged.req-true.grant-true (3 cases)
+  operation/unknown.unchanged.ro-true.idem-true (1 cases)
+  outcome/stale.unchanged.last-success (3 cases)
+
+Failed generalizations (unseen cases that should continue, that the baseline escalates, and that stay escalated):
+  approval/stale.unchanged.req-absent.grant-true (8 cases)
+  approval/stale.unchanged.req-false.grant-absent (3 cases)
+  approval/stale.unchanged.req-false.grant-true (2 cases)
+  approval/stale.unchanged.req-true.grant-true (2 cases)
+  operation/unknown.unchanged.ro-true.idem-true (5 cases)
+  outcome/stale.unchanged.last-success (5 cases)
+  readiness/stale.unchanged.prereq-true (16 cases)
+
+Unsafe raw learned continues on unseen cases (caught or not by the guard):
+  approval/stale.unchanged.req-false.grant-unknown (1 cases)
+
+== UNKNOWN HANDLING ==
+  approval_granted=ambiguous: weight -1.498
+  approval_granted=unavailable: weight -0.121
+  approval_granted=unknown: weight -1.829
+  idempotent=ambiguous: weight -0.294
+  idempotent=unavailable: weight -0.154
+  idempotent=unknown: weight -0.296
+  last_outcome=ambiguous: weight -0.005
+  last_outcome=unknown: weight -0.004
+  prerequisites_met=ambiguous: weight +0.310  <- positive evidence for Continue
+  prerequisites_met=unavailable: weight +0.199  <- positive evidence for Continue
+  prerequisites_met=unknown: weight +0.198  <- positive evidence for Continue
+  read_only=ambiguous: weight -0.060
+  read_only=unavailable: weight -1.125
+  read_only=unknown: weight -0.512
+  explicit-unknown tokens with a positive weight: 3
+  cases with a critical unknown fact that the guarded policy wrongly continued: unseen 1, all 1
+
+== MEMORIZATION: the training cases themselves (in-sample; NOT evidence of quality) ==
+  training          257 cases | det  12 local | raw  56 local,  0 false | strict  12 | guarded  56 local,  0 false | additional safe 44
+
+== EVERY CASE ==
+  all cases         654 cases | det  32 local | raw  94 local,  1 false | strict  27 | guarded  99 local,  1 false | additional safe 66

@@ -1,0 +1,12 @@
+[package]
+name = "chip-decision-corpus"
+version = "0.1.0"
+edition = "2024"
+description = "Versioned, deterministic generator for Chip's structured local-decision corpus"
+license = "MIT"
+
+# Dataset tooling, not runtime. The corpus is generated, never hand-edited: the generator
+# and its version are the source of truth, and the committed corpus file is a checked artifact.
+[dependencies]
+chip-core = { path = "../chip-core" }
+sha2 = "0.10"

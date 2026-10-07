@@ -1,0 +1,14 @@
+{
+  "schema": "chip.local-decision.v1",
+  "feature_schema": "chip.decision-features.v1",
+  "model": "tiny-linear",
+  "experiment": "pr25",
+  "seed": 42,
+  "config": {"lambda": 0.001, "kappa": 0.5, "learning_rate": 0.8, "iterations": 8000, "unfamiliar_penalty": 4},
+  "corpus": {"schema": "chip.decision-corpus.v1", "generator": "chip.decision-corpus-gen.v1", "cases": 654, "digest_sha256": "5f128c3f13ab3fbd07d3a4170516c95fe70d13ec0da5a482b95fe27a2d74e012"},
+  "split": {"train": 257, "validation": 21, "held_out": 376},
+  "fitted_on": "train",
+  "tuned_on": "nothing: the PR24 configuration is unchanged",
+  "result": {"additional_safe_local_decisions": 0, "unseen_guarded_false_continues": 1},
+  "artifact": {"bytes": 1564, "sha256": "0e237f5ff017400175026240ad8497ddea0669263d128465d376c6088dc58d0b", "parameters": 129, "dimension": 63}
+}

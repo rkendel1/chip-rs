@@ -1,0 +1,540 @@
+{
+  "schema_version": "chip.architecture.v1",
+  "snapshot_id": "sha256:1064a966631da6a569bb55ed778ed2a251a31306e517a29fa48b50181b439cff",
+  "nodes": [
+    {
+      "id": "binary:.:demo",
+      "kind": "binary_target"
+    },
+    {
+      "id": "config:.cargo/config.toml",
+      "kind": "config_surface"
+    },
+    {
+      "id": "config:.github/workflows/test.yml",
+      "kind": "config_surface"
+    },
+    {
+      "id": "config:Cargo.lock",
+      "kind": "config_surface"
+    },
+    {
+      "id": "config:Cargo.toml",
+      "kind": "config_surface"
+    },
+    {
+      "id": "config:helper/Cargo.toml",
+      "kind": "config_surface"
+    },
+    {
+      "id": "config:rust-toolchain.toml",
+      "kind": "config_surface"
+    },
+    {
+      "id": "crate:.",
+      "kind": "crate"
+    },
+    {
+      "id": "crate:helper",
+      "kind": "crate"
+    },
+    {
+      "id": "file:helper/src/lib.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:src/api.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:src/bin/demo.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:src/evidence.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:src/execution.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:src/lib.rs",
+      "kind": "file"
+    },
+    {
+      "id": "file:tests/integration.rs",
+      "kind": "file"
+    },
+    {
+      "id": "module:.:bin/demo",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:crate",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:crate::api",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:crate::evidence",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:crate::execution",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:crate::internal",
+      "kind": "module"
+    },
+    {
+      "id": "module:.:tests/integration",
+      "kind": "module"
+    },
+    {
+      "id": "module:helper:crate",
+      "kind": "module"
+    },
+    {
+      "id": "module:helper:crate::tests",
+      "kind": "module"
+    },
+    {
+      "id": "repository:.",
+      "kind": "repository"
+    },
+    {
+      "id": "symbol:helper/src/lib.rs:Summarize",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:helper/src/lib.rs:shout",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/api.rs:api::Request",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/api.rs:api::handle",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/evidence.rs:evidence::Evidence",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/evidence.rs:evidence::Evidence::record",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/evidence.rs:evidence::Verdict",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/execution.rs:execution::Runner",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/execution.rs:execution::Runner::new",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/execution.rs:execution::Runner::run",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/lib.rs:VERSION",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/lib.rs:api",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/lib.rs:evidence",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/lib.rs:execution",
+      "kind": "symbol"
+    },
+    {
+      "id": "symbol:src/lib.rs:internal::hidden",
+      "kind": "symbol"
+    },
+    {
+      "id": "test:helper/src/lib.rs:tests::shout_uppercases",
+      "kind": "test_suite"
+    },
+    {
+      "id": "test:tests/integration.rs:handles_a_request",
+      "kind": "test_suite"
+    }
+  ],
+  "edges": [
+    {
+      "from": "binary:.:demo",
+      "kind": "targets",
+      "to": "module:.:bin/demo"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "binary:.:demo"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:src/api.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:src/bin/demo.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:src/evidence.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:src/execution.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:src/lib.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "file:tests/integration.rs"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "module:.:bin/demo"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "module:.:crate"
+    },
+    {
+      "from": "crate:.",
+      "kind": "contains",
+      "to": "module:.:tests/integration"
+    },
+    {
+      "from": "crate:helper",
+      "kind": "contains",
+      "to": "file:helper/src/lib.rs"
+    },
+    {
+      "from": "crate:helper",
+      "kind": "contains",
+      "to": "module:helper:crate"
+    },
+    {
+      "from": "file:helper/src/lib.rs",
+      "kind": "imports",
+      "to": "module:helper:crate"
+    },
+    {
+      "from": "file:src/api.rs",
+      "kind": "imports",
+      "to": "module:.:crate::execution"
+    },
+    {
+      "from": "file:src/api.rs",
+      "kind": "imports",
+      "to": "module:helper:crate"
+    },
+    {
+      "from": "file:src/api.rs",
+      "kind": "imports",
+      "to": "symbol:helper/src/lib.rs:Summarize"
+    },
+    {
+      "from": "file:src/api.rs",
+      "kind": "imports",
+      "to": "symbol:src/execution.rs:execution::Runner"
+    },
+    {
+      "from": "file:src/bin/demo.rs",
+      "kind": "imports",
+      "to": "module:.:crate::api"
+    },
+    {
+      "from": "file:src/bin/demo.rs",
+      "kind": "imports",
+      "to": "symbol:src/api.rs:api::Request"
+    },
+    {
+      "from": "file:src/bin/demo.rs",
+      "kind": "imports",
+      "to": "symbol:src/api.rs:api::handle"
+    },
+    {
+      "from": "file:src/execution.rs",
+      "kind": "imports",
+      "to": "module:.:crate::evidence"
+    },
+    {
+      "from": "file:src/execution.rs",
+      "kind": "imports",
+      "to": "symbol:src/evidence.rs:evidence::Evidence"
+    },
+    {
+      "from": "file:src/lib.rs",
+      "kind": "imports",
+      "to": "module:.:crate::api"
+    },
+    {
+      "from": "file:src/lib.rs",
+      "kind": "imports",
+      "to": "module:.:crate::evidence"
+    },
+    {
+      "from": "file:src/lib.rs",
+      "kind": "imports",
+      "to": "module:.:crate::execution"
+    },
+    {
+      "from": "file:tests/integration.rs",
+      "kind": "imports",
+      "to": "module:.:crate::api"
+    },
+    {
+      "from": "file:tests/integration.rs",
+      "kind": "imports",
+      "to": "symbol:src/api.rs:api::Request"
+    },
+    {
+      "from": "file:tests/integration.rs",
+      "kind": "imports",
+      "to": "symbol:src/api.rs:api::handle"
+    },
+    {
+      "from": "module:.:bin/demo",
+      "kind": "contains",
+      "to": "file:src/bin/demo.rs"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "contains",
+      "to": "file:src/lib.rs"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "contains",
+      "to": "module:.:crate::api"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "contains",
+      "to": "module:.:crate::evidence"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "contains",
+      "to": "module:.:crate::execution"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "contains",
+      "to": "module:.:crate::internal"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "defines",
+      "to": "symbol:src/lib.rs:VERSION"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "defines",
+      "to": "symbol:src/lib.rs:api"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "defines",
+      "to": "symbol:src/lib.rs:evidence"
+    },
+    {
+      "from": "module:.:crate",
+      "kind": "defines",
+      "to": "symbol:src/lib.rs:execution"
+    },
+    {
+      "from": "module:.:crate::api",
+      "kind": "contains",
+      "to": "file:src/api.rs"
+    },
+    {
+      "from": "module:.:crate::api",
+      "kind": "defines",
+      "to": "symbol:src/api.rs:api::Request"
+    },
+    {
+      "from": "module:.:crate::api",
+      "kind": "defines",
+      "to": "symbol:src/api.rs:api::handle"
+    },
+    {
+      "from": "module:.:crate::evidence",
+      "kind": "contains",
+      "to": "file:src/evidence.rs"
+    },
+    {
+      "from": "module:.:crate::evidence",
+      "kind": "defines",
+      "to": "symbol:src/evidence.rs:evidence::Evidence"
+    },
+    {
+      "from": "module:.:crate::evidence",
+      "kind": "defines",
+      "to": "symbol:src/evidence.rs:evidence::Evidence::record"
+    },
+    {
+      "from": "module:.:crate::evidence",
+      "kind": "defines",
+      "to": "symbol:src/evidence.rs:evidence::Verdict"
+    },
+    {
+      "from": "module:.:crate::execution",
+      "kind": "contains",
+      "to": "file:src/execution.rs"
+    },
+    {
+      "from": "module:.:crate::execution",
+      "kind": "defines",
+      "to": "symbol:src/execution.rs:execution::Runner"
+    },
+    {
+      "from": "module:.:crate::execution",
+      "kind": "defines",
+      "to": "symbol:src/execution.rs:execution::Runner::new"
+    },
+    {
+      "from": "module:.:crate::execution",
+      "kind": "defines",
+      "to": "symbol:src/execution.rs:execution::Runner::run"
+    },
+    {
+      "from": "module:.:crate::internal",
+      "kind": "contains",
+      "to": "file:src/lib.rs"
+    },
+    {
+      "from": "module:.:crate::internal",
+      "kind": "defines",
+      "to": "symbol:src/lib.rs:internal::hidden"
+    },
+    {
+      "from": "module:.:tests/integration",
+      "kind": "contains",
+      "to": "file:tests/integration.rs"
+    },
+    {
+      "from": "module:.:tests/integration",
+      "kind": "defines",
+      "to": "test:tests/integration.rs:handles_a_request"
+    },
+    {
+      "from": "module:helper:crate",
+      "kind": "contains",
+      "to": "file:helper/src/lib.rs"
+    },
+    {
+      "from": "module:helper:crate",
+      "kind": "contains",
+      "to": "module:helper:crate::tests"
+    },
+    {
+      "from": "module:helper:crate",
+      "kind": "defines",
+      "to": "symbol:helper/src/lib.rs:Summarize"
+    },
+    {
+      "from": "module:helper:crate",
+      "kind": "defines",
+      "to": "symbol:helper/src/lib.rs:shout"
+    },
+    {
+      "from": "module:helper:crate::tests",
+      "kind": "contains",
+      "to": "file:helper/src/lib.rs"
+    },
+    {
+      "from": "module:helper:crate::tests",
+      "kind": "defines",
+      "to": "test:helper/src/lib.rs:tests::shout_uppercases"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:.cargo/config.toml"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:.github/workflows/test.yml"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:Cargo.lock"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:Cargo.toml"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:helper/Cargo.toml"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "config:rust-toolchain.toml"
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "crate:."
+    },
+    {
+      "from": "repository:.",
+      "kind": "contains",
+      "to": "crate:helper"
+    },
+    {
+      "from": "symbol:src/api.rs:api::Request",
+      "kind": "implements",
+      "to": "symbol:helper/src/lib.rs:Summarize"
+    },
+    {
+      "from": "test:helper/src/lib.rs:tests::shout_uppercases",
+      "kind": "tests",
+      "to": "symbol:helper/src/lib.rs:shout"
+    },
+    {
+      "from": "test:tests/integration.rs:handles_a_request",
+      "kind": "tests",
+      "to": "symbol:src/api.rs:api::Request"
+    },
+    {
+      "from": "test:tests/integration.rs:handles_a_request",
+      "kind": "tests",
+      "to": "symbol:src/api.rs:api::handle"
+    }
+  ]
+}

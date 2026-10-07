@@ -1,0 +1,21 @@
+[package]
+name = "chip-wasm-reasoner"
+version = "0.1.0"
+edition = "2024"
+description = "Host for an untrusted WASM module implementing Chip's LocalReasoner"
+license = "MIT"
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+wasmi = "0.51"
+wat = { version = "1", optional = true }
+
+[features]
+# Compiles the built-in benchmark fixture from WAT. Off by default.
+fixture = ["dep:wat"]
+
+[dev-dependencies]
+wat = "1"
+fx-core = { path = "../fx-core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

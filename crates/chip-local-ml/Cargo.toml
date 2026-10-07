@@ -1,0 +1,22 @@
+[package]
+name = "chip-local-ml"
+version = "0.1.0"
+edition = "2024"
+description = "LocalReasoner backed by a local typed-decision model via rust-ml-runtime"
+license = "MIT"
+
+# The runtime pulls in ONNX Runtime, which its build script downloads at build time.
+# It is therefore opt-in: without the `runtime` feature this crate is empty and the
+# default workspace build stays free of that dependency.
+[features]
+runtime = ["dep:rust-ml-runtime", "dep:serde_json"]
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+rust-ml-runtime = { version = "0.2.3", optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+fx-core = { path = "../fx-core" }
+async-trait = "0.1"

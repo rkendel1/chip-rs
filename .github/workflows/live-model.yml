@@ -1,0 +1,29 @@
+name: Live Model (optional)
+
+# Manual only; not part of normal PR validation and never authoritative for it. Needs provider
+# credentials as repository secrets and a `compute` executable. Without them the run SKIPS.
+on:
+  workflow_dispatch:
+    inputs:
+      compute_bin:
+        description: "Path to an installed compute executable (default: compute on PATH)"
+        required: false
+
+jobs:
+  live-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Real model autonomous work
+        env:
+          CHIP_TEST_REAL_MODEL: "1"
+          CHIP_PROVIDER: ${{ secrets.CHIP_PROVIDER }}
+          CHIP_MODEL: ${{ secrets.CHIP_MODEL }}
+          CHIP_ENDPOINT: ${{ secrets.CHIP_ENDPOINT }}
+          CHIP_API_KEY: ${{ secrets.CHIP_API_KEY }}
+          COMPUTE_BIN: ${{ inputs.compute_bin }}
+        run: |
+          # Exit 3 means skipped (no credentials or no Compute); any other failure fails the job.
+          cargo run -p chip-cli -- --test-real-model-work || [ $? -eq 3 ]
+          cargo test -p chip-cli --test real_model_work real_model_escalation -- --nocapture

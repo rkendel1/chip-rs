@@ -1,0 +1,16 @@
+{
+  "schema": "chip.local-decision.v1",
+  "feature_schema": "chip.decision-features.v1",
+  "model": "tiny-linear",
+  "seed": 42,
+  "config": {"lambda": 0.001, "kappa": 0.5, "learning_rate": 0.8, "iterations": 8000, "unfamiliar_penalty": 4},
+  "corpus": {"cases": 32, "digest_sha256": "3a217c2995184f83a27a44f740e620b495a3d4b995f505da3c8c6d41e4bc1d96"},
+  "split": {
+    "train": ["det-valid-02", "det-stale-01", "det-unknown-01", "lj-01", "lj-02", "lj-03", "lj-05", "lj-06", "lj-07", "lj-08", "lj-10", "ii-01", "ii-02", "cf-04", "ex-01", "ex-02", "ex-03", "ex-04"],
+    "validation": ["det-valid-03", "det-unknown-02", "det-unknown-03", "lj-09", "ii-04", "cf-03", "cf-05"],
+    "held_out": ["det-valid-01", "det-stale-02", "lj-04", "ii-03", "ii-05", "cf-01", "cf-02"]
+  },
+  "fitted_on": "train + validation",
+  "selection": {"method": "leave-one-out on train + validation", "loo_false_continues": 0, "loo_true_continues": 2},
+  "artifact": {"bytes": 840, "sha256": "87358124dbf2f9257e158b650527672cb3f2134b2b3c443ea2ba4a0206cdccc8", "parameters": 75, "dimension": 36, "capabilities": 5, "fact_tokens": 21}
+}

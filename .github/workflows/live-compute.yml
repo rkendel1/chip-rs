@@ -1,0 +1,27 @@
+name: Live Compute (optional)
+
+# Manual only. Requires a `compute` executable; not part of normal PR validation.
+on:
+  workflow_dispatch:
+    inputs:
+      compute_bin:
+        description: "Path to an installed compute executable (default: compute on PATH)"
+        required: false
+
+jobs:
+  live-compute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Live Compute execution
+        env:
+          COMPUTE_BIN: ${{ inputs.compute_bin }}
+        run: |
+          if [ -z "$COMPUTE_BIN" ]; then unset COMPUTE_BIN; fi
+          cargo test -p chip-compute --test live_compute -- --nocapture
+          cargo run -p chip-cli -- --compute-test
+          cargo run -p chip-cli -- --test-real-cycle
+          cargo run -p chip-cli -- --test-real-evidence
+          cargo run -p chip-cli -- --test-real-work
+          cargo run -p chip-cli -- --test-real-work --json

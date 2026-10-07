@@ -1,0 +1,1 @@
+{"schema":"chip.work-decision.v2","decision":"request_capability","capability":"compute.selftest"}

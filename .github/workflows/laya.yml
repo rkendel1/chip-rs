@@ -1,0 +1,28 @@
+name: Laya reasoner (optional, experimental)
+
+# Builds and tests the native Laya adapter. laya-decision is pure Rust (candle), so no system
+# libraries are needed, but it is heavy to compile and is kept out of normal PR validation.
+on:
+  workflow_dispatch:
+    inputs:
+      model_dir:
+        description: "Path to a local Laya checkpoint directory on the runner (optional)"
+        required: false
+  pull_request:
+    paths:
+      - "crates/chip-laya-reasoner/**"
+      - ".github/workflows/laya.yml"
+
+jobs:
+  laya:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Adapter tests (real candle path on a synthetic random-weight checkpoint)
+        run: cargo test -p chip-laya-reasoner --features fixture
+      - name: CLI with the laya feature
+        run: cargo test -p chip-cli --features laya
+      - name: Real checkpoint (only when a directory is given)
+        if: ${{ inputs.model_dir != '' }}
+        run: cargo run --release -p chip-cli --features laya -- --test-laya-reasoner "${{ inputs.model_dir }}"

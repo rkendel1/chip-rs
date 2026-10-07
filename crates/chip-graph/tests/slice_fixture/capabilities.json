@@ -1,0 +1,16 @@
+{
+  "schema": "chip.capabilities.v1",
+  "capabilities": [
+    { "id": "cap.other", "graph_nodes": ["module:a:crate::three"] },
+    {
+      "id": "cap.slice",
+      "graph_nodes": [
+        "file:a/src/one.rs",
+        "crate:a",
+        "module:a:crate::two",
+        "module:a:crate::one",
+        "crate:a"
+      ]
+    }
+  ]
+}

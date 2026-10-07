@@ -1,0 +1,7 @@
+{
+  "schema": "chip.decision-corpus.v1",
+  "generator": "chip.decision-corpus-gen.v1",
+  "seed": 42,
+  "cases": 654,
+  "digest_sha256": "5f128c3f13ab3fbd07d3a4170516c95fe70d13ec0da5a482b95fe27a2d74e012"
+}

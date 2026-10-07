@@ -4,8 +4,30 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+# `local-ml` adds the native local-model reasoner. It needs ONNX Runtime at build time
+# (downloaded by the runtime's build script, or supplied via ORT_LIB_LOCATION), so it is off by default.
+[features]
+local-ml = ["dep:chip-local-ml", "chip-local-ml/runtime"]
+# Experimental native Laya (candle) reasoner; needs a local checkpoint directory, never downloads.
+laya = ["dep:chip-laya-reasoner", "chip-laya-reasoner/laya"]
+
 [dependencies]
 chip-core = { path = "../chip-core" }
+chip-graph = { path = "../chip-graph" }
+chip-local-decision = { path = "../chip-local-decision" }
+chip-decision-corpus = { path = "../chip-decision-corpus" }
 fx-core = { path = "../fx-core" }
+chip-compute = { path = "../chip-compute" }
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+chip-local-ml = { path = "../chip-local-ml", optional = true }
+chip-laya-reasoner = { path = "../chip-laya-reasoner", optional = true }
+chip-wasm-reasoner = { path = "../chip-wasm-reasoner", features = ["fixture"] }
+chip-wasm-decision = { path = "../chip-wasm-decision" }
+chip-wasm-decision-host = { path = "../chip-wasm-decision-host" }
+fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
+serde_json = "1"

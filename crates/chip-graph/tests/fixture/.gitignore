@@ -1,0 +1,3 @@
+# Recommended: chip init writes a cache of the architecture graph here.
+# The snapshot is a projection, not authority; it can always be rebuilt.
+.chip/

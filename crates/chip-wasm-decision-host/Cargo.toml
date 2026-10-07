@@ -1,0 +1,15 @@
+[package]
+name = "chip-wasm-decision-host"
+version = "0.1.0"
+edition = "2024"
+description = "Host for the typed Wasm decision module: a persistent instance fed canonical decision-state bytes"
+license = "MIT"
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-wasm-decision = { path = "../chip-wasm-decision" }
+wasmi = "0.51"
+
+[dev-dependencies]
+chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
+wat = "1"

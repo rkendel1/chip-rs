@@ -1,0 +1,13 @@
+[package]
+name = "chip-wasm-decision"
+version = "0.1.0"
+edition = "2024"
+description = "Tiny, generation-free, typed decision module over Chip's canonical decision state (compiles to Wasm)"
+license = "MIT"
+
+# `cdylib` is the Wasm module; `rlib` is the native reference used by tests and the host.
+# No dependencies, deliberately: this is the footprint of the module.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
