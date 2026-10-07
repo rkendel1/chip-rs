@@ -1,4 +1,4 @@
-//! `chip-cli --benchmark-local-model` and `--evaluate-local-model`.
+//! `chip --benchmark-local-model` and `--evaluate-local-model`.
 //!
 //! Native only: the question here is model quality and footprint, not deployment. Neither
 //! command reads a repository, calls a model provider or executes anything; the model is the

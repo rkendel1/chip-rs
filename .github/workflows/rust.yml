@@ -49,6 +49,13 @@ jobs:
       - name: Build the Wasm decision module
         run: cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
 
+      - name: Install PAX (pinned release v0.3.0, the minimum Chip requires)
+        run: |
+          git clone --depth 1 --branch v0.3.0 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
+          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 3bf88b884f2abecf17e21175e5ce2dd6c52c7e8f
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/pax/Cargo.toml"
+          echo "$RUNNER_TEMP/pax/target/release" >> "$GITHUB_PATH"
+
       - name: Run tests
         run: cargo test --workspace --verbose
 
@@ -79,3 +86,37 @@ jobs:
         run: |
           cargo run -p chip-cli -- --benchmark-work
           cargo run -p chip-cli -- --benchmark-work --json
+
+  product:
+    name: Rust Chip product (boundaries, release artifact, packaged smoke test)
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PAX (pinned release v0.3.0, the minimum Chip requires)
+        run: |
+          git clone --depth 1 --branch v0.3.0 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
+          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 3bf88b884f2abecf17e21175e5ce2dd6c52c7e8f
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/pax/Cargo.toml"
+          echo "$RUNNER_TEMP/pax/target/release" >> "$GITHUB_PATH"
+
+      - name: Dependency direction (Rust Chip -> Rust FX; no environment provider)
+        run: scripts/audit-dependencies.sh
+
+      - name: Build the release artifact
+        run: scripts/package-release.sh dist
+
+      - name: Packaged local smoke test
+        run: scripts/smoke-test.sh dist/chip-*.tar.gz
+
+      - name: Keep the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chip-release
+          path: dist/

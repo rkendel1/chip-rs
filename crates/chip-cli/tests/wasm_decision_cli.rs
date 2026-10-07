@@ -1,10 +1,10 @@
-//! `chip-cli --benchmark-wasm-decision` against the real Wasm module.
+//! `chip --benchmark-wasm-decision` against the real Wasm module.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .args(args)
         .output()
         .unwrap()

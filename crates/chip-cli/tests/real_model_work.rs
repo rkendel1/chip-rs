@@ -28,7 +28,7 @@ const REQUEST: &str = r#"{"decision":"request_capability","capability":"compute.
 const EXPECTED_DIGEST: &str = "5dc3ef3419c119833659d7288d246c87db93e4eeabb2b11126be581cb83c165f";
 
 fn run(url: &str, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-real-model-work")
         .args(extra)
         .env("CHIP_PROVIDER", "openai-compatible")
@@ -1007,7 +1007,7 @@ fn ollama_reply(content: &str, usage: Option<(u32, u32)>) -> String {
 }
 
 fn run_ollama(base_url: &str, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-real-model-work")
         .args(extra)
         .env("CHIP_PROVIDER", "ollama")
@@ -1255,7 +1255,7 @@ async fn a_half_specified_permutation_is_refused() {
 
 #[test]
 fn an_unconfigured_provider_is_skipped_not_failed() {
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-real-model-work")
         .env_remove("CHIP_PROVIDER")
         .env_remove("CHIP_MODEL")
@@ -1276,7 +1276,7 @@ fn real_model_escalation() {
         eprintln!("SKIPPED: set CHIP_TEST_REAL_MODEL=1 to call a real model");
         return;
     }
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("--test-real-model-work")
         .output()
         .unwrap();
@@ -1346,7 +1346,7 @@ fn real_model_permuted_selection() {
     }
     let mut correct = 0;
     for run_number in 1..=5 {
-        let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        let out = Command::new(env!("CARGO_BIN_EXE_chip"))
             .arg("--test-real-model-work")
             .args(["--permutation-seed", SEED])
             .args(["--permutation-run", &run_number.to_string()])
@@ -1394,7 +1394,7 @@ fn real_model_semantic_goal_matrix() {
     let mut tally = std::collections::BTreeMap::new();
     for goal in 1..=3 {
         for run_number in 1..=6 {
-            let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+            let out = Command::new(env!("CARGO_BIN_EXE_chip"))
                 .arg("--test-real-model-work")
                 .args(["--permutation-seed", SEED])
                 .args(["--permutation-run", &run_number.to_string()])
@@ -1464,7 +1464,7 @@ fn real_model_zero_overlap_matrix() {
     let mut tally = std::collections::BTreeMap::new();
     for goal in 1..=6 {
         for run_number in 1..=6 {
-            let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+            let out = Command::new(env!("CARGO_BIN_EXE_chip"))
                 .arg("--test-real-model-work")
                 .arg("--balanced-dealing")
                 .args(["--permutation-seed", SEED])

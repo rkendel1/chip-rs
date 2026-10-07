@@ -1,0 +1,16 @@
+[package]
+name = "chip-remote-env"
+version = "0.1.0"
+edition = "2024"
+description = "Run Rust Chip's capabilities in an external execution environment through a generic exec(argv, env) transport"
+license = "MIT"
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-project = { path = "../chip-project" }
+chip-pax = { path = "../chip-pax" }
+async-trait = "0.1"
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "time"] }

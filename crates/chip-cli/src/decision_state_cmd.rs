@@ -1,4 +1,4 @@
-//! `chip-cli decision-state` and `chip-cli --benchmark-decision-state`.
+//! `chip decision-state` and `chip --benchmark-decision-state`.
 //!
 //! Both operate on values passed in. Neither reads the repository, initializes the graph,
 //! executes anything or calls a model.
@@ -10,7 +10,7 @@ use chip_core::{
     CapabilityDecisionState, CapabilityId, EvidenceState, GraphStateToken, ImpactState, InputValue,
 };
 
-const USAGE: &str = "usage: chip-cli decision-state --capability ID --graph-state sha256:HEX \
+const USAGE: &str = "usage: chip decision-state --capability ID --graph-state sha256:HEX \
 --evidence valid|stale|unknown --impact impacted|unchanged";
 
 fn flag(args: &[String], name: &str) -> Option<String> {

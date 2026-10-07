@@ -1,4 +1,4 @@
-//! `chip-cli --test-work [scenario]` and `--test-real-work`: the bounded autonomous loop, end to end.
+//! `chip --test-work [scenario]` and `--test-real-work`: the bounded autonomous loop, end to end.
 //!
 //! One `run_work` call makes every decision; this module never starts a second turn. The model is
 //! a deterministic stand-in, so nothing here needs credentials. `--test-real-work` uses real

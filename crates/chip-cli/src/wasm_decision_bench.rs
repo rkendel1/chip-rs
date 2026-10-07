@@ -1,4 +1,4 @@
-//! `chip-cli --benchmark-wasm-decision`: what the tiny Wasm decision module costs.
+//! `chip --benchmark-wasm-decision`: what the tiny Wasm decision module costs.
 //!
 //! Module initialization, decision invocation on a live instance, and fresh-instance
 //! end-to-end are reported separately, next to the native reference, so the number that matters

@@ -1,4 +1,4 @@
-//! PR45: `chip-cli work "<goal>"`, the binary run as a user would run it, in the project directory.
+//! PR45: `chip work "<goal>"`, the binary run as a user would run it, in the project directory.
 //!
 //! Mock provider tests drive the real `HttpProvider` against a local HTTP server that answers one
 //! fixed reply, with the real filesystem and real PAX/Cargo behind it (the multi-step scripted
@@ -48,7 +48,7 @@ fn completion(content: &str) -> String {
 }
 
 fn base(args: &[&str], dir: &Path) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_chip"));
     c.arg("work")
         .args(args)
         .current_dir(dir)
@@ -121,7 +121,7 @@ fn usage_errors_are_exit_2_and_run_nothing() {
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", text(&out));
-        assert!(text(&out).contains("usage: chip-cli work"), "{args:?}");
+        assert!(text(&out).contains("usage: chip work"), "{args:?}");
     }
     let long = "x".repeat(2001);
     let out = mock("http://127.0.0.1:1", base(&[&long], &dir))
@@ -288,7 +288,7 @@ fn real_model_does_real_work() {
         return;
     }
     let dir = fixture("live");
-    let out = Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+    let out = Command::new(env!("CARGO_BIN_EXE_chip"))
         .arg("work")
         .args(["--json", "--print-reply", GOAL])
         .current_dir(&dir)
@@ -641,7 +641,7 @@ fn real_model_codes_real_tasks() {
                 model.as_deref().unwrap_or("env").replace([':', '.'], "-")
             ),
         );
-        let mut command = Command::new(env!("CARGO_BIN_EXE_chip-cli"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_chip"));
         command.arg("work").args(["--json", "--print-reply"]);
         if let Some(p) = &provider {
             command.args(["--provider", p]);

@@ -6,6 +6,12 @@ license = "MIT"
 
 # `local-ml` adds the native local-model reasoner. It needs ONNX Runtime at build time
 # (downloaded by the runtime's build script, or supplied via ORT_LIB_LOCATION), so it is off by default.
+# The one Rust executable is `chip`. The package keeps its name (`chip-cli`) so the library other
+# programs embed keeps its path; there is no second command-line program.
+[[bin]]
+name = "chip"
+path = "src/main.rs"
+
 [features]
 local-ml = ["dep:chip-local-ml", "chip-local-ml/runtime"]
 # Experimental native Laya (candle) reasoner; needs a local checkpoint directory, never downloads.
@@ -20,6 +26,7 @@ fx-core = { path = "../fx-core" }
 chip-compute = { path = "../chip-compute" }
 chip-pax = { path = "../chip-pax" }
 chip-project = { path = "../chip-project" }
+chip-remote-env = { path = "../chip-remote-env" }
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
 chip-local-ml = { path = "../chip-local-ml", optional = true }
 chip-laya-reasoner = { path = "../chip-laya-reasoner", optional = true }
@@ -30,7 +37,7 @@ fx-provider-http = { path = "../fx-provider-http" }
 async-trait = "0.1"
 sha2 = "0.10"
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }

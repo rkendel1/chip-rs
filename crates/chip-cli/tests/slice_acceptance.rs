@@ -1,4 +1,4 @@
-//! Black-box acceptance test for `chip-cli slice`.
+//! Black-box acceptance test for `chip slice`.
 //!
 //! The contract under test: a StateToken is only emitted from
 //!
@@ -82,7 +82,7 @@ impl Repo {
             self.root.to_str().unwrap().to_string(),
         ]);
         full.extend(args[1..].iter().map(|a| a.to_string()));
-        Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        Command::new(env!("CARGO_BIN_EXE_chip"))
             .args(&full)
             .output()
             .unwrap()

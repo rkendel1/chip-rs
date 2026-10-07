@@ -1,21 +1,11 @@
 // The work report is one large `json!` literal.
 #![recursion_limit = "256"]
 
-mod benchmark;
-mod corpus_eval;
-mod decision_state_cmd;
-mod graph_cmd;
-mod horizon;
-mod laya_eval;
-mod live_benchmark;
-mod local_model_bench;
-mod native;
-mod pax_work;
-mod provider_selection;
-mod software_work;
-mod verify;
-mod wasm_decision_bench;
-mod work_demo;
+use chip_cli::{
+    benchmark, config_from_env, corpus_eval, decision_state_cmd, graph_cmd, horizon, laya_eval,
+    live_benchmark, local_model_bench, native, pax_work, service, software_work, verify,
+    wasm_decision_bench, work_demo,
+};
 
 use std::sync::Arc;
 
@@ -26,8 +16,8 @@ use chip_core::{
     ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult, Executor,
     LocalReasoningResult, ScriptedDecision, StateToken, TestExecutor, TestLocalReasoner, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Secret, Usage};
-use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use fx_provider_http::HttpProvider;
 
 #[derive(Default)]
 struct TestModelProvider;
@@ -533,49 +523,6 @@ impl CapabilityProvider for DemoCapabilities {
     }
 }
 
-/// Builds provider config from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT / CHIP_API_KEY.
-fn config_from_env(get: impl Fn(&str) -> Option<String>) -> Result<HttpProviderConfig, FxError> {
-    let required = |name: &str| {
-        get(name)
-            .filter(|v| !v.trim().is_empty())
-            .ok_or_else(|| FxError::Configuration(format!("{name} is not set")))
-    };
-    let provider = get("CHIP_PROVIDER").unwrap_or_else(|| PROVIDER_OPENAI_COMPATIBLE.to_string());
-    // A provider with one well-known endpoint does not need CHIP_ENDPOINT.
-    let set = |name: &str| get(name).filter(|v| !v.trim().is_empty());
-    let endpoint = match (provider == fx_provider_http::PROVIDER_OLLAMA)
-        .then(|| set("CHIP_OLLAMA_ENDPOINT"))
-        .flatten()
-        .or_else(|| set("CHIP_ENDPOINT"))
-    {
-        Some(endpoint) => endpoint,
-        None => match fx_provider_http::default_endpoint(&provider) {
-            Some(endpoint) => endpoint.to_string(),
-            None => required("CHIP_ENDPOINT")?,
-        },
-    };
-    let mut config = HttpProviderConfig::new(provider, required("CHIP_MODEL")?, endpoint);
-    if let Some(key) = get("CHIP_API_KEY").filter(|k| !k.is_empty()) {
-        config = config.with_api_key(Secret::new(key));
-    }
-    // Opt-in, and explicit either way: anything but `true` or `false` is a configuration error.
-    if let Some(value) = set("CHIP_ENABLE_THINKING") {
-        match value.trim() {
-            "true" => config = config.with_enable_thinking(true),
-            "false" => config = config.with_enable_thinking(false),
-            _ => {
-                return Err(FxError::Configuration(
-                    "CHIP_ENABLE_THINKING must be `true` or `false`".into(),
-                ));
-            }
-        }
-    }
-    if let Some(workspace) = get("CHIP_ANTHROPIC_WORKSPACE_ID").filter(|v| !v.trim().is_empty()) {
-        config = config.with_workspace_id(workspace);
-    }
-    Ok(config)
-}
-
 async fn run_configured(prompt: String) -> Result<(), String> {
     let config = config_from_env(|name| std::env::var(name).ok()).map_err(|e| e.to_string())?;
     let provider_name = config.provider.clone();
@@ -599,12 +546,29 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
-        println!("chip-cli {}", env!("CARGO_PKG_VERSION"));
+        println!("chip {}", env!("CARGO_PKG_VERSION"));
         return;
     }
 
     if args.len() > 1 && args[1] == "work" {
         std::process::exit(software_work::work(&args[2..]).await);
+    }
+
+    if args.len() > 1 && args[1] == "serve" {
+        std::process::exit(service::serve(&args[2..]).await);
+    }
+
+    // The worker Rust Chip runs inside an external environment (see `chip-remote-env`). It is not
+    // an agent: it executes one already-validated capability request with Chip's own executors.
+    if args.len() > 1 && args[1] == chip_remote_env::WORKER_SUBCOMMAND {
+        let root = match (args.get(2).map(String::as_str), args.get(3)) {
+            (Some("--root"), Some(root)) if args.len() == 4 => root.clone(),
+            _ => {
+                eprintln!("usage: chip capability-exec --root <project directory>");
+                std::process::exit(2);
+            }
+        };
+        std::process::exit(chip_remote_env::worker::run(std::path::Path::new(&root)).await);
     }
 
     if args.len() > 1 && args[1] == "verify" {
@@ -1153,65 +1117,4 @@ async fn main() {
     eprintln!(
         "       CHIP_MODEL=.. CHIP_ENDPOINT=.. [CHIP_PROVIDER=..] [CHIP_API_KEY=..] cargo run -p chip-cli -- \"<prompt>\""
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::config_from_env;
-    use fx_core::FxError;
-
-    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-        move |name| {
-            pairs
-                .iter()
-                .find(|(k, _)| *k == name)
-                .map(|(_, v)| v.to_string())
-        }
-    }
-
-    #[test]
-    fn reads_all_fields_and_redacts_key() {
-        let config = config_from_env(env(&[
-            ("CHIP_PROVIDER", "openai-compatible"),
-            ("CHIP_MODEL", "m"),
-            ("CHIP_ENDPOINT", "http://localhost/x"),
-            ("CHIP_API_KEY", "super-secret-value"),
-        ]))
-        .unwrap();
-        assert_eq!(config.model.0, "m");
-        assert_eq!(config.endpoint, "http://localhost/x");
-        assert!(config.api_key.is_some());
-        assert!(!format!("{config:?}").contains("super-secret-value"));
-    }
-
-    #[test]
-    fn missing_model_or_endpoint_is_configuration_error() {
-        let err = config_from_env(env(&[("CHIP_ENDPOINT", "http://x")])).unwrap_err();
-        assert!(matches!(err, FxError::Configuration(_)));
-        let err = config_from_env(env(&[("CHIP_MODEL", "m")])).unwrap_err();
-        assert!(matches!(err, FxError::Configuration(_)));
-    }
-
-    #[test]
-    fn thinking_is_off_only_when_explicitly_configured_and_never_guessed() {
-        let base = [("CHIP_MODEL", "m"), ("CHIP_ENDPOINT", "http://x")];
-        assert_eq!(config_from_env(env(&base)).unwrap().enable_thinking, None);
-        for (value, expected) in [("false", false), ("true", true), (" false ", false)] {
-            let mut vars = base.to_vec();
-            vars.push(("CHIP_ENABLE_THINKING", value));
-            assert_eq!(
-                config_from_env(env(&vars)).unwrap().enable_thinking,
-                Some(expected)
-            );
-        }
-        for bad in ["0", "no", "False", "off"] {
-            let mut vars = base.to_vec();
-            vars.push(("CHIP_ENABLE_THINKING", bad));
-            let err = config_from_env(env(&vars)).unwrap_err();
-            assert!(err.to_string().contains("CHIP_ENABLE_THINKING"), "{bad}");
-        }
-        // The model is never inferred from the endpoint.
-        let err = config_from_env(env(&[("CHIP_ENDPOINT", "http://127.0.0.1:8000")])).unwrap_err();
-        assert!(err.to_string().contains("CHIP_MODEL"));
-    }
 }

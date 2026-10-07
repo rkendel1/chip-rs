@@ -511,7 +511,7 @@ mod graph_snapshot {
     }
 
     fn run(args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_chip-cli"))
+        Command::new(env!("CARGO_BIN_EXE_chip"))
             .args(args)
             .output()
             .unwrap()

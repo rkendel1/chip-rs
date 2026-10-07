@@ -1,4 +1,4 @@
-//! `chip-cli init` and `chip-cli graph`: build and show the architecture graph snapshot.
+//! `chip init` and `chip graph`: build and show the architecture graph snapshot.
 //!
 //! The graph is a projection of source. These commands only read source (for `init`) and
 //! read or write the snapshot cache under `.chip/graph/`; they never run anything.
@@ -234,12 +234,12 @@ fn load_inputs(parsed: &CatalogArgs) -> Result<(ArchitectureGraph, CapabilityCat
     }
 }
 
-/// `chip-cli impact --capabilities FILE [--root PATH] <path>...`
+/// `chip impact --capabilities FILE [--root PATH] <path>...`
 ///
 /// Reads the stored snapshot and an external capability catalog; never runs `init`, never
 /// infers or invents a catalog. Returns the process exit code.
 pub fn impact(args: &[String]) -> i32 {
-    let usage = "usage: chip-cli impact --capabilities FILE [--root PATH] <changed path>...";
+    let usage = "usage: chip impact --capabilities FILE [--root PATH] <changed path>...";
     let parsed = parse_catalog_args(args, false);
     if parsed.catalog.is_none() || parsed.positional.is_empty() {
         eprintln!("{usage}");
@@ -256,12 +256,13 @@ pub fn impact(args: &[String]) -> i32 {
     0
 }
 
-/// `chip-cli slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>`
+/// `chip slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>`
 ///
 /// Prints the capability's relevant graph slice and its StateToken, from the stored snapshot.
 /// Returns the process exit code.
 pub fn slice(args: &[String]) -> i32 {
-    let usage = "usage: chip-cli slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>";
+    let usage =
+        "usage: chip slice --capabilities FILE [--root PATH] [--changed PATH]... <capability id>";
     let parsed = parse_catalog_args(args, true);
     if parsed.catalog.is_none() || parsed.positional.len() != 1 {
         eprintln!("{usage}");
