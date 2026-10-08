@@ -378,6 +378,7 @@ mod tests {
                 .with_local_reasoner(reasoner.clone());
             let request = CapabilityRequest {
                 execution_id: ExecutionId::new("fixture"),
+                provider_response_id: None,
                 capability_id: case.input.capability.clone(),
                 inputs_present: !case.input.inputs.is_empty(),
                 inputs: case.input.inputs.clone(),

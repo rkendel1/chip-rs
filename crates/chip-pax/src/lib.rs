@@ -30,15 +30,17 @@
 //! stderr or in a project's output can pose as a status. It carries no receipt: PAX issues none,
 //! and a PAX result is an observation, not a cryptographic receipt.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chip_core::{
     CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
     CapabilityProvider, ExecutionError, ExecutionRequest, ExecutionResult, ExecutionStatus,
-    Executor, Observation, ObservationKind, ObservationPredicate,
+    Executor, InputValue, Observation, ObservationKind, ObservationPredicate,
 };
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use tokio::process::Command;
@@ -495,6 +497,11 @@ pub struct PaxExecutor {
     search_path: Option<OsString>,
     work_directory: PathBuf,
     timeout: Duration,
+    /// The verified PAX, once something genuinely needed it. Shared by clones of this executor and
+    /// owned by nothing wider: one executor is one work's (or one environment's) PAX, so the
+    /// identity probe runs at most once per executor and never before PAX is needed. Only a
+    /// success is kept; a failure is probed again.
+    resolved: Arc<tokio::sync::OnceCell<ResolvedPax>>,
 }
 
 impl PaxExecutor {
@@ -508,12 +515,14 @@ impl PaxExecutor {
             search_path: std::env::var_os("PATH"),
             work_directory: work_directory.into(),
             timeout: Duration::from_secs(300),
+            resolved: Arc::default(),
         }
     }
 
     /// Names the executable explicitly. It is still identity- and version-checked.
     pub fn with_binary(mut self, path: impl Into<PathBuf>) -> Self {
         self.explicit_binary = Some(path.into());
+        self.resolved = Arc::default();
         self
     }
 
@@ -522,6 +531,7 @@ impl PaxExecutor {
     pub fn with_search_path(mut self, path: impl Into<OsString>) -> Self {
         self.explicit_binary = None;
         self.search_path = Some(path.into());
+        self.resolved = Arc::default();
         self
     }
 
@@ -568,14 +578,34 @@ impl PaxExecutor {
             .ok_or_else(|| PaxUnavailable::NotFound("no `pax` on the search path".into()))
     }
 
-    /// Finds PAX, verifies that it is PAX, and that it is new enough. Fails closed.
-    pub async fn resolve(&self) -> Result<ResolvedPax, PaxUnavailable> {
+    /// Whether a `pax` file is where it would be run from. A filesystem lookup only: no process is
+    /// started, so this says "present", never "is PAX". Use it where PAX is merely expected.
+    pub fn locate(&self) -> Result<PathBuf, PaxUnavailable> {
         if !self.work_directory.is_dir() {
             return Err(PaxUnavailable::BadWorkDirectory(
                 self.work_directory.clone(),
             ));
         }
-        let path = self.candidate()?;
+        self.candidate()
+    }
+
+    /// The verified PAX if something has already needed it. Starts nothing.
+    pub fn resolved(&self) -> Option<ResolvedPax> {
+        self.resolved.get().cloned()
+    }
+
+    /// Finds PAX, verifies that it is PAX, and that it is new enough. Fails closed. The identity
+    /// probe (`pax --version`) runs at most once per executor: a verified PAX is kept for this
+    /// executor's lifetime, and a failure is not kept.
+    pub async fn resolve(&self) -> Result<ResolvedPax, PaxUnavailable> {
+        self.resolved
+            .get_or_try_init(|| self.probe())
+            .await
+            .cloned()
+    }
+
+    async fn probe(&self) -> Result<ResolvedPax, PaxUnavailable> {
+        let path = self.locate()?;
         let version = probe_identity(&path).await?;
         let parsed = Version::parse(&version).ok_or_else(|| PaxUnavailable::NotPax {
             path: path.clone(),
@@ -642,14 +672,37 @@ impl CapabilityProvider for PaxExecutor {
         ])
     }
 
+    /// Cheap and process-free: it is asked for every capability when a work starts, whether or not
+    /// the work will ever run a test. A `pax` file in place is "available"; that it is PAX, and new
+    /// enough, is verified when a `pax.test` request is validated (see `validate_inputs`) and never
+    /// later than the execution itself.
     async fn availability(&self, id: &CapabilityId) -> CapabilityAvailability {
         if id.as_str() != PAX_TEST_CAPABILITY {
             return CapabilityAvailability::Unavailable("capability is not provided".into());
         }
-        match self.resolve().await {
+        if self.resolved.initialized() {
+            return CapabilityAvailability::Available;
+        }
+        match self.locate() {
             Ok(_) => CapabilityAvailability::Available,
             Err(why) => CapabilityAvailability::Unavailable(why.to_string()),
         }
+    }
+
+    /// A `pax.test` request is the first thing that genuinely needs PAX: it is verified here, once,
+    /// before anything executes. A PAX that is not PAX, or too old, rejects the request exactly as
+    /// an unavailable capability does.
+    async fn validate_inputs(
+        &self,
+        id: &CapabilityId,
+        _inputs: &BTreeMap<String, InputValue>,
+    ) -> Result<(), CapabilityError> {
+        if id.as_str() == PAX_TEST_CAPABILITY {
+            self.resolve()
+                .await
+                .map_err(|why| CapabilityError::Unavailable(why.to_string()))?;
+        }
+        Ok(())
     }
 }
 
@@ -669,7 +722,8 @@ impl Executor for PaxExecutor {
                 "pax.test takes no inputs".into(),
             ));
         }
-        // Verified at the moment of use, and the path verified is the path run.
+        // Verified once for this executor (already done by validation when the request came
+        // through Chip), and the path verified is the path run.
         let pax = self
             .resolve()
             .await

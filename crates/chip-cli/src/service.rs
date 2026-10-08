@@ -15,12 +15,12 @@
 //! Routes (all JSON):
 //!
 //! - `GET  /health`
-//! - `POST /v1/work` `{"goal": "..."}` -> 202 `{"work_id", "status": "running"}`
+//! - `POST /v1/work` `{"goal": "...", "kind": "change"|"verify"|"inspect" (optional)}` -> 202 `{"work_id", "status": "running"}`
 //! - `GET  /v1/work/{id}`
 //! - `GET  /v1/work/{id}/events`
 //! - `POST /v1/work/{id}/cancel`
 //!
-//! The client supplies a goal and nothing else: provider, model, endpoint, executable, workspace
+//! The client supplies a goal, and optionally how completion is judged (`kind`), and nothing else: provider, model, endpoint, executable, workspace
 //! root, ids, receipts, observations and evidence are all runtime concerns, and a request that
 //! names any of them is refused, not ignored.
 //!
@@ -45,7 +45,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::local_environment::LocalEnvironmentProvider;
 use crate::software_work::{
-    DEFAULT_MAX_EXECUTIONS, DEFAULT_MAX_TURNS, RunControl, SoftwareWork, WorkRuntime,
+    DEFAULT_MAX_EXECUTIONS, DEFAULT_MAX_TURNS, GoalKind, RunControl, SoftwareWork, WorkRuntime,
     goal_is_acceptable, render_json,
 };
 use crate::verify::{EXIT_RUNTIME_FAILURE, EXIT_UNAVAILABLE, EXIT_USAGE};
@@ -109,6 +109,8 @@ struct Finished {
 
 struct Item {
     goal: String,
+    /// How completion is judged. The client's choice, like the goal; never the model's.
+    kind: GoalKind,
     /// The opaque id of the environment this work acquired; unset until it has one. Never a path.
     environment: Mutex<Option<String>>,
     submitted: Instant,
@@ -202,7 +204,7 @@ impl Service {
     }
 
     /// Registers and enqueues. Returns the id and whether admission was immediate.
-    fn submit(self: &Arc<Self>, goal: String) -> Result<(String, bool), Response> {
+    fn submit(self: &Arc<Self>, goal: String, kind: GoalKind) -> Result<(String, bool), Response> {
         let mut sched = lock(&self.sched);
         if sched.active >= self.capacity.max_concurrent
             && sched.queue.len() >= self.capacity.max_queued
@@ -217,6 +219,7 @@ impl Service {
         let id = self.allocate_id();
         let item = Arc::new(Item {
             goal,
+            kind,
             environment: Mutex::new(None),
             submitted: Instant::now(),
             control: Arc::new(RunControl::default()),
@@ -251,7 +254,12 @@ impl Service {
     fn spawn(self: &Arc<Self>, id: String, item: Arc<Item>) {
         let runtime = self.runtime.clone();
         let environments = self.environments.clone();
-        let (limits, control, goal) = (self.limits, item.control.clone(), item.goal.clone());
+        let (limits, control, goal, kind) = (
+            self.limits,
+            item.control.clone(),
+            item.goal.clone(),
+            item.kind,
+        );
         let work_id = WorkId::new(id);
         let owner = item.clone();
         let task = tokio::spawn(async move {
@@ -260,7 +268,14 @@ impl Service {
             let owned = environments.acquire(work_id.clone()).await?;
             *lock(&owner.environment) = Some(owned.id().to_string());
             let work = runtime
-                .run(work_id, &goal, limits, Some(control), owned.environment())
+                .run(
+                    work_id,
+                    &goal,
+                    kind,
+                    limits,
+                    Some(control),
+                    owned.environment(),
+                )
                 .await
                 .0;
             let description = owned.environment().description();
@@ -356,11 +371,11 @@ impl Service {
         if !json_type {
             return Response::error(415, "unsupported_media_type", "Send application/json");
         }
-        let goal = match parse_goal(&request.body) {
-            Ok(goal) => goal,
+        let (goal, kind) = match parse_goal(&request.body) {
+            Ok(parsed) => parsed,
             Err(response) => return response,
         };
-        match self.submit(goal) {
+        match self.submit(goal, kind) {
             Ok((id, admitted)) => Response::ok(
                 202,
                 json!({"work_id": id, "status": if admitted { "running" } else { "queued" }}),
@@ -423,6 +438,7 @@ impl Service {
         body["work_id"] = json!(id);
         body["environment_id"] = json!(lock(&item.environment).clone());
         body["goal"] = json!(item.goal);
+        body["kind"] = json!(item.kind.name());
         body["cancellation_requested"] = json!(item.control.cancel.load(Ordering::SeqCst));
         Response::ok(200, body)
     }
@@ -591,27 +607,42 @@ fn unknown_work() -> Response {
     Response::error(404, "work_not_found", "Unknown work id")
 }
 
-/// A goal, from a body that is exactly `{"goal": "<text>"}`. Anything else is refused: a field
+/// A goal, and optionally its kind, from a body that is `{"goal": "<text>"}` or
+/// `{"goal": "<text>", "kind": "change" | "verify" | "inspect"}`. Anything else is refused: a field
 /// naming an id, receipt, observation, executable or configuration is an attempt to supply
-/// authority, and it is rejected rather than ignored.
-fn parse_goal(body: &[u8]) -> Result<String, Response> {
+/// authority, and it is rejected rather than ignored. The kind says how Chip will judge completion;
+/// it grants nothing, and the default is `change`.
+fn parse_goal(body: &[u8]) -> Result<(String, GoalKind), Response> {
     let bad = |code: &str, message: &str| Err(Response::error(400, code, message));
     let Ok(Value::Object(fields)) = serde_json::from_slice::<Value>(body) else {
         return bad("malformed_request", "The body must be a JSON object");
     };
-    if let Some(name) = fields.keys().find(|k| k.as_str() != "goal") {
+    if let Some(name) = fields
+        .keys()
+        .find(|k| !matches!(k.as_str(), "goal" | "kind"))
+    {
         let shown: String = name.chars().filter(|c| !c.is_control()).take(40).collect();
         return bad(
             "unknown_field",
-            &format!("Only `goal` is accepted; `{shown}` is a runtime concern"),
+            &format!("Only `goal` and `kind` are accepted; `{shown}` is a runtime concern"),
         );
     }
+    let kind = match fields.get("kind") {
+        None => GoalKind::Change,
+        Some(Value::String(k)) => match GoalKind::parse(k) {
+            Some(kind) => kind,
+            None => return bad("invalid_kind", "The kind must be change, verify or inspect"),
+        },
+        Some(_) => return bad("invalid_kind", "The kind must be change, verify or inspect"),
+    };
     match fields.get("goal") {
         None => bad("missing_goal", "A goal is required"),
         Some(Value::String(goal)) if goal.trim().is_empty() => {
             bad("empty_goal", "The goal must not be empty")
         }
-        Some(Value::String(goal)) if goal_is_acceptable(goal) => Ok(goal.trim().to_string()),
+        Some(Value::String(goal)) if goal_is_acceptable(goal) => {
+            Ok((goal.trim().to_string(), kind))
+        }
         Some(Value::String(_)) => bad(
             "invalid_goal",
             "The goal must be plain text of at most 2000 bytes",
@@ -1708,6 +1739,56 @@ mod tests {
         );
     }
 
+    /// The kind says how Chip judges completion. It is the client's choice, like the goal; it
+    /// grants nothing, defaults to `change`, and an unknown one is refused before anything runs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_kind_of_a_goal_is_optional_validated_and_reported() {
+        let answer = r#"{"decision":"complete","summary":"`one` is defined in src/lib.rs."}"#;
+        let read = r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#;
+        let model = Model::new(&[("ALPHA", &[LIST, read, answer]), ("BRAVO", &[BLOCK])]).arc();
+        let (addr, service, _d) = start(model.clone(), "kind").await;
+
+        for bad in [r#""deploy""#, "null", "7", r#""""#, r#""Inspect""#] {
+            let body = format!(r#"{{"goal":"ALPHA where is one defined","kind":{bad}}}"#);
+            let r = call(addr, "POST", "/v1/work", Some(&body));
+            assert_eq!(r.status, 400, "{bad}");
+            assert_eq!(r.body["error"]["code"], "invalid_kind", "{bad}");
+        }
+        assert!(
+            lock(&service.items).is_empty(),
+            "a refused request starts nothing"
+        );
+        assert_eq!(model.total_entered(), 0);
+
+        let r = call(
+            addr,
+            "POST",
+            "/v1/work",
+            Some(r#"{"goal":"ALPHA where is one defined","kind":"inspect"}"#),
+        );
+        assert_eq!(r.status, 202, "{}", r.body);
+        let id = r.body["work_id"].as_str().unwrap().to_string();
+        let done = finished(addr, &id).await;
+        assert_eq!(done["kind"], "inspect");
+        assert_eq!(done["status"], "completed", "{done}");
+        assert_eq!(done["result"]["goal_kind"], "inspect");
+        assert_eq!(done["result"]["verified"], true);
+        assert!(
+            done["result"]["answer"]
+                .as_str()
+                .unwrap()
+                .contains("src/lib.rs")
+        );
+        assert_eq!(done["result"]["audit"]["clean"], true);
+
+        // Without a kind, the work is change work, exactly as before.
+        let id = submit(addr, "BRAVO inspect the project");
+        let done = finished(addr, &id).await;
+        assert_eq!(done["kind"], "change");
+        assert_eq!(done["result"]["goal_kind"], "change");
+        assert_eq!(done["result"]["answer"], Value::Null);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn unknown_work_is_404_on_every_route() {
         let (addr, _s, _d) = start(Model::new(&[]).arc(), "unknown").await;
@@ -1807,6 +1888,7 @@ mod tests {
             .run(
                 WorkId::new("direct"),
                 "ALPHA inspect the project",
+                GoalKind::Change,
                 WorkLimits {
                     max_turns: DEFAULT_MAX_TURNS,
                     max_executions: DEFAULT_MAX_EXECUTIONS,
@@ -1817,7 +1899,23 @@ mod tests {
             .await
             .0;
         let direct: Vec<Value> = direct.report.events.iter().map(event_json).collect();
-        assert_eq!(served, direct);
+        // Identity is Chip's and derives from the work id, so the two runs differ only in that
+        // (and in the context bytes that carry it); everything else is the same trajectory.
+        let normalise = |events: Vec<Value>| -> Vec<Value> {
+            events
+                .into_iter()
+                .map(|mut e| {
+                    if let Some(o) = e.as_object_mut() {
+                        if o.contains_key("execution_id") {
+                            o.insert("execution_id".into(), Value::from("exec"));
+                        }
+                        o.remove("context_bytes");
+                    }
+                    e
+                })
+                .collect()
+        };
+        assert_eq!(normalise(served), normalise(direct));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2152,8 +2250,15 @@ mod tests {
         assert!(!eb[0]["goal"].as_str().unwrap().contains("ALPHA"));
         let (xa, xb) = (execution_ids(&ea), execution_ids(&eb));
         assert_eq!((xa.len(), xb.len()), (1, 2));
-        assert!(xa.iter().all(|id| id.contains("alpha")), "{xa:?}");
-        assert!(xb.iter().all(|id| id.contains("bravo")), "{xb:?}");
+        // Execution ids are Chip's: derived from each work's own id, so they cannot collide.
+        assert!(
+            xa.iter().all(|id| id.starts_with(&format!("{a}-exec-"))),
+            "{xa:?}"
+        );
+        assert!(
+            xb.iter().all(|id| id.starts_with(&format!("{b}-exec-"))),
+            "{xb:?}"
+        );
         assert!(!ea.iter().any(|e| e.to_string().contains("bravo")));
         assert!(!eb.iter().any(|e| e.to_string().contains("alpha")));
         assert_eq!(
@@ -2336,7 +2441,10 @@ mod tests {
             assert_eq!(done["result"]["measurement"]["observations"], 1);
             let ev = events(addr, id);
             assert_eq!(execution_ids(&ev).len(), 1);
-            assert!(execution_ids(&ev)[0].contains(own), "{ev:?}");
+            assert!(
+                execution_ids(&ev)[0].starts_with(&format!("{id}-exec-")),
+                "{own}: {ev:?}"
+            );
             assert_eq!(
                 kinds(&ev)
                     .iter()

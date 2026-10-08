@@ -201,11 +201,13 @@ fn the_model_never_names_an_execution() {
         else {
             panic!()
         };
-        let id = r.execution_id.0;
-        assert!(
-            id.starts_with("model-") && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
-            "{provider_id:?} -> {id:?}"
-        );
+        // The boundary never derives an execution id from the provider's response id; it is only
+        // kept as correlation metadata.
+        assert!(r.execution_id.is_unassigned(), "{provider_id:?}");
+        match r.provider_response_id.as_deref() {
+            Some(kept) => assert!(!kept.chars().any(char::is_control), "{provider_id:?}"),
+            None => assert!(provider_id.trim().is_empty(), "{provider_id:?}"),
+        }
     }
     // A reply cannot smuggle an id: it is an extra field.
     assert!(read(r#"{"decision":"request_capability","capability":"compute.selftest","execution_id":"x"}"#).is_err());

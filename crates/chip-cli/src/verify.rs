@@ -18,18 +18,52 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, ExecutionObserver,
-    LocalWorkPolicy, ModelDecisionBoundary, SafetyAudit, TestLocalReasoner, WorkEvent, WorkGoal,
-    WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, audit_safety,
-    measure_utility, verify_trajectory,
+    LocalWorkPolicy, ModelDecisionBoundary, ObservationKind, SafetyAudit, WorkDecision, WorkEvent,
+    WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement,
+    WorkView, audit_safety, measure_utility, verify_trajectory,
 };
 use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxTestPassed, ResolvedPax,
     parse_execution_result,
 };
-use fx_core::ModelProvider;
+use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
-use crate::horizon::Recording;
-use crate::pax_work::ReactToObservation;
+/// Keeps what the model replied, for the report. Replies only: no prompt, no credentials.
+pub(crate) struct Recording<P> {
+    pub(crate) inner: P,
+    pub(crate) replies: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl<P: ModelProvider> ModelProvider for Recording<P> {
+    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
+        let response = self.inner.complete(request).await?;
+        self.replies.lock().unwrap().push(response.output.clone());
+        Ok(response)
+    }
+}
+
+/// The local policy of the verification work: ask the model first; afterwards propose to complete
+/// if the execution completed and to block if it did not. It never proposes a request. The loop,
+/// not this policy, decides whether a completion is allowed: it is refused unless PAX established
+/// `passed`.
+pub(crate) struct ReactToObservation;
+
+impl LocalWorkPolicy for ReactToObservation {
+    fn propose(&self, view: &WorkView<'_>) -> Option<WorkDecision> {
+        if view.turn == 0 {
+            return None;
+        }
+        Some(match view.observations.last().map(|o| o.kind) {
+            Some(ObservationKind::ExecutionCompleted) => WorkDecision::Complete {
+                summary: "pax.test completed".into(),
+            },
+            _ => WorkDecision::Block {
+                reason: "pax.test did not establish the goal".into(),
+            },
+        })
+    }
+}
 
 pub const GOAL: &str = "Verify that the project's tests pass.";
 
@@ -94,8 +128,7 @@ pub async fn run_verification(
     let agent = Agent::with_model(model, model_name)
         .with_capabilities(Arc::new(pax.clone()))
         .with_executor(Arc::new(pax))
-        .with_observer(Arc::new(ExecutionObserver))
-        .with_local_reasoner(Arc::new(TestLocalReasoner::default()));
+        .with_observer(Arc::new(ExecutionObserver));
     let spec = spec();
     let report = agent.run_work(&spec, policy, &ModelDecisionBoundary).await;
     let declared = vec![CapabilityId::new(PAX_TEST_CAPABILITY).unwrap()];

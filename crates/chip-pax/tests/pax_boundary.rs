@@ -282,6 +282,7 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
 struct Shim {
     path: PathBuf,
     log: PathBuf,
+    versions: PathBuf,
 }
 
 #[cfg(unix)]
@@ -290,21 +291,35 @@ fn shim(tag: &str, version: &str, stdout: &[u8], stderr: &[u8], exit: i32) -> Sh
     std::fs::write(dir.join("out.bin"), stdout).unwrap();
     std::fs::write(dir.join("err.bin"), stderr).unwrap();
     let log = dir.join("calls.log");
+    let versions = dir.join("versions.log");
     let path = script(
         &dir,
         "pax",
         &format!(
-            "if [ \"$1\" = \"--version\" ]; then echo 'pax {version}'; exit 0; fi\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{log}'; done; printf -- '--\\n' >> '{log}'\ncat '{out}'\ncat '{err}' >&2\nexit {exit}",
+            "if [ \"$1\" = \"--version\" ]; then echo v >> '{versions}'; echo 'pax {version}'; exit 0; fi\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{log}'; done; printf -- '--\\n' >> '{log}'\ncat '{out}'\ncat '{err}' >&2\nexit {exit}",
             log = log.display(),
+            versions = versions.display(),
             out = dir.join("out.bin").display(),
             err = dir.join("err.bin").display(),
         ),
     );
-    Shim { path, log }
+    Shim {
+        path,
+        log,
+        versions,
+    }
 }
 
 #[cfg(unix)]
 impl Shim {
+    /// How many times PAX was asked `--version`.
+    fn version_probes(&self) -> usize {
+        std::fs::read_to_string(&self.versions)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    }
+
     /// The calls made besides `--version`.
     fn calls(&self) -> Vec<String> {
         std::fs::read_to_string(&self.log)
@@ -631,14 +646,16 @@ async fn an_older_pax_is_unavailable_and_nothing_native_runs() {
             other => panic!("PAX {old} was accepted: {other:?}"),
         }
         let id = CapabilityId::new("pax.test").unwrap();
+        // Availability is process-free (a `pax` file is in place); the version is verified when a
+        // `pax.test` request is validated, which rejects it as unavailable.
         assert!(
             matches!(
-                pax.availability(&id).await,
-                CapabilityAvailability::Unavailable(_)
+                pax.validate_inputs(&id, &Default::default()).await,
+                Err(chip_core::CapabilityError::Unavailable(_))
             ),
             "{old}"
         );
-        // Through the loop: the capability is not offered, so a request for it executes nothing.
+        // Through the loop: the request is rejected at validation, so it executes nothing.
         let (report, spec) = run(pax, &[request("pax.test")], &ReactToObservation).await;
         assert_eq!(
             (
@@ -1624,4 +1641,95 @@ async fn the_audit_catches_a_completion_no_observation_supports() {
 #[test]
 fn the_predicate_describes_itself_in_terms_of_pax_status() {
     assert!(PaxTestPassed.describe().contains("passed"));
+}
+
+// ---- PAX is started only when needed, and at most once -----------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn pax_is_not_started_to_describe_or_list_it_and_is_resolved_once_when_used() {
+    let dir = passing("lazy");
+    let s = shim(
+        "lazy",
+        "0.3.0",
+        result_json("passed", "tests-passed", Some("cargo"), Some(0)).as_bytes(),
+        b"",
+        0,
+    );
+    let pax = PaxExecutor::new(&dir).with_binary(&s.path);
+    let id = CapabilityId::new("pax.test").unwrap();
+
+    // Describing, listing and checking availability start nothing.
+    pax.capabilities().await.unwrap();
+    assert!(matches!(
+        pax.availability(&id).await,
+        CapabilityAvailability::Available
+    ));
+    assert!(pax.locate().is_ok());
+    assert!(pax.resolved().is_none());
+    assert_eq!(s.version_probes(), 0, "nothing needed PAX yet");
+
+    // Validating a request is the first need: one probe. Further validation and every execution
+    // reuse it, and clones of the executor share it.
+    let clone = pax.clone();
+    pax.validate_inputs(&id, &Default::default()).await.unwrap();
+    for i in 0..3 {
+        clone
+            .validate_inputs(&id, &Default::default())
+            .await
+            .unwrap();
+        let r = ExecutionRequest::new(ExecutionId::new(format!("e{i}")), "pax.test");
+        pax.execute(r).await.unwrap();
+    }
+    assert_eq!(s.version_probes(), 1, "resolved once");
+    assert_eq!(s.calls().len(), 3, "the tests ran three times");
+    assert_eq!(pax.resolved().unwrap().version, "0.3.0");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_resolution_is_not_remembered_and_never_runs_the_tests() {
+    let dir = passing("lazy-old");
+    let s = shim("lazy-old", "0.2.0", b"", b"", 0);
+    let pax = PaxExecutor::new(&dir).with_binary(&s.path);
+    for _ in 0..2 {
+        assert!(matches!(
+            pax.resolve().await,
+            Err(PaxUnavailable::TooOld { .. })
+        ));
+    }
+    let r = ExecutionRequest::new(ExecutionId::new("e"), "pax.test");
+    assert!(matches!(
+        pax.execute(r).await,
+        Err(ExecutionError::ExecutorUnavailable(_))
+    ));
+    assert!(pax.resolved().is_none());
+    assert_eq!(
+        s.version_probes(),
+        3,
+        "a failure is checked again, not cached"
+    );
+    assert!(s.calls().is_empty(), "the tests never ran");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missing_pax_starts_no_process_and_fails_when_it_is_needed() {
+    let dir = passing("lazy-missing");
+    let empty = unique("lazy-missing-path");
+    let pax = PaxExecutor::new(&dir).with_search_path(empty.as_os_str());
+    let id = CapabilityId::new("pax.test").unwrap();
+    assert!(matches!(
+        pax.availability(&id).await,
+        CapabilityAvailability::Unavailable(_)
+    ));
+    assert!(matches!(
+        pax.validate_inputs(&id, &Default::default()).await,
+        Err(chip_core::CapabilityError::Unavailable(_))
+    ));
+    let r = ExecutionRequest::new(ExecutionId::new("e"), "pax.test");
+    assert!(matches!(
+        pax.execute(r).await,
+        Err(ExecutionError::ExecutorUnavailable(_))
+    ));
+    assert!(!dir.join("target").exists());
 }

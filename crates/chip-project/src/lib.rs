@@ -61,7 +61,8 @@ pub const PROJECT_WRITE: &str = "project.write";
 pub const PROJECT_LIST: &str = "project.list";
 pub const PROJECT_SEARCH: &str = "project.search";
 
-/// The largest file `project.read` returns, and the largest content `project.write` accepts.
+/// The most one `project.read` observation carries (a whole file, or one range of a larger one),
+/// and the largest content `project.write` accepts. A single read never returns more than this.
 pub const MAX_READ_BYTES: usize = 32 * 1024;
 pub const MAX_WRITE_BYTES: usize = 32 * 1024;
 /// The longest project-relative path accepted.
@@ -325,6 +326,40 @@ fn git_count(inputs: &BTreeMap<String, InputValue>) -> Result<Option<i64>, Capab
     }
 }
 
+/// `project.read`'s optional range: `None` when neither input is given (a whole-file read), else
+/// `(offset, length)` with the defaults filled in. Both are integers; the offset is 0 or more and the
+/// length is between 1 and [`MAX_READ_BYTES`], so no request can ask for more than one bounded read.
+fn read_range(
+    inputs: &BTreeMap<String, InputValue>,
+) -> Result<Option<(u64, usize)>, CapabilityError> {
+    let integer = |name: &str| -> Result<Option<i64>, CapabilityError> {
+        match inputs.get(name) {
+            None => Ok(None),
+            Some(InputValue::Integer(n)) => Ok(Some(*n)),
+            Some(_) => Err(CapabilityError::InvalidInput(format!(
+                "input '{name}' must be an integer"
+            ))),
+        }
+    };
+    let (offset, length) = (integer("offset")?, integer("length")?);
+    if offset.is_none() && length.is_none() {
+        return Ok(None);
+    }
+    let offset = offset.unwrap_or(0);
+    if offset < 0 {
+        return Err(CapabilityError::InvalidInput(format!(
+            "offset is {offset}; it must be 0 or more"
+        )));
+    }
+    let length = length.unwrap_or(MAX_READ_BYTES as i64);
+    if !(1..=MAX_READ_BYTES as i64).contains(&length) {
+        return Err(CapabilityError::InvalidInput(format!(
+            "length is {length}; it must be between 1 and {MAX_READ_BYTES}"
+        )));
+    }
+    Ok(Some((offset as u64, length as usize)))
+}
+
 /// A literal search query: short, one line, no control characters.
 fn check_query(query: &str) -> Result<(), CapabilityError> {
     let bad = |why: String| Err(CapabilityError::InvalidInput(why));
@@ -398,8 +433,12 @@ impl CapabilityProvider for ProjectExecutor {
             describe(
                 PROJECT_READ,
                 "Read a project file",
-                "Read a UTF-8 text file of the project by project-relative path, for example src/lib.rs.",
-                vec![input("path", "project-relative path of the file")],
+                "Read a UTF-8 project file by relative path, e.g. src/lib.rs. Over 32768 bytes, read in ranges: offset and length in bytes, length at most 32768.",
+                vec![
+                    input("path", "project-relative path of the file"),
+                    optional_input("offset", "byte offset to start at, 0 or more; default 0"),
+                    optional_input("length", "bytes to read, 1 to 32768; default 32768"),
+                ],
             ),
             describe(
                 PROJECT_WRITE,
@@ -459,7 +498,7 @@ impl CapabilityProvider for ProjectExecutor {
         inputs: &BTreeMap<String, InputValue>,
     ) -> Result<(), CapabilityError> {
         let expected: &[&str] = match id.as_str() {
-            PROJECT_READ => &["path"],
+            PROJECT_READ => &["path", "offset", "length"],
             PROJECT_WRITE => &["path", "content"],
             PROJECT_LIST => &["path"],
             PROJECT_SEARCH => &["query", "path"],
@@ -490,6 +529,9 @@ impl CapabilityProvider for ProjectExecutor {
         let path = text_input(inputs, "path")?;
         self.locate(path)
             .map_err(|e| CapabilityError::InvalidInput(e.to_string()))?;
+        if id.as_str() == PROJECT_READ {
+            read_range(inputs)?;
+        }
         if id.as_str() == PROJECT_WRITE {
             let content = text_input(inputs, "content")?;
             if content.len() > MAX_WRITE_BYTES {
@@ -515,6 +557,42 @@ fn failure(capability: &str, path: &str, error: &str) -> (bool, String) {
     )
 }
 
+/// A failure line with structured extra fields (never a host path, never file content).
+fn failure_with(
+    capability: &str,
+    path: &str,
+    error: &str,
+    extra: serde_json::Value,
+) -> (bool, String) {
+    let mut fields = serde_json::json!({"capability": capability, "path": path, "error": error});
+    if let (Some(base), Some(extra)) = (fields.as_object_mut(), extra.as_object()) {
+        base.extend(extra.clone());
+    }
+    (false, line(fields))
+}
+
+/// If `bytes` are valid UTF-8 once an incomplete character at each edge is set aside, how many bytes
+/// that is at the start and at the end: `Some((leading, trailing))`. `None` when they are not valid
+/// even then (the file is not UTF-8). A character is at most four bytes, so an edge is at most 3.
+fn split_edges(bytes: &[u8]) -> Option<(usize, usize)> {
+    let leading = bytes
+        .iter()
+        .take(3)
+        .take_while(|b| (**b & 0xC0) == 0x80)
+        .count();
+    let body = &bytes[leading..];
+    for trailing in 0..=3usize.min(body.len()) {
+        if std::str::from_utf8(&body[..body.len() - trailing]).is_ok() {
+            // An incomplete tail must really be an incomplete character, not stray bytes.
+            let tail = &body[body.len() - trailing..];
+            let incomplete =
+                trailing == 0 || std::str::from_utf8(tail).is_err_and(|e| e.error_len().is_none());
+            return incomplete.then_some((leading, trailing));
+        }
+    }
+    None
+}
+
 fn io_code(e: &std::io::Error) -> &'static str {
     match e.kind() {
         std::io::ErrorKind::NotFound => "not_found",
@@ -524,8 +602,12 @@ fn io_code(e: &std::io::Error) -> &'static str {
 }
 
 impl ProjectExecutor {
-    /// Returns `(succeeded, observation text)`.
-    fn read(&self, path: &str) -> Result<(bool, String), PathError> {
+    /// Returns `(succeeded, observation text)`. `range` is `None` for a whole-file read (the file
+    /// must fit one bounded observation) or `(offset, length)` for one bounded range of it. Either
+    /// way the path has been through [`ProjectExecutor::locate`] and the file is read from that
+    /// authorized location only; at most [`MAX_READ_BYTES`] bytes are ever read.
+    fn read(&self, path: &str, range: Option<(u64, usize)>) -> Result<(bool, String), PathError> {
+        use std::io::Seek;
         let located = self.locate(path)?;
         match located.kind {
             Kind::Missing => return Ok(failure(PROJECT_READ, path, "not_found")),
@@ -536,23 +618,70 @@ impl ProjectExecutor {
             Ok(f) => f,
             Err(e) => return Ok(failure(PROJECT_READ, path, io_code(&e))),
         };
-        let mut bytes = Vec::new();
-        if let Err(e) = (&mut file)
-            .take(MAX_READ_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-        {
+        let size = match file.metadata() {
+            Ok(m) => m.len(),
+            Err(e) => return Ok(failure(PROJECT_READ, path, io_code(&e))),
+        };
+        let (offset, limit) = range.unwrap_or((0, MAX_READ_BYTES));
+        if offset > size {
+            return Ok(failure_with(
+                PROJECT_READ,
+                path,
+                "offset_beyond_end",
+                serde_json::json!({"offset": offset, "file_bytes": size}),
+            ));
+        }
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(offset)) {
             return Ok(failure(PROJECT_READ, path, io_code(&e)));
         }
-        if bytes.len() > MAX_READ_BYTES {
+        // One byte more than a whole-file read may return, to tell "exactly the limit" from "over".
+        let take = if range.is_some() { limit } else { limit + 1 };
+        let mut bytes = Vec::new();
+        if let Err(e) = (&mut file).take(take as u64).read_to_end(&mut bytes) {
+            return Ok(failure(PROJECT_READ, path, io_code(&e)));
+        }
+        if range.is_none() && bytes.len() > MAX_READ_BYTES {
             return Ok(failure(PROJECT_READ, path, "too_large"));
         }
-        let Ok(content) = String::from_utf8(bytes) else {
-            return Ok(failure(PROJECT_READ, path, "not_utf8"));
+        let content = match String::from_utf8(bytes) {
+            Ok(content) => content,
+            Err(e) if range.is_some() => {
+                // Say whether it is the range's edges that split a character, so the caller can move
+                // them; the bytes themselves are never trimmed, replaced or returned.
+                let returned = e.as_bytes().len() as u64;
+                return Ok(match split_edges(e.as_bytes()) {
+                    // A partial character at the file's own start or end is the file's fault, not
+                    // the range's.
+                    Some((leading, trailing))
+                        if (leading == 0 || offset > 0)
+                            && (trailing == 0 || offset + returned < size) =>
+                    {
+                        failure_with(
+                            PROJECT_READ,
+                            path,
+                            "range_splits_character",
+                            serde_json::json!({
+                                "offset": offset,
+                                "file_bytes": size,
+                                "leading_partial_bytes": leading,
+                                "trailing_partial_bytes": trailing,
+                            }),
+                        )
+                    }
+                    _ => failure(PROJECT_READ, path, "not_utf8"),
+                });
+            }
+            Err(_) => return Ok(failure(PROJECT_READ, path, "not_utf8")),
         };
         let head = line(serde_json::json!({
             "capability": PROJECT_READ,
             "path": path,
+            "offset": offset,
             "bytes": content.len(),
+            "file_bytes": size,
+            // The observation is the whole file only if it starts at the start and holds all of it.
+            "complete": offset == 0 && content.len() as u64 == size,
+            // Of the bytes returned, not of the file: a range's hash is the hash of the range.
             "sha256": hex(&Sha256::digest(content.as_bytes())),
         }));
         Ok((true, format!("{head}\n--- content ---\n{content}")))
@@ -921,6 +1050,11 @@ impl Executor for ProjectExecutor {
         let path = text_input(&request.inputs, "path")
             .map_err(|e| invalid(e.to_string()))?
             .to_string();
+        let range = if capability == PROJECT_READ {
+            read_range(&request.inputs).map_err(|e| invalid(e.to_string()))?
+        } else {
+            None
+        };
         let content = (capability == PROJECT_WRITE)
             .then(|| text_input(&request.inputs, "content").map(str::to_string))
             .transpose()
@@ -928,7 +1062,7 @@ impl Executor for ProjectExecutor {
         let this = self.clone();
         let done = tokio::task::spawn_blocking(move || match content {
             Some(content) => this.write(&path, &content),
-            None => this.read(&path),
+            None => this.read(&path, range),
         })
         .await
         .map_err(|_| ExecutionError::ExecutionFailed("the file operation did not complete".into()))?

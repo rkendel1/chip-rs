@@ -27,6 +27,8 @@ use chip_core::{
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 use sha2::{Digest, Sha256};
 
+use crate::verify::Recording;
+
 /// What a capability does for the goal. `k` is the 1-based step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -276,21 +278,6 @@ impl ModelProvider for ScriptedModel {
             reply,
             Usage::new(self.usage.0, self.usage.1),
         ))
-    }
-}
-
-/// Keeps what the real model replied, for the report. Replies only: no prompt, no credentials.
-pub(crate) struct Recording<P> {
-    pub(crate) inner: P,
-    pub(crate) replies: Arc<Mutex<Vec<String>>>,
-}
-
-#[async_trait::async_trait]
-impl<P: ModelProvider> ModelProvider for Recording<P> {
-    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
-        let response = self.inner.complete(request).await?;
-        self.replies.lock().unwrap().push(response.output.clone());
-        Ok(response)
     }
 }
 

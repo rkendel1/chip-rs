@@ -37,8 +37,8 @@ fn every_fixture_is_read_as_its_name_says() {
             match result {
                 Ok(WorkDecision::RequestCapability(r)) => {
                     assert_eq!(r.capability_id.as_str(), "compute.selftest", "{name}");
-                    // Chip, not the fixture, names the execution.
-                    assert!(r.execution_id.0.as_str().starts_with("model-"), "{name}");
+                    // The boundary names no execution; the work loop assigns it.
+                    assert!(r.execution_id.is_unassigned(), "{name}");
                 }
                 other => panic!("{name}: expected a capability request, got {other:?}"),
             }

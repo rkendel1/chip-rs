@@ -474,6 +474,9 @@ pub struct ObservationOrigin {
     /// The capability's own contract: may an earlier observation of it stand in for a later one?
     /// Only such an observation may ever be left out of a request.
     pub reusable: bool,
+    /// The provider's id for the model response that asked for this request, when a model did and
+    /// the provider gave one. Correlation metadata: not the execution's identity, not a key.
+    pub provider_response_id: Option<String>,
 }
 
 /// Two observations say the same thing about reality: same kind, status and output. Their
@@ -1288,6 +1291,8 @@ pub struct WorkSpec {
     /// observation and nothing else, and says whether it establishes the outcome. Like
     /// `required_outputs`, while any is unmet the work cannot complete.
     pub required_observations: Vec<Arc<dyn ObservationPredicate>>,
+    /// Checks the model's proposed answer against the observations when it asks to complete.
+    pub required_answers: Vec<Arc<dyn AnswerPredicate>>,
     /// Invariants the safety audit checks every recorded observation against.
     pub observation_invariants: Vec<Arc<dyn ObservationInvariant>>,
     /// Capabilities whose earlier observations must never answer a later request. The audit holds
@@ -1318,6 +1323,18 @@ pub trait ObservationPredicate: fmt::Debug + Send + Sync {
     }
 }
 
+/// Decides whether an *answer* the model proposes when it asks to complete is acceptable, given the
+/// authoritative observations. This is how a read-only goal is completed: the model proposes the
+/// answer, and the runtime accepts it only if reality supports it. The answer is never evidence and
+/// is never believed; it is only checked against what was observed. A predicate that accepts
+/// everything would let the model manufacture completion, so supplying one is the owner's
+/// responsibility, and the safety audit asks it again of the recorded outcome.
+pub trait AnswerPredicate: fmt::Debug + Send + Sync {
+    /// What the answer must satisfy, in words, for diagnostics.
+    fn describe(&self) -> String;
+    fn accepts(&self, answer: &str, observations: &[Observation]) -> bool;
+}
+
 /// An invariant over authoritative observations that must never be violated, whatever the model
 /// asked for. The safety audit evaluates each recorded observation against it independently of
 /// the capability that produced it (a filesystem capability's observation must not name a path
@@ -1345,6 +1362,7 @@ impl WorkSpec {
             state: None,
             required_outputs: Vec::new(),
             required_observations: Vec::new(),
+            required_answers: Vec::new(),
             observation_invariants: Vec::new(),
             evidence_reuse_prohibited: Vec::new(),
             context_budget_bytes: None,
@@ -1379,6 +1397,13 @@ impl WorkSpec {
     /// An outcome decided by a predicate over an authoritative observation.
     pub fn with_required_observation(mut self, predicate: Arc<dyn ObservationPredicate>) -> Self {
         self.required_observations.push(predicate);
+        self
+    }
+
+    /// A condition the proposed answer must satisfy against the observations before the work may
+    /// complete.
+    pub fn with_required_answer(mut self, predicate: Arc<dyn AnswerPredicate>) -> Self {
+        self.required_answers.push(predicate);
         self
     }
 
@@ -1424,6 +1449,8 @@ struct Run<'a> {
     latency: WorkLatency,
     /// Which of the spec's required outputs some authoritative observation has produced.
     satisfied: Vec<bool>,
+    /// How many execution identities this work has assigned.
+    assigned: usize,
 }
 
 impl<'a> Run<'a> {
@@ -1475,6 +1502,7 @@ impl<'a> Run<'a> {
             capability: request.capability_id.clone(),
             invocation: format!("{}|{:?}", request.capability_id, request.inputs),
             reusable: self.reusable(&request.capability_id),
+            provider_response_id: request.provider_response_id.clone(),
         });
     }
 
@@ -1482,6 +1510,15 @@ impl<'a> Run<'a> {
     /// observation has produced.
     fn completion_refused(&self) -> bool {
         self.satisfied.iter().any(|met| !met)
+    }
+
+    /// Whether the answer the model proposed with its completion is unacceptable against the
+    /// observations recorded so far.
+    fn answer_refused(&self, answer: &str) -> bool {
+        self.spec
+            .required_answers
+            .iter()
+            .any(|p| !p.accepts(answer, &self.observations))
     }
 
     /// What Chip can say about progress without recommending anything: how many required outputs
@@ -1627,17 +1664,31 @@ impl<'a> Run<'a> {
         let (_, response) = called.map_err(|e| WorkOutcome::Failed {
             reason: format!("model escalation failed: {e}"),
         })?;
-        let decision = boundary
+        let mut decision = boundary
             .interpret(&response, &self.capabilities)
             .map_err(|e| WorkOutcome::Failed {
                 reason: format!("the model's response is not a valid decision: {e}"),
             })?;
+        // Chip, not the provider, names the execution: assigned here, once, where the request is
+        // authorized, and carried unchanged by the execution, its events, its observation and its
+        // evidence. Whatever identity the boundary put on a model's request is replaced.
+        if let WorkDecision::RequestCapability(request) = &mut decision {
+            request.execution_id = self.assign_execution_id();
+        }
         self.decisions.push(DecisionRecord {
             turn,
             source: DecisionSource::Model,
             decision: decision.clone(),
         });
         Ok(decision)
+    }
+
+    /// The next execution identity of this work: `<work id>-exec-<n>`, counting from 1. It is
+    /// derived from nothing a provider or model supplied, so it cannot repeat within the work and
+    /// is distinct across works whose ids are. It is not a cryptographic receipt.
+    fn assign_execution_id(&mut self) -> ExecutionId {
+        self.assigned += 1;
+        ExecutionId::new(format!("{}-exec-{}", self.spec.id, self.assigned))
     }
 
     /// Whether an earlier observation of this capability may answer a request for it again.
@@ -1844,6 +1895,7 @@ impl Agent {
             },
             latency: WorkLatency::default(),
             satisfied: vec![false; spec.required_outputs.len() + spec.required_observations.len()],
+            assigned: 0,
         };
 
         let outcome = self.drive(&mut run, policy, boundary).await;
@@ -1993,9 +2045,18 @@ impl Agent {
                             )];
                             (None, Some((format!("local reasoner: {reason}"), evidence)))
                         }
+                        // No reasoner is installed (the product configuration): a locally proposed
+                        // request without valid evidence is not run on Chip's own say-so. The
+                        // model is asked, exactly as for an `Escalate` verdict.
                         Err(AgentError::Reasoning(ReasoningError::Unavailable(_))) => (
                             None,
-                            Some(("no local reasoner is available".to_string(), Vec::new())),
+                            Some((
+                                "no valid evidence for the locally proposed request".to_string(),
+                                vec![format!(
+                                    "{}: no valid evidence (absent or stale)",
+                                    request.capability_id
+                                )],
+                            )),
                         ),
                         Err(e) => {
                             return WorkOutcome::Failed {
@@ -2006,7 +2067,9 @@ impl Agent {
                 }
                 // A local completion the evidence does not support is refused before it is
                 // recorded: the turn is then an ordinary escalation, with the evidence as it is.
-                Some(WorkDecision::Complete { .. }) if run.completion_refused() => (
+                Some(WorkDecision::Complete { summary })
+                    if run.completion_refused() || run.answer_refused(&summary) =>
+                (
                     None,
                     Some((
                         "the local completion was refused: no authoritative observation satisfies the goal"
@@ -2049,6 +2112,14 @@ impl Agent {
                         reason:
                             "completion refused: no authoritative observation satisfies the goal"
                                 .to_string(),
+                    };
+                }
+                WorkDecision::Complete { summary } if run.answer_refused(&summary) => {
+                    // The goal's observations hold, but the proposed answer is not supported by
+                    // them. Same rule: the claim is refused and the work does not go on from it.
+                    return WorkOutcome::Blocked {
+                        reason: "completion refused: the proposed answer is not supported by the observations"
+                            .to_string(),
                     };
                 }
                 WorkDecision::Complete { summary } => return WorkOutcome::Completed { summary },
@@ -2295,6 +2366,17 @@ pub fn audit_safety(
                     audit
                         .details
                         .push("completed without a completion decision".to_string());
+                }
+                if let WorkOutcome::Completed { summary } = &report.outcome {
+                    for predicate in &spec.required_answers {
+                        if !predicate.accepts(summary, &report.observations) {
+                            audit.unauthorized_completions += 1;
+                            audit.details.push(format!(
+                                "completed with an answer that does not satisfy: {}",
+                                predicate.describe()
+                            ));
+                        }
+                    }
                 }
                 if !spec.required_outputs.is_empty() || !spec.required_observations.is_empty() {
                     if last_remaining != Some(0) {

@@ -271,18 +271,15 @@ fn reject_extras(fields: &[(String, Json)]) -> Result<(), DecisionError> {
     }
 }
 
-/// Keeps only characters that cannot mean anything to an executor.
-fn identifier(provider_id: &str) -> String {
+/// The provider's id for a response, kept as correlation metadata: bounded and free of control
+/// characters, `None` when the provider gave none. It is never an execution identity.
+fn provider_response_id(provider_id: &str) -> Option<String> {
     let cleaned: String = provider_id
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .take(32)
+        .filter(|c| !c.is_control())
+        .take(128)
         .collect();
-    if cleaned.is_empty() {
-        "request".to_string()
-    } else {
-        cleaned
-    }
+    (!cleaned.trim().is_empty()).then_some(cleaned)
 }
 
 /// The exact way to request each available capability, written from its declared inputs and from
@@ -425,8 +422,10 @@ impl WorkDecisionBoundary for ModelDecisionBoundary {
                     Some(_) => {}
                 }
                 Ok(WorkDecision::RequestCapability(CapabilityRequest {
-                    // Chip names the execution; the model's text never becomes an identifier.
-                    execution_id: ExecutionId::new(format!("model-{}", identifier(&response.id))),
+                    // A model's request names no execution. Chip assigns the identity when the work
+                    // loop authorizes it; the provider's response id is metadata and nothing more.
+                    execution_id: ExecutionId::unassigned(),
+                    provider_response_id: provider_response_id(&response.id),
                     capability_id: id,
                     inputs,
                     inputs_present,

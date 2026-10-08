@@ -1170,3 +1170,91 @@ async fn capabilities_are_described_once_not_per_iteration() {
     assert_eq!(discoveries, 1);
     assert!(report.summary.turns >= 4);
 }
+
+/// The product installs no local reasoner. A locally proposed request with no valid evidence is then
+/// not run on Chip's own say-so: the model is asked once, and nothing has executed by then.
+#[tokio::test]
+async fn with_no_reasoner_a_request_without_valid_evidence_escalates_instead_of_running() {
+    let (fx, exec) = (Fx::new(), Exec::ok());
+    let policy = ScriptedPolicy::new(vec![Some(run("op.perform", "e1"))]);
+    let model = ModelScript::new(vec![WorkDecision::Block {
+        reason: "stop".into(),
+    }]);
+    let agent = Agent::new(fx.clone())
+        .with_capabilities(Arc::new(Caps))
+        .with_executor(exec.clone())
+        .with_observer(Arc::new(ExecutionObserver));
+    let report = agent.run_work(&spec("g"), &policy, &model).await;
+
+    assert_eq!(exec.calls(), 0, "nothing ran on the local proposal");
+    assert_eq!(fx.calls(), 1, "the model was asked, once");
+    assert_eq!(
+        report.outcome,
+        WorkOutcome::Blocked {
+            reason: "stop".into()
+        }
+    );
+    let reason = report
+        .events
+        .iter()
+        .find_map(|e| match e {
+            WorkEvent::ModelEscalation { reason, .. } => Some(reason.clone()),
+            _ => None,
+        })
+        .expect("an escalation");
+    assert!(reason.contains("no valid evidence"), "{reason}");
+}
+
+/// An answer predicate that accepts, or refuses, whatever the model proposes.
+#[derive(Debug)]
+struct AnswerIs(bool);
+
+impl chip_core::AnswerPredicate for AnswerIs {
+    fn describe(&self) -> String {
+        format!("an answer the test says is acceptable: {}", self.0)
+    }
+    fn accepts(&self, _answer: &str, _observations: &[chip_core::Observation]) -> bool {
+        self.0
+    }
+}
+
+/// A completion proposed by the model is checked against the observations by the runtime: refused
+/// when the answer predicate refuses it, accepted when it accepts, and the safety audit asks the
+/// predicate again of the recorded outcome, so an accepting loop cannot hide behind itself.
+#[tokio::test]
+async fn a_proposed_answer_is_evaluated_by_the_runtime_and_audited() {
+    let model = || ModelScript::new(vec![complete()]);
+    let policy = ScriptedPolicy::new(vec![None]);
+    let run_with = |accepts: bool| {
+        let spec = spec("g").with_required_answer(Arc::new(AnswerIs(accepts)));
+        let (fx, exec) = (Fx::new(), Exec::ok());
+        let agent = Agent::new(fx.clone())
+            .with_capabilities(Arc::new(Caps))
+            .with_executor(exec.clone())
+            .with_observer(Arc::new(ExecutionObserver));
+        (agent, spec, exec)
+    };
+
+    let (agent, refusing, exec) = run_with(false);
+    let report = agent.run_work(&refusing, &policy, &model()).await;
+    assert!(
+        matches!(&report.outcome, WorkOutcome::Blocked { reason } if reason.contains("not supported by the observations")),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(exec.calls(), 0, "refusing a claim executes nothing");
+
+    let (agent, accepting, _) = run_with(true);
+    let policy = ScriptedPolicy::new(vec![None]);
+    let report = agent.run_work(&accepting, &policy, &model()).await;
+    assert!(
+        matches!(report.outcome, WorkOutcome::Completed { .. }),
+        "{:?}",
+        report.outcome
+    );
+    let declared = [CapabilityId::new("op.perform").unwrap()];
+    chip_core::audit_safety(&report, &accepting, &declared).assert_clean();
+    // The same recorded run, audited against a predicate that would have refused it.
+    let audit = chip_core::audit_safety(&report, &refusing, &declared);
+    assert_eq!(audit.unauthorized_completions, 1, "{audit:?}");
+}

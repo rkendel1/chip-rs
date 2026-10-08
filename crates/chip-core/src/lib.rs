@@ -36,7 +36,7 @@ pub use reasoning::{
     TestLocalReasoner,
 };
 pub use work::{
-    ContextCall, ContextMetrics, ContextReport, DecisionRecord, DecisionSource,
+    AnswerPredicate, ContextCall, ContextMetrics, ContextReport, DecisionRecord, DecisionSource,
     DeduplicatedEscalationContext, EscalationContext, EscalationContextPolicy,
     FullEscalationContext, LimitKind, LocalWorkPolicy, ModelUsage, NoLocalPolicy, ObservationClass,
     ObservationInvariant, ObservationOrigin, ObservationPredicate, ObservationRepetition,
@@ -272,6 +272,18 @@ pub struct ExecutionId(pub String);
 impl ExecutionId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
+    }
+
+    /// The identity of a request that no execution has been authorized for yet. A decision
+    /// boundary returns this for a model's request: it names no execution, and the work loop
+    /// assigns the real, Chip-owned identity when it authorizes the request. It is empty, so an
+    /// executor or observer that ever received it would refuse it.
+    pub fn unassigned() -> Self {
+        Self(String::new())
+    }
+
+    pub fn is_unassigned(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
