@@ -53,6 +53,7 @@ impl Executor for Exec {
             status: *self.status.lock().unwrap(),
             output: self.output.to_string(),
             receipt_id: Some("sha256:test".into()),
+            evidence: None,
         })
     }
 }
@@ -315,6 +316,7 @@ async fn a_request_alone_is_never_evidence() {
         status: ExecutionStatus::Success,
         output: None,
         receipt_id: None,
+        evidence: None,
     };
     assert!(matches!(
         a.record_evidence(&req, &other),

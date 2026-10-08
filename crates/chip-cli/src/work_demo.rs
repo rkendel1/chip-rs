@@ -73,6 +73,7 @@ impl Executor for Fixed {
                 _ => "self test failed".into(),
             },
             receipt_id: Some("sha256:demo-receipt".into()),
+            evidence: None,
         })
     }
 }

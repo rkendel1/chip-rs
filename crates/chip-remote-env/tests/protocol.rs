@@ -55,6 +55,7 @@ fn responses_round_trip() {
             status: ExecutionStatus::Failure,
             output: "line\n\"quoted\"".into(),
             receipt_id: Some("sha256:abc".into()),
+            evidence: None,
         })),
         Response::Executed(Ok(ExecutionResult::success(id, "ok"))),
         Response::Executed(Err(ExecutionError::ExecutionFailed("boom".into()))),
@@ -86,5 +87,48 @@ fn malformed_or_unversioned_messages_are_refused_not_repaired() {
         r#"{"v":1,"op":"execute","result":{"status":"win"}}"#,
     ] {
         assert!(Response::decode(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn execution_evidence_is_additive_on_the_wire() {
+    use chip_core::ExecutionEvidence;
+    let id = ExecutionId::new("model-1");
+    // Without evidence the message has no `execution_evidence` key at all, as before.
+    let plain = Response::Executed(Ok(ExecutionResult::success(id.clone(), "ok"))).encode();
+    assert!(!plain.contains("execution_evidence"), "{plain}");
+    // With evidence it round-trips, carrying only the identifiers present.
+    let evidence = ExecutionEvidence::from_runtime(
+        "rt",
+        [("executionId", "exec_789"), ("receiptId", "sha256:abc")],
+    )
+    .unwrap();
+    let with = Response::Executed(Ok(
+        ExecutionResult::success(id, "ok").with_execution_evidence(evidence)
+    ));
+    let encoded = with.encode();
+    assert!(encoded.contains(r#""executionId":"exec_789""#), "{encoded}");
+    assert!(
+        !encoded.contains("jobId") && !encoded.contains("environmentId"),
+        "{encoded}"
+    );
+    assert_eq!(Response::decode(&encoded).unwrap(), with);
+}
+
+#[test]
+fn a_peer_that_sends_no_or_empty_evidence_decodes_to_none() {
+    let base = r#"{"v":1,"op":"execute","result":{"execution_id":"m","status":"success","output":"ok","receipt_id":null"#;
+    for tail in [
+        "}}",
+        r#","execution_evidence":{"rt":{}}}}"#,
+        r#","execution_evidence":{"rt":{"jobId":""}}}}"#,
+        r#","execution_evidence":{"rt":{"bad key":"x"}}}}"#,
+        r#","execution_evidence":"nope"}}"#,
+    ] {
+        let Response::Executed(Ok(result)) = Response::decode(&format!("{base}{tail}")).unwrap()
+        else {
+            panic!("not an executed result");
+        };
+        assert!(result.evidence.is_none(), "{tail}");
     }
 }

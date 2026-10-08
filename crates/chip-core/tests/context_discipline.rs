@@ -364,6 +364,7 @@ fn only_a_later_identical_observation_of_the_same_invocation_justifies_an_omissi
         status: ExecutionStatus::Success,
         output: Some(out.into()),
         receipt_id: Some(format!("sha256:{n}")),
+        evidence: None,
     };
     let origin = |key: &str, reusable: bool| ObservationOrigin {
         capability: id("echo.reusable"),

@@ -96,6 +96,7 @@ impl Executor for Exec {
             status: self.status,
             output: "out".into(),
             receipt_id: Some(format!("sha256:r{n}")),
+            evidence: None,
         })
     }
 }

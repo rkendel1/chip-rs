@@ -1513,6 +1513,7 @@ fn observation(kind: ObservationKind, status: ExecutionStatus, output: &str) -> 
         status,
         output: Some(output.to_string()),
         receipt_id: None,
+        evidence: None,
     }
 }
 

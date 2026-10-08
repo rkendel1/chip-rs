@@ -11,6 +11,7 @@ fn result(status: ExecutionStatus, output: &str, receipt: Option<&str>) -> Execu
         status,
         output: output.to_string(),
         receipt_id: receipt.map(str::to_string),
+        evidence: None,
     }
 }
 

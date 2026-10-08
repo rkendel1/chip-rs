@@ -2922,6 +2922,7 @@ mod tests {
             status: chip_core::ExecutionStatus::Success,
             output: Some(output.to_string()),
             receipt_id: None,
+            evidence: None,
         }
     }
 

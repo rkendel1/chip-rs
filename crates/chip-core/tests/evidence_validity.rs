@@ -36,6 +36,7 @@ impl Executor for Exec {
             status: self.status,
             output: format!("run {n}"),
             receipt_id: Some(format!("sha256:run-{n}")),
+            evidence: None,
         })
     }
 }
@@ -313,6 +314,7 @@ async fn recording_under_a_state_still_requires_the_requests_own_execution() {
         status: ExecutionStatus::Success,
         output: None,
         receipt_id: None,
+        evidence: None,
     };
     assert!(
         r.agent

@@ -200,6 +200,7 @@ fn cancelled_result_and_cancelled_error_remain_distinct() {
         status: ExecutionStatus::Cancelled,
         output: String::new(),
         receipt_id: None,
+        evidence: None,
     };
     assert_eq!(
         ExecutionObserver.observe(&result).unwrap().kind,

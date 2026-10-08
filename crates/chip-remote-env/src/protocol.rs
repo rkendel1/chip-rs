@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use chip_core::{
     CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInput,
-    ExecutionError, ExecutionId, ExecutionResult, ExecutionStatus, InputValue,
+    ExecutionError, ExecutionEvidence, ExecutionId, ExecutionResult, ExecutionStatus, InputValue,
 };
 use serde_json::{Value, json};
 
@@ -248,15 +248,25 @@ impl Response {
                 }
             },
             Response::Executed(r) => match r {
-                Ok(result) => json!({"op": "execute", "result": {
-                    "execution_id": result.id.to_string(),
-                    "status": match result.status {
-                        ExecutionStatus::Success => "success",
-                        ExecutionStatus::Failure => "failure",
-                        ExecutionStatus::Cancelled => "cancelled",
-                    },
-                    "output": result.output, "receipt_id": result.receipt_id,
-                }}),
+                Ok(result) => {
+                    let mut body = json!({"op": "execute", "result": {
+                        "execution_id": result.id.to_string(),
+                        "status": match result.status {
+                            ExecutionStatus::Success => "success",
+                            ExecutionStatus::Failure => "failure",
+                            ExecutionStatus::Cancelled => "cancelled",
+                        },
+                        "output": result.output, "receipt_id": result.receipt_id,
+                    }});
+                    // Additive: omitted entirely unless the executor supplied evidence, so a peer that
+                    // knows nothing about it reads the same message as before.
+                    if let Some(evidence) =
+                        result.evidence.as_ref().and_then(execution_evidence_json)
+                    {
+                        body["result"]["execution_evidence"] = evidence;
+                    }
+                    body
+                }
                 Err(e) => json!({"op": "execute", "error": execution_error_json(e)}),
             },
         };
@@ -318,9 +328,37 @@ impl Response {
                     status,
                     output: text(r, "output")?.to_string(),
                     receipt_id: optional_text(r, "receipt_id"),
+                    evidence: execution_evidence_from(r),
                 })))
             }
             other => Err(format!("unknown operation `{other}`")),
         }
     }
+}
+
+/// `{"<runtime>": {"<identifier>": "<value>"}}` with only what the executor reported, or `None`.
+fn execution_evidence_json(evidence: &ExecutionEvidence) -> Option<Value> {
+    let runtimes: serde_json::Map<String, Value> = evidence
+        .runtimes()
+        .map(|(runtime, ids)| (runtime.to_string(), json!(ids)))
+        .collect();
+    (!runtimes.is_empty()).then(|| Value::Object(runtimes))
+}
+
+/// Reads optional evidence. Only string identifiers under valid names are kept, blanks are
+/// dropped, and an empty result is no evidence.
+fn execution_evidence_from(result: &Value) -> Option<ExecutionEvidence> {
+    result
+        .get("execution_evidence")?
+        .as_object()?
+        .iter()
+        .filter_map(|(runtime, ids)| {
+            let ids = ids.as_object()?;
+            ExecutionEvidence::from_runtime(
+                runtime,
+                ids.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))),
+            )
+        })
+        .reduce(ExecutionEvidence::merged)
 }

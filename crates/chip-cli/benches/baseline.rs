@@ -355,6 +355,7 @@ impl Executor for Noop {
             status: ExecutionStatus::Success,
             output: "ok".into(),
             receipt_id: Some(format!("sha256:{n}")),
+            evidence: None,
         })
     }
 }
@@ -619,6 +620,7 @@ async fn parts(report: &mut Report, opts: &Opts) {
         status: ExecutionStatus::Success,
         output: "x".repeat(2000),
         receipt_id: Some("sha256:abc".into()),
+        evidence: None,
     };
     let mut d = Vec::with_capacity(n);
     for _ in 0..n {
@@ -701,6 +703,7 @@ async fn parts(report: &mut Report, opts: &Opts) {
                 status: ExecutionStatus::Success,
                 output: Some("x".repeat(1024)),
                 receipt_id: None,
+                evidence: None,
             })
             .collect();
         let origins: Vec<ObservationOrigin> = (0..count)
@@ -760,6 +763,7 @@ async fn parts(report: &mut Report, opts: &Opts) {
                 status: ExecutionStatus::Success,
                 output: Some("{\"ok\":true}\nbody".into()),
                 receipt_id: None,
+                evidence: None,
             })
             .collect();
         let predicate = chip_cli::software_work::VerifiedChange;

@@ -21,10 +21,14 @@ use std::time::Duration;
 
 use chip_core::{
     CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
-    CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult, Executor,
+    CapabilityProvider, ExecutionError, ExecutionEvidence, ExecutionId, ExecutionRequest,
+    ExecutionResult, Executor,
 };
 use serde_json::Value;
 use tokio::process::Command;
+
+/// The runtime name Compute's evidence is carried under (`ExecutionEvidence::runtime`).
+pub const COMPUTE_EVIDENCE_RUNTIME: &str = "compute";
 
 /// Environment variable naming the `compute` executable (default: `compute` on PATH).
 pub const COMPUTE_BIN_ENV: &str = "COMPUTE_BIN";
@@ -309,6 +313,18 @@ pub fn translate_result(id: ExecutionId, stdout: &[u8]) -> Result<ExecutionResul
     let exit_code = value["exit_code"].as_i64();
     let text = value["stdout"]["text"].as_str().unwrap_or("");
     let receipt = value["receipt"]["receipt_hash"].as_str().map(str::to_owned);
+    // Compute's own execution identity, read only from Compute's structured result. Compute's
+    // `exec` result names an execution and a receipt; it has no environment or job, so none is
+    // reported. Nothing is inferred from Chip's execution id, the output or an error message.
+    let compute_evidence = ExecutionEvidence::from_runtime(
+        COMPUTE_EVIDENCE_RUNTIME,
+        [
+            ("executionId", value["execution_id"].as_str()),
+            ("receiptId", receipt.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(key, id)| id.map(|id| (key, id.to_string()))),
+    );
 
     if status == "cancelled" {
         return Err(ExecutionError::Cancelled);
@@ -327,6 +343,9 @@ pub fn translate_result(id: ExecutionId, stdout: &[u8]) -> Result<ExecutionResul
     };
     if let Some(receipt) = receipt {
         result = result.with_receipt_id(receipt);
+    }
+    if let Some(evidence) = compute_evidence {
+        result = result.with_execution_evidence(evidence);
     }
     Ok(result)
 }

@@ -27,6 +27,7 @@ fn the_default_policy_builds_exactly_the_context_the_loop_has_always_sent() {
         status: ExecutionStatus::Success,
         output: Some("ran".into()),
         receipt_id: Some("sha256:r".into()),
+        evidence: None,
     };
     let decisions = [
         DecisionRecord {

@@ -95,6 +95,7 @@ fn observation(
         status,
         output: output.map(str::to_string),
         receipt_id: receipt.map(str::to_string),
+        evidence: None,
     }
 }
 

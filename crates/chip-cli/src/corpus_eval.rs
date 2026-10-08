@@ -390,6 +390,7 @@ mod tests {
                 status: ExecutionStatus::Success,
                 output: None,
                 receipt_id: None,
+                evidence: None,
             };
             let (current, expected_calls) = match case.input.evidence {
                 EvidenceState::KnownValid => {

@@ -102,6 +102,7 @@ fn observation(r: &chip_core::ExecutionResult) -> Observation {
         status: r.status,
         output: Some(r.output.clone()),
         receipt_id: None,
+        evidence: None,
     }
 }
 

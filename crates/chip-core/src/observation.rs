@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::{ExecutionId, ExecutionResult, ExecutionStatus};
+use crate::{ExecutionEvidence, ExecutionId, ExecutionResult, ExecutionStatus};
 
 /// What kind of execution outcome was observed. Deliberately generic: there
 /// are no domain-specific kinds.
@@ -36,6 +36,9 @@ pub struct Observation {
     pub status: ExecutionStatus,
     pub output: Option<String>,
     pub receipt_id: Option<String>,
+    /// Runtime identity reported for the execution, carried unchanged. It is
+    /// not part of [`render`](Self::render), so the model never sees it.
+    pub evidence: Option<ExecutionEvidence>,
 }
 
 impl Observation {
@@ -127,6 +130,7 @@ impl Observer for ExecutionObserver {
             status: result.status,
             output: (!result.output.is_empty()).then(|| result.output.clone()),
             receipt_id: result.receipt_id.clone(),
+            evidence: result.evidence.clone(),
         })
     }
 }

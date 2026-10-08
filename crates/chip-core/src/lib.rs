@@ -3,6 +3,7 @@ mod decision;
 mod decision_state;
 mod environment;
 mod evidence;
+mod execution_evidence;
 mod model_decision;
 mod observation;
 mod reasoning;
@@ -26,6 +27,7 @@ pub use environment::{
     OwnedEnvironment, WorkEnvironment,
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
+pub use execution_evidence::ExecutionEvidence;
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use model_decision::{ModelDecisionBoundary, WORK_DECISION_SCHEMA};
 pub use observation::{
@@ -335,6 +337,10 @@ pub struct ExecutionResult {
     /// Stable identifier of the executor's evidence for this execution, if it
     /// provides one. Chip preserves it and does not interpret it.
     pub receipt_id: Option<String>,
+    /// Identifiers the executing runtime reported for this execution, when the
+    /// executor supplied any. Chip carries them and never derives them; `None`
+    /// means the executor supplied none.
+    pub evidence: Option<ExecutionEvidence>,
 }
 
 impl ExecutionResult {
@@ -344,6 +350,7 @@ impl ExecutionResult {
             status: ExecutionStatus::Success,
             output: output.into(),
             receipt_id: None,
+            evidence: None,
         }
     }
 
@@ -353,11 +360,19 @@ impl ExecutionResult {
             status: ExecutionStatus::Failure,
             output: output.into(),
             receipt_id: None,
+            evidence: None,
         }
     }
 
     pub fn with_receipt_id(mut self, receipt_id: impl Into<String>) -> Self {
         self.receipt_id = Some(receipt_id.into());
+        self
+    }
+
+    /// Attaches evidence the executor obtained from its runtime. Blank
+    /// identifiers are dropped, and evidence left empty is not attached.
+    pub fn with_execution_evidence(mut self, evidence: ExecutionEvidence) -> Self {
+        self.evidence = evidence.normalized();
         self
     }
 }

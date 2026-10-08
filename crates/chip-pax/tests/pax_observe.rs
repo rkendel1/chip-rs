@@ -922,6 +922,7 @@ fn recorded(output: &str, status: ExecutionStatus) -> Observation {
         status,
         output: Some(output.to_string()),
         receipt_id: None,
+        evidence: None,
     }
 }
 

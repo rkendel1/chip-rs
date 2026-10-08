@@ -115,6 +115,7 @@ fn observation(kind: ObservationKind, text: &str) -> Observation {
         },
         output: Some(text.to_string()),
         receipt_id: None,
+        evidence: None,
     }
 }
 
