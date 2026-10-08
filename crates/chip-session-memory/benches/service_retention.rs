@@ -97,11 +97,15 @@ fn http(addr: &str, method: &str, path: &str, body: Option<&str>) -> (u16, Strin
     let mut out = String::new();
     stream.read_to_string(&mut out).unwrap();
     let (head, body) = out.split_once("\r\n\r\n").unwrap();
-    (head.split(' ').nth(1).unwrap().parse().unwrap(), body.to_string())
+    (
+        head.split(' ').nth(1).unwrap().parse().unwrap(),
+        body.to_string(),
+    )
 }
 
 fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) -> Value {
-    let tmp = std::env::temp_dir().join(format!("chip-retention-{}-{scenario}", std::process::id()));
+    let tmp =
+        std::env::temp_dir().join(format!("chip-retention-{}-{scenario}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("src")).unwrap();
     let mut source = String::from("pub fn one() -> u8 { 1 }\n");
@@ -116,8 +120,12 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let decision = match scenario {
-        "escape" => r#"{"decision":"request_capability","capability":"project.write","inputs":{"path":"../chip-retention-escaped.txt","content":"x"}}"#,
-        "read" => r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#,
+        "escape" => {
+            r#"{"decision":"request_capability","capability":"project.write","inputs":{"path":"../chip-retention-escaped.txt","content":"x"}}"#
+        }
+        "read" => {
+            r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#
+        }
         other => panic!("unknown scenario {other}"),
     };
     let model = mock_model(completion(decision));
@@ -155,7 +163,12 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
         let mut wave = Vec::new();
         for _ in 0..count {
             loop {
-                let (status, body) = http(&addr, "POST", "/v1/work", Some(r#"{"goal":"Add a function that sorts the payload."}"#));
+                let (status, body) = http(
+                    &addr,
+                    "POST",
+                    "/v1/work",
+                    Some(r#"{"goal":"Add a function that sorts the payload."}"#),
+                );
                 if status == 202 {
                     let v: Value = serde_json::from_str(&body).unwrap();
                     wave.push(v["work_id"].as_str().unwrap().to_string());
@@ -242,10 +255,15 @@ fn main() {
             .or_else(|| std::env::var("CHIP_BIN").ok())
             .unwrap_or_else(|| root.join("release/chip").to_string_lossy().into_owned()),
     );
-    assert!(bin.exists(), "build the binary first: cargo build --release -p chip-cli ({bin:?})");
-    let out_path = PathBuf::from(
-        get("--out").unwrap_or_else(|| root.join("service-retention.json").to_string_lossy().into_owned()),
+    assert!(
+        bin.exists(),
+        "build the binary first: cargo build --release -p chip-cli ({bin:?})"
     );
+    let out_path = PathBuf::from(get("--out").unwrap_or_else(|| {
+        root.join("service-retention.json")
+            .to_string_lossy()
+            .into_owned()
+    }));
     let mut scenarios = Vec::new();
     for s in ["escape", "read"] {
         let r = run_scenario(&bin, s, works, file_kib);
@@ -254,7 +272,9 @@ fn main() {
             works,
             r["rss_anon_growth_kib"].as_f64().unwrap(),
             r["bytes_retained_per_finished_work"].as_f64().unwrap(),
-            r["one_result_json_bytes"], r["one_events_count"], r["one_events_json_bytes"],
+            r["one_result_json_bytes"],
+            r["one_events_count"],
+            r["one_events_json_bytes"],
             r["first_work_still_retrievable_after_all"]
         );
         scenarios.push(r);

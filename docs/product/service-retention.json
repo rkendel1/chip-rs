@@ -1,0 +1,105 @@
+{
+  "binary": "/home/user/chip-rs/crates/chip-session-memory/../../target/release/chip",
+  "method": "Real `chip serve` binary, mock model and PAX shim, bounded runs; server process RssAnon read from /proc/<pid>/status after each wave of finished work. Measures retention of finished work in Service.items, not model or PAX behavior.",
+  "scenarios": [
+    {
+      "bytes_retained_per_finished_work": 25548.8,
+      "file_kib": 32,
+      "first_work_still_retrievable_after_all": true,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":2020,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"execution_ms\":{\"count\":2020,\"max\":0.0,\"total\":0.0},\"failed_work\":0,\"limit_reached_work\":0,\"max_concurrent_work\":1,\"max_queued_work\":32,\"model_ms\":{\"count\":2020,\"max\":1.558,\"total\":640.521},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":11.47,\"total\":9549.304},\"queued_work\":0,\"rejected_work\":0,\"star",
+      "one_events_count": 9,
+      "one_events_json_bytes": 1251,
+      "one_result_json_bytes": 2802,
+      "rss_anon_growth_kib": 49900.0,
+      "samples": [
+        {
+          "finished": 20,
+          "hwm_kib": 8968,
+          "label": "after warm-up",
+          "rss_anon_kib": 1636,
+          "rss_kib": 8968
+        },
+        {
+          "finished": 520,
+          "hwm_kib": 21832,
+          "label": "after 500 more",
+          "rss_anon_kib": 14500,
+          "rss_kib": 21832
+        },
+        {
+          "finished": 1020,
+          "hwm_kib": 34248,
+          "label": "after 1000 more",
+          "rss_anon_kib": 26916,
+          "rss_kib": 34248
+        },
+        {
+          "finished": 1520,
+          "hwm_kib": 46516,
+          "label": "after 1500 more",
+          "rss_anon_kib": 39184,
+          "rss_kib": 46516
+        },
+        {
+          "finished": 2020,
+          "hwm_kib": 58868,
+          "label": "after 2000 more",
+          "rss_anon_kib": 51536,
+          "rss_kib": 58868
+        }
+      ],
+      "scenario": "escape",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 121229.312,
+      "file_kib": 32,
+      "first_work_still_retrievable_after_all": true,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":0,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"execution_ms\":{\"count\":2020,\"max\":3.21,\"total\":1441.396},\"failed_work\":0,\"limit_reached_work\":2020,\"max_concurrent_work\":1,\"max_queued_work\":32,\"model_ms\":{\"count\":2020,\"max\":6.295,\"total\":5009.5},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":119.253,\"total\":99770.362},\"queued_work\":0,\"rejected_work\"",
+      "one_events_count": 97,
+      "one_events_json_bytes": 8758,
+      "one_result_json_bytes": 5017,
+      "rss_anon_growth_kib": 236776.0,
+      "samples": [
+        {
+          "finished": 20,
+          "hwm_kib": 11488,
+          "label": "after warm-up",
+          "rss_anon_kib": 3860,
+          "rss_kib": 11488
+        },
+        {
+          "finished": 520,
+          "hwm_kib": 71140,
+          "label": "after 500 more",
+          "rss_anon_kib": 63512,
+          "rss_kib": 71140
+        },
+        {
+          "finished": 1020,
+          "hwm_kib": 130200,
+          "label": "after 1000 more",
+          "rss_anon_kib": 122572,
+          "rss_kib": 130200
+        },
+        {
+          "finished": 1520,
+          "hwm_kib": 189204,
+          "label": "after 1500 more",
+          "rss_anon_kib": 181576,
+          "rss_kib": 189204
+        },
+        {
+          "finished": 2020,
+          "hwm_kib": 248264,
+          "label": "after 2000 more",
+          "rss_anon_kib": 240636,
+          "rss_kib": 248264
+        }
+      ],
+      "scenario": "read",
+      "works_after_warmup": 2000
+    }
+  ],
+  "schema": "chip.service-retention.v1"
+}

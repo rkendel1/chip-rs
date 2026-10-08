@@ -299,7 +299,8 @@ or resume after escalation becomes a real requirement), and *platform state* (Fe
 intended durable-state role). If durable session storage does become necessary, benchmark an
 embedded SQL store such as SQLite (for example through `rusqlite`) against FeltDB with the same
 recovery contract and workload. **SQLite was not tested here and nothing in this experiment shows
-it to be better.**
+it to be better.** (Superseded: SQLite, redb and a `durability`-crate journal were later measured
+against the same contract; see `docs/product/session-store-comparison.md`.)
 
 Any WASM-hosting or alternative-store investigation requires its own decision and PR.
 
