@@ -507,6 +507,42 @@ async fn parts(report: &mut Report, opts: &Opts) {
         "real filesystem",
     );
 
+    // -- what a work does before its first decision, and per request --
+    {
+        let agent = Agent::new(Synthetic::new(vec![])).with_capabilities(set.clone());
+        let mut d = Vec::with_capacity(n.min(500));
+        for _ in 0..n.min(500) {
+            let t = Instant::now();
+            let _ = std::hint::black_box(agent.discover_capabilities().await);
+            d.push(t.elapsed());
+        }
+        report.time(
+            "L1",
+            "work start: discover capabilities (9 declared, availability of each)",
+            d,
+            "starts no process",
+        );
+        let request = chip_core::CapabilityRequest::new(
+            ExecutionId::new("v"),
+            CapabilityId::new("project.read").unwrap(),
+        );
+        let mut request = request;
+        request.inputs = ok_inputs.clone();
+        request.inputs_present = true;
+        let mut d = Vec::with_capacity(n.min(500));
+        for _ in 0..n.min(500) {
+            let t = Instant::now();
+            let _ = std::hint::black_box(agent.validate_capability_request(&request).await);
+            d.push(t.elapsed());
+        }
+        report.time(
+            "L1",
+            "validate a project.read request (declared, available, inputs, validate_inputs)",
+            d,
+            "Agent::validate_capability_request",
+        );
+    }
+
     // -- environment acquisition / release --
     {
         let provider = Arc::new(LocalEnvironmentProvider::prepare(&root).await);
@@ -535,9 +571,9 @@ async fn parts(report: &mut Report, opts: &Opts) {
                 }
                 report.time(
                     "L1",
-                    "environment provider prepare (resolves PAX)",
+                    "environment provider prepare (locates PAX; starts nothing)",
                     d,
-                    "one subprocess: `pax --version`",
+                    "a filesystem lookup; it was one `pax --version` before PAX became lazy",
                 );
             }
             Err(why) => report.skip(
@@ -651,6 +687,68 @@ async fn parts(report: &mut Report, opts: &Opts) {
         d,
         "proxy: payload allocation only, see loop rows for events per step",
     );
+
+    // -- what an escalation builds from the work's history (the product uses the dedup policy) --
+    for count in [8usize, 50] {
+        use chip_core::{
+            DecisionRecord, DecisionSource, DeduplicatedEscalationContext, EscalationContextPolicy,
+            ObservationOrigin, WorkDecision, WorkState, WorkTrajectory,
+        };
+        let observations: Vec<Observation> = (0..count)
+            .map(|i| Observation {
+                execution_id: ExecutionId::new(format!("o{i}")),
+                kind: ObservationKind::ExecutionCompleted,
+                status: ExecutionStatus::Success,
+                output: Some("x".repeat(1024)),
+                receipt_id: None,
+            })
+            .collect();
+        let origins: Vec<ObservationOrigin> = (0..count)
+            .map(|i| ObservationOrigin {
+                capability: CapabilityId::new("project.read").unwrap(),
+                invocation: format!("project.read {{\"path\":\"f{i}\"}}"),
+                reusable: false,
+            })
+            .collect();
+        let decisions: Vec<DecisionRecord> = (0..count)
+            .map(|turn| DecisionRecord {
+                turn,
+                source: DecisionSource::Model,
+                decision: WorkDecision::Complete {
+                    summary: "x".into(),
+                },
+            })
+            .collect();
+        let state = WorkState {
+            goal: "baseline goal",
+            turn: count,
+            max_turns: 50,
+            executions: count,
+            max_executions: 50,
+        };
+        let trajectory = WorkTrajectory {
+            observations: &observations,
+            origins: &origins,
+            decisions: &decisions,
+            ruled_out: &[],
+            evidence: &[],
+            question: "Decide the next step.",
+        };
+        let mut d = Vec::with_capacity(n.min(500));
+        for _ in 0..n.min(500) {
+            let t = Instant::now();
+            let context = DeduplicatedEscalationContext.build(&state, &trajectory);
+            let metrics = context.metrics();
+            std::hint::black_box((&context, metrics));
+            d.push(t.elapsed());
+        }
+        report.time(
+            "L0",
+            format!("escalation context build + measure, {count} observations of 1 KB"),
+            d,
+            "DeduplicatedEscalationContext (what `chip work` uses); once per model call",
+        );
+    }
 
     // -- goal evaluation over a growing trajectory --
     for len in [1usize, 10, 100, 1000] {
@@ -1057,6 +1155,14 @@ async fn mock_model(delay: Duration, script: fn(usize) -> &'static str) -> Mock 
     }
 }
 
+/// Runs the tests twice, then stops.
+fn pax_twice(step: usize) -> &'static str {
+    match step {
+        0 | 1 => "{\"decision\":\"request_capability\",\"capability\":\"pax.test\"}",
+        _ => BLOCK,
+    }
+}
+
 /// project.list, then Git status twice, then stop.
 fn list_git_git_block(step: usize) -> &'static str {
     match step {
@@ -1258,9 +1364,9 @@ async fn process(report: &mut Report, opts: &Opts) {
                     std::fs::write(
                         &script,
                         format!(
-                            "#!/bin/sh\necho {tool} >> '{}'\nexec '{}' \"$@\"\n",
-                            log.display(),
-                            real.display()
+                            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo {tool}-version >> '{log}'; else echo {tool}-run >> '{log}'; fi\nexec '{real}' \"$@\"\n",
+                            log = log.display(),
+                            real = real.display()
                         ),
                     )
                     .unwrap();
@@ -1292,10 +1398,11 @@ async fn process(report: &mut Report, opts: &Opts) {
                     0,
                 ),
                 (
-                    "project.list, git status, git status (3 executions)",
+                    "project.list, git status, git status (3 executions, no PAX needed)",
                     list_git_git_block,
                     3,
                 ),
+                ("pax.test twice (2 executions)", pax_twice, 2),
             ] {
                 let mock = mock_model(Duration::ZERO, script).await;
                 let _ = std::fs::remove_file(&log);
@@ -1319,20 +1426,30 @@ async fn process(report: &mut Report, opts: &Opts) {
                     executions + 1,
                     "one model call per decision"
                 );
-                report.value(
-                    "process",
-                    format!("chip work subprocesses, {label}: pax"),
-                    "processes",
-                    count("pax") as f64,
-                    "",
-                );
-                report.value(
-                    "process",
-                    format!("chip work subprocesses, {label}: git"),
-                    "processes",
-                    count("git") as f64,
-                    "",
-                );
+                // The invariant: PAX is never started for a work that does not need it, and is
+                // identity-checked once for one that does.
+                if label.contains("pax.test") {
+                    assert_eq!(count("pax-version"), 1, "PAX is resolved once for the work");
+                } else {
+                    assert_eq!(
+                        count("pax-version") + count("pax-run"),
+                        0,
+                        "a work that never needs PAX starts none"
+                    );
+                }
+                for (what, key) in [
+                    ("pax --version", "pax-version"),
+                    ("pax test runs", "pax-run"),
+                    ("git", "git-run"),
+                ] {
+                    report.value(
+                        "process",
+                        format!("chip work, {label}: {what}"),
+                        "processes",
+                        count(key) as f64,
+                        "",
+                    );
+                }
             }
             let _ = std::fs::remove_dir_all(&git_project);
         }

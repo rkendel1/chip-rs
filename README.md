@@ -220,8 +220,12 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   escalated); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
   answer, no PAX; nothing ran); `4` runtime failure or a violated safety invariant.
 * Requirements as for `verify`: a model provider behind FX and PAX 0.3.0 or later (`PAX_BIN` to
-  select it); Compute is not required. PAX's own test diagnostics are shown to the model as PAX
-  wrote them and can include host paths.
+  select it); Compute is not required. `chip work` only *locates* PAX at startup (a `pax` must be
+  on the search path or `PAX_BIN`, else exit 3) and starts no PAX process unless the work runs
+  `pax.test`; that it is PAX 0.3.0 or later is verified, once, when `pax.test` is first requested
+  (an older or foreign `pax` rejects that request and the tests never run). `chip verify` verifies
+  it before asking the model. PAX's own test diagnostics are shown to the model as PAX wrote them
+  and can include host paths.
 
 ## Runtime service (`chip serve`)
 
@@ -230,7 +234,8 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 `chip work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
 `WorkRuntime` (model, PAX, project root) and call `WorkRuntime::run`. The model comes from
 `CHIP_PROVIDER` / `CHIP_MODEL` / `CHIP_ENDPOINT` as for `work`; the project is the current directory.
-If no model is selected or PAX is unusable, nothing listens (exit 3).
+If no model is selected or no `pax` can be found, nothing listens (exit 3); as for `work`, PAX is
+started only when a work runs `pax.test`.
 
 > **Chip Runtime Service is currently a local trusted-client interface. Remote exposure and
 > authentication are intentionally out of scope.** It binds to loopback by default, has no

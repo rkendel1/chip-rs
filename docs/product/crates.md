@@ -221,10 +221,11 @@ workspace crate). Reported L4 means it was in the path of the live PR36-38 runs.
 `live_provider.rs`, which runs only when `FX_PROVIDER_*` variables are set and otherwise returns.
 Provider matrix in section 5.3.
 
-**`chip-pax`** (INTEGRATION, L3). Runs an independently installed `pax` (verified as PAX >= 0.3.0,
-not the POSIX `pax` archiver), fixes `pax --dir <root> --json test`, parses stdout strictly as
+**`chip-pax`** (INTEGRATION, L3). Runs an independently installed `pax` (verified as PAX >= 0.3.0 and not
+the POSIX `pax` archiver; lazily: located without starting a process, verified once per executor
+when first needed), fixes `pax --dir <root> --json test`, parses stdout strictly as
 `pax.execution-result.v1`. Chip consumes PAX's `status`; it does not embed or reimplement PAX.
-32 tests; the real-PAX ones run only where PAX is installed (CI installs it). *What this proves:*
+35 tests (plus `chip-cli/tests/pax_probes.rs`, which counts the PAX processes `chip work` starts); the real-PAX ones run only where PAX is installed (CI installs it). *What this proves:*
 Chip can run PAX, reject malformed or mismatched results, and treat PAX `passed` as the test
 authority. *What it does not prove:* PAX behaviour on projects or toolchains beyond those the tests
 build, or anything about PAX versions other than 0.3.0.

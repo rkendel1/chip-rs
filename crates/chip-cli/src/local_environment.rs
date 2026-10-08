@@ -17,7 +17,7 @@ use chip_core::{
     EnvironmentDescription, EnvironmentError, EnvironmentId, EnvironmentProvider,
     ObservationInvariant, WorkEnvironment, WorkId,
 };
-use chip_pax::{PaxExecutor, ResolvedPax};
+use chip_pax::PaxExecutor;
 use chip_project::{PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, ProjectExecutor};
 use sha2::{Digest, Sha256};
 
@@ -26,6 +26,9 @@ pub struct LocalEnvironment {
     id: EnvironmentId,
     root: PathBuf,
     set: Arc<CapabilitySet>,
+    /// The same executor the capability set holds (clones share what it has verified), kept to
+    /// report the PAX that was actually used. Reading it starts nothing.
+    pax: PaxExecutor,
     description: EnvironmentDescription,
 }
 
@@ -36,11 +39,12 @@ impl LocalEnvironment {
         pax: PaxExecutor,
         description: EnvironmentDescription,
     ) -> Self {
-        let set = chip_remote_env::project_capability_set(root, pax);
+        let set = chip_remote_env::project_capability_set(root, pax.clone());
         Self {
             id,
             root: root.to_path_buf(),
             set: Arc::new(set),
+            pax,
             description,
         }
     }
@@ -59,8 +63,15 @@ impl WorkEnvironment for LocalEnvironment {
         chip_remote_env::project_invariants(&self.root)
     }
 
+    /// The PAX version is known only if the work needed PAX; a work that never ran a test did not
+    /// start it and does not report one.
     fn description(&self) -> EnvironmentDescription {
-        self.description.clone()
+        let mut description = self.description.clone();
+        if let Some(pax) = self.pax.resolved() {
+            description.verifier_version = Some(pax.version);
+            description.diagnostic = Some(pax.path.display().to_string());
+        }
+        description
     }
 }
 
@@ -82,12 +93,13 @@ pub struct LocalEnvironmentProvider {
 }
 
 impl LocalEnvironmentProvider {
-    /// Finds the test runner and checks the project capabilities. Fails closed with the reason;
-    /// nothing has run when it does.
+    /// Checks that a test runner is in place and the project capabilities are usable. Fails closed
+    /// with the reason; nothing has run when it does. PAX is only *located* here (a filesystem
+    /// lookup): it is not started, because a work that never runs a test never needs it. That it is
+    /// PAX, and new enough, is verified when a `pax.test` request first needs it.
     pub async fn prepare(root: &Path) -> Result<Self, String> {
-        let pax: ResolvedPax = PaxExecutor::new(root)
-            .resolve()
-            .await
+        let pax_path = PaxExecutor::new(root)
+            .locate()
             .map_err(|why| format!("PAX unavailable ({why}); nothing was run"))?;
         let project = ProjectExecutor::new(root);
         for id in [PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ, PROJECT_WRITE] {
@@ -100,8 +112,8 @@ impl LocalEnvironmentProvider {
             id: opaque_id(root),
             root: root.to_path_buf(),
             description: EnvironmentDescription {
-                verifier_version: Some(pax.version.clone()),
-                diagnostic: Some(pax.path.display().to_string()),
+                verifier_version: None,
+                diagnostic: Some(pax_path.display().to_string()),
             },
             leased: Mutex::new(None),
         })
