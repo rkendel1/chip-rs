@@ -58,13 +58,23 @@ impl CountingPax {
         std::fs::write(
             &path,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo version >> '{log}'; echo 'pax {version}'; exit 0; fi\necho run >> '{log}'\necho '{PASSED}'\nexit 0\n",
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo version >> '{log}'; echo 'pax {version}'; exit 0; fi\nif [ \"$4\" = \"observe\" ]; then echo observe >> '{log}'; exit 2; fi\necho run >> '{log}'\necho '{PASSED}'\nexit 0\n",
                 log = log.display()
             ),
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         Self { dir, log }
+    }
+
+    /// Acceptance: no normal work (a change, a verification, an inspection that never asked) starts
+    /// project observation. Checked for every test that uses this PAX, when it is dropped.
+    fn assert_never_observed(&self) {
+        assert_eq!(
+            self.count("observe"),
+            0,
+            "a work that never asked for project.observe started a PAX observation"
+        );
     }
 
     fn count(&self, what: &str) -> usize {
@@ -81,6 +91,14 @@ impl CountingPax {
             &std::env::var_os("PATH").unwrap_or_default(),
         ));
         std::env::join_paths(paths).unwrap()
+    }
+}
+
+impl Drop for CountingPax {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.assert_never_observed();
+        }
     }
 }
 

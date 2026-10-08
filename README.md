@@ -142,7 +142,7 @@ model ──judgment──▶ Chip ──pax.test──▶ pax --dir <cwd> --jso
 
 * A model provider behind FX, configured as for the rest of `chip`: `CHIP_PROVIDER`,
   `CHIP_MODEL`, and `CHIP_ENDPOINT` / `CHIP_API_KEY` where the provider needs them.
-* PAX **0.3.0 or later** (`pax.execution-result.v1`), found as `$PAX_BIN` if set, otherwise as the
+* PAX **0.3.0 or later** for `pax.test` (`pax.execution-result.v1`) and **0.4.1 or later** for `project.observe` (`pax.observation.v1`; CI pins the release `v0.4.1`, commit `674f3b3143874d1a692aca103b33f89da31a82ac`), found as `$PAX_BIN` if set, otherwise as the
   first `pax` on `PATH`. The candidate must identify itself via `pax --version`; the POSIX `pax`
   archive utility is refused. Chip never searches for another candidate. Use `PAX_BIN=/path/to/pax`
   when `PATH` discovery is not enough.
@@ -188,6 +188,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 | `project.read` | `path`; optional `offset`, `length` (bytes) | reads a UTF-8 file and records its real content; a call returns at most 32 KiB, so a larger file is read in ranges (`offset`, `length` <= 32768); a range that splits a multi-byte character is refused, not altered |
 | `project.write` | `path`, `content` | atomically creates or replaces a UTF-8 file (at most 32 KiB), reads it back, records what the filesystem holds |
 | `project.git.status`, `project.git.diff`, `project.git.diff_stat`, `project.git.log` | none (`log`: a bounded count) | read-only Git observations; Chip fixes every argument; nothing mutating is expressible |
+| `project.observe` | `scope` (required): `file:`, `path:`, `crate:` or `module:` | bounded, deterministic project structure (source files, modules, declarations, tests, manifests) observed by PAX and rendered compactly by Chip; facts, never relevance; `complete`, `partial` and failure states are explicit, and a partial observation is never shown as complete |
 | `pax.test` | none | runs `pax --dir <project> --json test` and records PAX's `pax.execution-result.v1` |
 
 * **The model owns only a project-relative path, a literal query, and file content.** It cannot

@@ -103,6 +103,9 @@ fn write(path: &str, content: &str) -> String {
         &format!(r#"{{"path":{},"content":{}}}"#, q(path), q(content)),
     )
 }
+fn observe(scope: &str) -> String {
+    request("project.observe", &format!(r#"{{"scope":{}}}"#, q(scope)))
+}
 fn pax_test() -> String {
     request("pax.test", "")
 }
@@ -154,6 +157,32 @@ fn pax_available(dir: &Path) -> bool {
     .is_ok();
     if !ok {
         eprintln!("SKIPPED: PAX is not installed");
+    }
+    ok
+}
+
+/// `project.observe` needs the PAX release it was verified against; a test that needs it says
+/// SKIPPED when the installed PAX is older, exactly as one that needs PAX does when it is absent.
+fn observe_available(dir: &Path) -> bool {
+    let ok = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(PaxExecutor::new(dir).resolve())
+    })
+    .is_ok_and(|pax| {
+        chip_pax::MIN_OBSERVE_PAX_VERSION <= {
+            let parts: Vec<u64> = pax
+                .version
+                .split(['.', '-', '+'])
+                .take(3)
+                .filter_map(|p| p.parse().ok())
+                .collect();
+            (parts[0], parts[1], parts[2])
+        }
+    });
+    if !ok {
+        eprintln!(
+            "SKIPPED: PAX is older than {:?}",
+            chip_pax::MIN_OBSERVE_PAX_VERSION
+        );
     }
     ok
 }
@@ -1009,6 +1038,166 @@ async fn inspect_requires_observation_and_forbids_change() {
     .await;
     assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
     assert!(!w.verified);
+}
+
+/// `project.observe` is a fact about structure. The completion contract is unchanged by it: an
+/// inspection that observed structure and nothing else is not grounded, because grounding is what
+/// `list`, `search` and `read` observed. With a read of the file it cites, it is grounded as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn project_observe_does_not_ground_an_answer_and_does_not_change_the_contract() {
+    let dir = project("observe-inspect", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    // Observation alone: it names the file and the declaration, and the answer cites them.
+    let (w, m) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            observe("crate:auditfx"),
+            complete("`len` is declared in src/lib.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        m.request(1).contains("pub fn len"),
+        "the model was shown the observed declaration: {}",
+        m.request(1)
+    );
+    assert!(
+        blocked_with(&w, "completion refused"),
+        "an observation alone does not complete an inspection: {}",
+        describe(&w)
+    );
+    assert!(!w.verified && !w.grounded);
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+    assert_eq!(before, snapshot(&dir), "observing changed nothing");
+    w.audit.assert_clean();
+
+    // With a read of the file it cites: grounded, never verified, exit 1: exactly as without observe.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            observe("crate:auditfx"),
+            read("src/lib.rs"),
+            complete("`len` is declared in src/lib.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(w.grounded && !w.verified, "grounded is not verified");
+    assert_eq!(w.goal_satisfied, Some(true));
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+    w.audit.assert_clean();
+}
+
+/// An observation is not a model's claim and a model's claim is not an observation.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_cannot_supply_an_observation_or_a_fact() {
+    let dir = project("observe-forge", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    // The model asks to observe and tries to bring its own facts, limits and state: refused before
+    // PAX is started, and nothing becomes an observation.
+    for inputs in [
+        r#"{"scope":"crate:auditfx","facts":"src/lib.rs declares len"}"#,
+        r#"{"scope":"crate:auditfx","max_files":100000}"#,
+        r#"{"scope":"crate:auditfx","state":"complete"}"#,
+        r#"{"scope":"crate:auditfx","observation":"complete"}"#,
+        r#"{"facts":"src/lib.rs declares len"}"#,
+    ] {
+        let (w, _) = run_kind(
+            &dir,
+            GoalKind::Inspect,
+            None,
+            vec![
+                request("project.observe", inputs),
+                complete("`len` is declared in src/lib.rs."),
+            ],
+        )
+        .await;
+        assert!(
+            blocked_with(&w, "invalid capability input"),
+            "{inputs}: {}",
+            describe(&w)
+        );
+        assert_eq!(started(&w), 0, "{inputs}: nothing ran");
+        assert!(
+            w.report.observations.is_empty(),
+            "{inputs}: nothing was observed"
+        );
+    }
+    // Claiming a structure that was never observed does not complete anything.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![complete(
+            "src/lib.rs declares `len`, and src/other.rs declares `helper`.",
+        )],
+    )
+    .await;
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert!(w.report.observations.is_empty());
+}
+
+/// Observing structure is work: it costs model calls and executions, and it is not useful work. A
+/// change that is verified is still the only thing that counts, and observation does not alter it.
+#[tokio::test(flavor = "multi_thread")]
+async fn observing_structure_is_cost_and_never_useful_work_by_itself() {
+    let dir = project("observe-change", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            observe("crate:auditfx"),
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+        ],
+    )
+    .await;
+    assert!(
+        w.verified && w.goal_satisfied == Some(true),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert_eq!(
+        w.utility.executions_by_capability.get("project.observe"),
+        Some(&1)
+    );
+    // The observation is in the cost: one verified goal over four executions, not three.
+    assert_eq!(w.utility.executions, 4);
+    assert_eq!(w.useful_work_per_execution(), Some(0.25));
+    assert_completed_means_goal_met(&w);
+    w.audit.assert_clean();
+
+    // And an unverified run that observed plenty did no useful work.
+    let (w, _) = run(
+        &dir,
+        vec![
+            observe("crate:auditfx"),
+            observe("file:src/lib.rs"),
+            complete("done"),
+        ],
+    )
+    .await;
+    assert!(!w.verified);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
 }
 
 /// Verify: the runtime completes the work itself when PAX passes an unchanged project. The model

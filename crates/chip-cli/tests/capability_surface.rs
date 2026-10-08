@@ -13,7 +13,13 @@ use chip_core::{CapabilityProvider, EnvironmentDescription, WorkEnvironment};
 use chip_pax::PaxExecutor;
 
 const CLASSES: &[&str] = &["CORE", "INTEGRATION"];
-const AUTHORITIES: &[&str] = &["read", "read-git", "write", "exec-via-tooling"];
+const AUTHORITIES: &[&str] = &[
+    "read",
+    "read-git",
+    "write",
+    "exec-via-tooling",
+    "read-via-tooling",
+];
 
 struct Row {
     class: String,
@@ -98,7 +104,7 @@ async fn the_declared_surface_is_exactly_the_documented_one() {
 }
 
 #[tokio::test]
-async fn exactly_one_capability_writes_and_exactly_one_runs_project_tooling() {
+async fn exactly_one_capability_writes_one_runs_tooling_and_one_observes_through_it() {
     let documented = documented();
     let with = |authority: &str| -> Vec<&String> {
         documented
@@ -116,6 +122,11 @@ async fn exactly_one_capability_writes_and_exactly_one_runs_project_tooling() {
         with("exec-via-tooling"),
         ["pax.test"],
         "the only one that runs the project's own tooling"
+    );
+    assert_eq!(
+        with("read-via-tooling"),
+        ["project.observe"],
+        "the only one that asks PAX to read the project and report structure"
     );
 }
 
@@ -140,8 +151,10 @@ async fn no_declared_capability_is_a_shell_a_process_a_network_or_a_git_mutation
         // argument vector, a working directory, a root, a status, an observation or a receipt.
         for input in &d.inputs {
             assert!(
-                ["path", "content", "query", "count", "offset", "length"]
-                    .contains(&input.name.as_str()),
+                [
+                    "path", "content", "query", "count", "offset", "length", "scope"
+                ]
+                .contains(&input.name.as_str()),
                 "{id} takes an input named {}",
                 input.name
             );

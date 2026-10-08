@@ -6,7 +6,7 @@ missing, and what evidence each statement rests on.
 
 This is an audit, not an expansion: no capability, crate or abstraction was added. Each claim below
 is backed by a test (named where it exists) or by a reading of the code (marked as such). The
-scenario tests use the real product entry point over real files, real `git`, real PAX 0.3.0 and
+scenario tests use the real product entry point over real files, real `git`, real PAX 0.4.1 and
 cargo; **only the model is scripted.** They show that the capability surface *composes*. They say
 nothing about how well any real model uses it.
 
@@ -117,6 +117,13 @@ What does not change, for every kind:
   answer the answer check would have refused is an `unauthorized_completion`.
 * The rules the model is told are per kind and Chip-owned, so it knows how its work will be judged.
 
+**`project.observe` does not ground an answer.** An observation is a fact about structure, not work, and
+the completion contract is unchanged by it: `InspectionObserved` and `GroundedAnswer` count only what `project.list`,
+`project.search`, `project.read` and `project.git.*` observed. An inspection that used `project.observe` alone is
+refused (`completion refused`, Blocked); one that also read or searched a file it cites is grounded, as before.
+Neither `partial` nor `complete` is evidence that a goal is met, `verified` and `goal_satisfied` do not read it,
+and it is never useful work.
+
 Limits stated plainly: citation is not correctness; an inspect answer can cite a real file and be
 wrong, can cite a file whose relevant bytes were never observed (a search row shows one line), and
 can say "there is no information" while citing files it read. Chip does not interpret the answer, so
@@ -148,12 +155,15 @@ the *authority*. The level is the highest validated against the real thing; see 
 | `project.git.diff_stat` | CORE | read-git | Chip (chip-project) | L3 |
 | `project.git.log` | CORE | read-git | Chip (chip-project) | L3 |
 | `pax.test` | INTEGRATION | exec-via-tooling | PAX (chip-pax) | L3 |
+| `project.observe` | INTEGRATION | read-via-tooling | PAX (chip-pax) | L3 |
 <!-- capabilities:end -->
 
 Authority classes: **read** (reads files under the project root), **read-git** (runs `git` with an
 argument vector Chip fixes, read-only), **write** (changes one file), **exec-via-tooling** (starts
-the project's own test tooling through PAX). Two tests pin that exactly one capability writes
-and exactly one runs project tooling, and that no declared capability is a shell, a process, a
+the project's own test tooling through PAX), **read-via-tooling** (asks PAX to read the project's
+manifests and Rust source and report structural facts; it starts no project command, builds nothing
+and writes nothing). Three tests pin that exactly one capability writes, exactly one runs project
+tooling, and exactly one is read-via-tooling, and that no declared capability is a shell, a process, a
 network call, a delete, or a Git mutation.
 
 Other things that look like capabilities but are not part of the product surface:
@@ -177,6 +187,7 @@ Other things that look like capabilities but are not part of the product surface
 | `project.git.diff` | none | none | as above | as above; fails instead of truncating at 32 KiB | n/a | whole-tree diff only; untracked files absent and said so |
 | `project.git.diff_stat` | none | none | as above | as above | n/a | none |
 | `project.git.log` | `count` (1 to 50) | none | as above | as above | n/a | none |
+| `project.observe` | `scope` only (required): `file:<path.rs>`, `path:<prefix>`, `crate:<package>[/lib\|/<bin\|test\|bench\|example>/<name>]`, `module:<package>/lib::crate[::<module>...]`. No limit, path outside the project, command or fact. | none | the scope grammar, then project-root containment **before** PAX is started (lexical rules as the project paths; every symlink refused, inside or out); fixed `pax --dir <root> --json observe --scope <s> --max-files 50 --max-bytes 1048576 --max-facts 600`; PAX >= 0.4.1 verified once per work (the version is the contract; `observe` support is never probed); every artifact a fact names is re-walked, and a fact behind a symlink is omitted | `complete`, `partial`, `invalid_scope`, `limit_exceeded`, `artifact_unreadable`, `unsupported`, `malformed` are **observation states**, not work outcomes; no PAX, an unparseable failure or a timeout gives no observation | n/a | PAX reads <= 50 files / 1 MiB of source for one scope and starts `cargo metadata --no-deps --offline`; the model is shown <= 16 KiB, rendered by Chip (never PAX's JSON), with what did not fit counted. **Facts, never relevance**; not a completion, and it does not ground an inspect answer (section 2a) |
 | `pax.test` | none | **whatever the project's tests and build scripts do**, with the tools' permissions | fixed `pax --dir <root> --json test`; PAX >= 0.3.0 verified once per work; 300 s limit | `failed`, `not_run`, `unsupported`, `ambiguous`, `error` results are observed, not retried | no | unbounded in principle: see section 9 |
 
 **The ranged read.** `project.read` is still the one read capability, with the same path validation

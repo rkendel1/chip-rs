@@ -119,7 +119,7 @@ Two columns, because they are different claims:
 
 * **CI level**: what `cargo test --workspace` and the default CI jobs reproducibly establish. Where a
   test needs PAX it passes by returning early when PAX is absent, so L3 applies only where PAX is
-  installed. CI installs PAX 0.3.0 pinned by commit.
+  installed. CI installs PAX v0.4.1 pinned by commit (`674f3b3`).
 * **Reported level**: a higher level shown by a run that is not part of default CI (a manual
   workflow, a live-model run recorded in `AGENTS.md`, or work in another repository). It is a
   report, not something this repository reproduces. `-` means none is recorded.
@@ -227,7 +227,9 @@ Provider matrix in section 5.3.
 **`chip-pax`** (INTEGRATION, L3). Runs an independently installed `pax` (verified as PAX >= 0.3.0 and not
 the POSIX `pax` archiver; lazily: located without starting a process, verified once per executor
 when first needed), fixes `pax --dir <root> --json test`, parses stdout strictly as
-`pax.execution-result.v1`. Chip consumes PAX's `status`; it does not embed or reimplement PAX.
+`pax.execution-result.v1`; and provides `project.observe` (PAX >= 0.4.1), a bounded `pax --json observe`
+whose `pax.observation.v1` document is parsed strictly and rendered compactly by Chip, with the scope grammar
+and project-root containment checked before PAX runs. Chip consumes PAX's `status`; it does not embed or reimplement PAX.
 35 tests (plus `chip-cli/tests/pax_probes.rs`, which counts the PAX processes `chip work` starts); the real-PAX ones run only where PAX is installed (CI installs it). *What this proves:*
 Chip can run PAX, reject malformed or mismatched results, and treat PAX `passed` as the test
 authority. *What it does not prove:* PAX behaviour on projects or toolchains beyond those the tests

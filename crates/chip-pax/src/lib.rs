@@ -30,6 +30,15 @@
 //! stderr or in a project's output can pose as a status. It carries no receipt: PAX issues none,
 //! and a PAX result is an observation, not a cryptographic receipt.
 
+mod observe;
+
+pub use observe::{
+    MAX_BYTES as OBSERVE_MAX_BYTES, MAX_FACTS as OBSERVE_MAX_FACTS, MAX_FILES as OBSERVE_MAX_FILES,
+    MAX_RENDERED_BYTES as OBSERVE_MAX_RENDERED_BYTES, MIN_OBSERVE_PAX_VERSION, OBSERVATION_SCHEMA,
+    ObservationState, PINNED_PAX, PROJECT_OBSERVE_CAPABILITY, PaxObserve, PaxRelease, Scope,
+    ScopeError, parse_state,
+};
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

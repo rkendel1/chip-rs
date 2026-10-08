@@ -29,7 +29,7 @@ use chip_core::{
 };
 #[cfg(test)]
 use chip_pax::PaxExecutor;
-use chip_pax::{PAX_TEST_CAPABILITY, PaxTestPassed};
+use chip_pax::{PAX_TEST_CAPABILITY, PROJECT_OBSERVE_CAPABILITY, PaxTestPassed};
 use chip_project::{
     GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
     PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, write_summary,
@@ -433,6 +433,7 @@ fn declared() -> Vec<CapabilityId> {
         PROJECT_READ,
         PROJECT_WRITE,
         PAX_TEST_CAPABILITY,
+        PROJECT_OBSERVE_CAPABILITY,
     ]
     .iter()
     .chain(GIT_CAPABILITIES.iter())
@@ -1352,6 +1353,33 @@ mod tests {
     use fx_core::{FxError, ModelRequest, ModelResponse, Usage};
 
     use super::*;
+
+    /// The audit judges every execution against `declared()`. An execution of a capability the
+    /// environment offers but the audit does not know is reported as an unrequested execution, so the
+    /// two must be the same set: adding a capability to one and not the other fails here.
+    #[tokio::test]
+    async fn the_audits_declared_set_is_exactly_what_the_environment_offers() {
+        let dir = std::env::temp_dir().join(format!("chip-declared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&dir),
+            &dir,
+            PaxExecutor::new(&dir),
+            EnvironmentDescription::default(),
+        );
+        let mut offered: Vec<String> = env
+            .capabilities()
+            .capabilities()
+            .await
+            .unwrap()
+            .iter()
+            .map(|d| d.id.to_string())
+            .collect();
+        let mut audited: Vec<String> = declared().iter().map(|c| c.to_string()).collect();
+        offered.sort();
+        audited.sort();
+        assert_eq!(offered, audited);
+    }
 
     struct Script {
         replies: Mutex<VecDeque<String>>,
