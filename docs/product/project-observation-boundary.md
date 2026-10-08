@@ -68,6 +68,15 @@ delegation layer:
   `runtime-dependency`, `development-dependency` and `workspace-member`; for Rust it is built from
   `cargo metadata --no-deps --offline`. The same crate appears as both a `dependency` node and a
   `workspace-member` node, which is a reminder that provenance matters even at this level.
+  **Its per-member attribution is wrong in a multi-member Cargo workspace** (checked against
+  `cargo metadata` on a two-member workspace): PAX attaches the workspace-wide union of declared
+  dependencies to every member, so a member that declares only `serde` is reported as also declaring
+  `serde` for development and as depending on itself, and the edge's evidence names that member's own
+  manifest for declarations the manifest does not contain. `pax info` carries only the same union.
+  The workspace's member list and the union of declared dependency names are reliable; "which member
+  declares which dependency" is not. Edge sources also mix identifiers (a directory for most, an
+  absolute host path for `workspace-member` edges, a package name as the target). A consumer must not
+  build per-package facts on `graph` until PAX attributes dependencies per package.
 * `pax reality` and `pax drift` report **layered presence checks**, not verified reality. In PAX's own
   words: no PAX output yet meets the bar to be called reality; `resolved` and `installed` mean "a
   lockfile / a conventional directory exists"; lockfile contents and installed packages are not read;
@@ -101,7 +110,7 @@ one graph:
 | --- | --- | --- |
 | Filesystem structure | `src/foo.rs` exists | only manifests, lockfiles and a few conventional directories |
 | Source structure | function `X` is defined in `src/foo.rs`; module `Y` is declared by `src/lib.rs` | no |
-| Dependency structure | package `A` declares dependency `B`; `C` belongs to workspace `W` | yes, declared edges only |
+| Dependency structure | package `A` declares dependency `B`; `C` belongs to workspace `W` | membership yes; the workspace's declared dependency names yes; per-member attribution **not reliable** (section 3) |
 | Import structure | module `X` imports module `Y` | no |
 | Test relationships | test `T` references function `X` | no |
 | Tooling and configuration | the selected build tool and why; manifests; lockfiles | yes |
