@@ -79,6 +79,9 @@ integration, experiment, proof), validation level (L0 to L5), and what is still 
 `chip work` / `chip serve` / `chip verify` path is the product; the graph, decision-model, Wasm and
 local-model crates are experiments. A test keeps that document in step with the workspace.
 
+What `chip work` can and cannot do today, capability by capability, with the gaps and who should own
+them, is in [`docs/product/capabilities.md`](docs/product/capabilities.md).
+
 Performance is a product concern too: Chip should add minimal, bounded overhead around the model and
 the computer. [`docs/product/performance.md`](docs/product/performance.md) records the measured baseline
 and how to reproduce it (`cargo bench -p chip-cli --bench baseline`).

@@ -1,0 +1,274 @@
+# Rust Chip capability inventory and audit
+
+The capability-level counterpart to [`crates.md`](crates.md). That document says which *crates* are
+product; this one says what the product can actually *do*, what it cannot, who should own what is
+missing, and what evidence each statement rests on.
+
+This is an audit, not an expansion: no capability, crate or abstraction was added. Each claim below
+is backed by a test (named where it exists) or by a reading of the code (marked as such). The
+scenario tests use the real product entry point over real files, real `git`, real PAX 0.3.0 and
+cargo; **only the model is scripted.** They show that the capability surface *composes*. They say
+nothing about how well any real model uses it.
+
+## 1. The answer
+
+**Is Rust Chip an effective project/coding agent today?** For one bounded job, yes; as a general
+coding agent, no.
+
+* **Yes:** "change this small project (files under 32 KiB, in directories that already exist) so its
+  tests pass", with the result established by PAX and not by the model. Search, read, write, inspect
+  the diff, run the tests, see the real failure, repair and re-run all compose, and the runtime
+  decides completion (scenarios 2 and 3).
+* **No** for work that is not "change files until tests pass": answering a question about the code
+  or reporting a finding cannot *complete* (scenario 1); a goal that already holds cannot complete
+  (scenario 5; `chip verify` covers the verify-only case separately); files over 32 KiB cannot be
+  read or written; directories cannot be created and nothing can be deleted or renamed.
+* **Unmeasured:** whether a real model does any of this well. No scenario here ran a real model, so
+  the validation level is L3, not L4.
+
+**The minimum next capability, from the evidence:** a ranged `project.read` (offset and length).
+It adds no authority, and the evidence is concrete: 15 of this repository's 185 Rust files exceed
+the 32 KiB read limit, including `chip-core/src/work.rs` (102 KB), so Chip cannot read the code it is
+made of. See gap G2. The most important gap is not a capability at all: it is the completion contract
+for non-mutating goals (G1), which belongs to Chip's goal evaluation.
+
+## 2. Capability model
+
+A capability is not a crate. `project.read` is a capability; `chip-project` is the implementation
+boundary that provides eight of them. `pax.test` is a capability; `chip-pax` is its integration. A
+gap in the matrix does not mean a new crate.
+
+A capability is declared with an id, named inputs (each required or optional), and a contract; it
+reports its own availability; it validates its own input values; it executes; and its result becomes
+an observation. The model proposes; Chip decides:
+
+```text
+model reply
+  -> ModelDecisionBoundary: strict chip.work-decision.v1; unknown capability, extra field, wrong
+     type, malformed reply: rejected (no repair, no retry)
+  -> the capability must be declared and available
+  -> inputs: declared names only; required present; "inputs" member absent when none are declared;
+     the capability's own value rules (path, size)
+  -> Chip builds the ExecutionRequest and its execution id (the model supplies neither)
+  -> CapabilitySet routes by declared id to exactly one backend (no fallback, no "closest")
+  -> execution -> observation -> evidence -> goal evaluation
+```
+
+Verified by: `capability_scenarios.rs` scenarios 4 (unknown capability: nothing runs, nothing is
+substituted, no further model call) and 4b (a declared capability asked outside its authority is
+refused before it runs); `chip-core/tests/invocation_boundary.rs`, `protocol_contract.rs` and
+`capability_surface.rs` (strict parsing and invocation rules); `capability_surface.rs` in `chip-cli`
+(below).
+
+What happens when a capability is missing or unavailable: the request is **rejected and the work
+ends `Failed`** (exit 4, "runtime failure"); a declared capability asked outside its authority ends
+`Blocked` (exit 1). Neither executes anything or substitutes. A model that sees the capability list
+and chooses to stop does so with `block` or `escalate` (scenario 1b). Finding: a request for a
+nonexistent capability is a failed *decision*, but exits in the same class as a violated safety
+invariant. That conflation is worth revisiting when exit codes are next considered.
+
+## 3. Current capability inventory
+
+Machine-read by `crates/chip-cli/tests/capability_surface.rs`: the declared surface of the local
+environment must equal this table exactly. Classes follow section 11 of the brief; owner is who owns
+the *authority*. The level is the highest validated against the real thing; see section 13.
+
+<!-- capabilities:start -->
+| Capability | Class | Authority | Owner | Level |
+| --- | --- | --- | --- | --- |
+| `project.list` | CORE | read | Chip (chip-project) | L3 |
+| `project.search` | CORE | read | Chip (chip-project) | L3 |
+| `project.read` | CORE | read | Chip (chip-project) | L3 |
+| `project.write` | CORE | write | Chip (chip-project) | L3 |
+| `project.git.status` | CORE | read-git | Chip (chip-project) | L3 |
+| `project.git.diff` | CORE | read-git | Chip (chip-project) | L3 |
+| `project.git.diff_stat` | CORE | read-git | Chip (chip-project) | L3 |
+| `project.git.log` | CORE | read-git | Chip (chip-project) | L3 |
+| `pax.test` | INTEGRATION | exec-via-tooling | PAX (chip-pax) | L3 |
+<!-- capabilities:end -->
+
+Authority classes: **read** (reads files under the project root), **read-git** (runs `git` with an
+argument vector Chip fixes, read-only), **write** (changes one file), **exec-via-tooling** (starts
+the project's own test tooling through PAX). Two tests pin that exactly one capability writes
+and exactly one runs project tooling, and that no declared capability is a shell, a process, a
+network call, a delete, or a Git mutation.
+
+Other things that look like capabilities but are not part of the product surface:
+
+| What | Class | Notes |
+| --- | --- | --- |
+| `compute.op_a/b/c`, `compute.selftest`, `compute.hash`, `compute.system_info` (`chip-compute`) | PROOF / INTEGRATION | Offered only by the proof and benchmark commands (`--test-*`, `--horizon-matrix`), never by `chip work`, `verify` or `serve` |
+| `chip.capabilities.v1` catalog, impact and slice bindings (`chip-graph`) | EXPERIMENT | Maps capabilities to graph nodes for the decision research; nothing in the work loop reads it |
+| `TestExecutor`, `ScriptedPolicy`, `TestLocalReasoner` | SUPPORTING (test doubles) | Not offered to a model |
+| `LocalReasoner` adapters (`chip-local-ml`, `chip-laya-reasoner`, `chip-wasm-reasoner`) | EXPERIMENT | Advise a continue/escalate verdict; they execute nothing |
+
+## 4. Authority, side effects and failure, per capability
+
+| Capability | Inputs the model may give | Side effects | Validation | Fails as | Reversible? | Collateral |
+| --- | --- | --- | --- | --- | --- | --- |
+| `project.list` | `path` (optional) | none | project-relative path rules; no `.git`, `.env*`, symlinks | `not_found` | n/a | none; at most 200 entries |
+| `project.search` | `query` (literal, <=200 B), `path` (optional) | none | as above; examines <=500 files of <=256 KiB, returns <=50 matches / 16 KiB | `not_found`; skipped-file counts reported | n/a | none; **not a pattern** (`l.n` matches nothing) |
+| `project.read` | `path` | none | as above; UTF-8 only; <=32 KiB | `not_found`, `too_large`, `not_utf8` | n/a | **content is sent to the model provider**; only `.git` and `.env*` are withheld, so other secret-bearing files are readable |
+| `project.write` | `path`, `content` (<=32 KiB, whole file) | creates or replaces one file; atomic (temp file then rename), read back and compared | as above; parent directory must exist; no `.git`, `.env*` | `parent_missing`, `permission_denied`, `io_error` | **No capability restores the old content**; recoverable only from Git, or by writing back what the model read | any non-reserved file in the root, including `Cargo.toml`, `build.rs`, tests and CI config (`.github/...` passes the path rules; read from the code) |
+| `project.git.status` | none | none | fixed `git` argv; read-only subcommands only | `not_a_repository`, `git_unavailable`, `too_large` | n/a | runs repository-configured filters like any `git status` |
+| `project.git.diff` | none | none | as above | as above; fails instead of truncating at 32 KiB | n/a | whole-tree diff only; untracked files absent and said so |
+| `project.git.diff_stat` | none | none | as above | as above | n/a | none |
+| `project.git.log` | `count` (1 to 50) | none | as above | as above | n/a | none |
+| `pax.test` | none | **whatever the project's tests and build scripts do**, with the tools' permissions | fixed `pax --dir <root> --json test`; PAX >= 0.3.0 verified once per work; 300 s limit | `failed`, `not_run`, `unsupported`, `ambiguous`, `error` results are observed, not retried | no | unbounded in principle: see section 9 |
+
+Higher-authority capability classes, **none of which exists in the product**, each needing an
+explicit design before it could: arbitrary shell, network, secrets, destructive filesystem
+operations, Git mutation, external-service mutation.
+
+## 5. Observation and evidence completeness
+
+For every capability: request, execution, result, observation, evidence, goal evaluation.
+
+| Need | What the product provides | Enough for autonomous recovery? |
+| --- | --- | --- |
+| stdout / stderr | `pax.test`: PAX's verdict on line one, `pax_process_exit`, then the native tools' stderr under a "diagnostics only; never evaluated" label (cap 256 KiB). Scenario 3 shows the model receiving the failing test's name and the `left`/`right` assertion text | Yes. Noisy (full backtraces) but present |
+| exit status | `pax.test`: PAX's own `status`/`reason`/`exit_code` and the process exit; project and Git capabilities report structured success or an `error` code | Yes |
+| file changes | `project.write`: `operation` (created or replaced), `bytes_written`, `sha256`, **`changed`** (false when the bytes were identical); `project.read`: `bytes`, `sha256` | Yes |
+| Git changes | status (branch, staged, unstaged, untracked, deleted, clean); diff (text, `complete`, `includes_untracked`); diff_stat (insertions and deletions) | Yes for tracked files; a new file shows in status, not in the diff, and the diff says so (`git_status_shows_a_new_file_but_the_diff_does_not`) |
+| PAX results | validated `pax.execution-result.v1`; malformed or mismatched results are rejected and create no observation | Yes |
+| failure information | `project.*`: `not_found`, `too_large`, `not_utf8`, `parent_missing`, `permission_denied`, `io_error`; Git: `not_a_repository`, `git_unavailable`, `too_large`; failed observations are ruled out by Chip in the next request with the invocation named | Yes |
+| evidence identity | execution id = `model-` plus the sanitised provider response id; content hashes on read and write; no cryptographic receipt exists (PAX issues none and Chip invents none) | Adequate. Limit: a provider that repeats a response id repeats the execution id and nothing objects (`execution_ids_are_chips_and_derive_from_the_providers_response_id`) |
+| stale evidence | every product capability depends on state that changes between requests, so none is ever answered from remembered evidence (pinned by `no_declared_capability_is_a_shell...`); a PAX pass counts only if it follows the last content-changing write | Yes |
+
+No capability was found whose result is insufficient for the recovery loop that the tests exercise.
+
+## 6. The agent jobs
+
+| Job | Verdict | Evidence and limits |
+| --- | --- | --- |
+| **A. Understand a project** | Sufficient for small projects | `list`, `search` (literal), `read`, Git status/diff/log and `pax.test` answer structure, content, state and test reality (scenarios 1, 2). Limits: 32 KiB per file, 200 entries per listing, 500 files searched, no pattern search. Cannot *report* the result as a completed answer (G1) |
+| **B. Modify a project** | Sufficient for a basic coding loop | search, read, write, diff, status and `pax.test` (scenario 2). Limits: whole-file replace only; files <=32 KiB; the directory must exist; no create-directory, delete or rename (G2, G3, G4) |
+| **C. Verify its own work** | Yes, within what PAX proves | `pax.test` passing after the last content-changing write, decided by Chip from PAX's `status`, not from a model claim (scenarios 2, 3, 5). **PAX proves** that the project's own test operation ran and what it reported. **It does not prove** that the tests are adequate, that the change is minimal or correct beyond them, that lint, format or type checks pass, or that the stated goal means what the tests check. Git status/diff show what changed, not that it is right |
+| **D. Recover from failure** | Yes, with the existing capabilities | observe the failing `pax.test` (verdict and diagnostics), write a fix, re-run, compare (scenario 3). No new capability was needed. Bounded by the work limits (default 12 turns / 8 executions) |
+| **E. Work with Git** | Read: yes. Mutation: not needed for this product | Inspect state, changes, history and the resulting diff (scenario 2). The work contract ends at "tests pass in the working tree"; a human reviews the diff. See section 10 |
+| **F. Work with external systems** | Not required for this product | See section 11 |
+
+## 7. Composition scenarios
+
+`crates/chip-cli/tests/capability_scenarios.rs`; each asserts what reality did.
+
+| # | Scenario | Result |
+| --- | --- | --- |
+| 1 | Inspect: list, search, read, then report | The three observations are real and shown to the model. A `complete` claim is **refused** ("completion refused"): the product's goal is "a file changed and PAX passed after it". A finding can be delivered only as the reason of a `block` (or an escalation). Nothing changed on disk |
+| 2 | Modify: search, read, write, diff, verify | **Completed**, verified. The model sees the real diff (`+pub fn canonical`). The runtime completes the work itself the moment PAX reports `passed` after the change; the model makes no completion call |
+| 3 | Repair: write a wrong fix, test fails, read the evidence, write the right fix, test passes | **Completed**, verified, one recovery. The model's second-turn input contains PAX's `failed` status, the failing test's name and the assertion text, and Chip's own "ruled out: pax.test: its execution failed" |
+| 4 | Block: ask for `shell.exec`, `project.delete`, `git.commit`, `http.get` | Each is rejected as an unknown capability; the work ends `Failed`; **only the earlier read-only step ran**, no further model call, nothing substituted, nothing on disk changed |
+| 4b | A declared capability outside its authority: write into `.git`, outside the root, an absolute path, `.env`; read outside the root | Each ends `Blocked` ("invalid capability input") with **zero executions** and no file created |
+| 5 | No-op: the goal already holds | `list` and `pax.test` run and show `passed`; the claim of completion is **refused** and the files are untouched. Rewriting identical bytes does not count as a change either. (`chip verify` is the command for verify-only work) |
+| - | Limits are observed, not hidden | a 40 KiB file reads as `too_large`; non-UTF-8 as `not_utf8`; a new file in a missing directory as `parent_missing`; 40 KiB of content, or a path with a space, is refused before anything runs |
+| - | Authority through tooling | A model that writes a test and runs `pax.test` makes the project's tooling execute its code, which here writes a file outside the project root. This is the documented limit of the model (README), recorded by `write_plus_test_is_code_execution_through_the_projects_own_tooling` so that a future sandbox changes the test |
+
+## 8. Gaps, from the scenarios
+
+Each gap names the concrete use case that fails, why the current surface cannot do it, who should
+own it, the authority it would carry, and the evidence. Priority is for the first real product.
+
+| # | Gap | Use case that fails | Why current capabilities cannot | Owner | Authority | Evidence | Priority |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **G1** | **No way to complete a non-mutating goal** (a question, a review, "is it already fixed?") | "Where is X defined?", "does the build pass?" | Completion requires a content-changing write followed by `passed` (`VerifiedChange`); the only exits are a refused claim, `block`, or `escalate` | **Chip** (goal evaluation and the work contract; not a capability) | none | scenarios 1 and 5 | **High**, if Chip is to answer questions as well as change code |
+| **G2** | **No ranged read, no partial edit; files over 32 KiB are unreadable and unwritable** | Work in any real codebase's larger files | `project.read` returns the whole file or `too_large`; `project.write` replaces the whole file | **Chip** (chip-project) | ranged read: none beyond `read`; a partial edit: the same as `write` | `capability_limits...` test; 15 of 185 Rust files in this repository exceed 32 KiB, largest 105 KB | **High: the minimum next capability is a ranged `project.read`** |
+| **G3** | **Cannot create a directory, delete or rename a file** | Add a module in a new directory; remove dead code | `project.write` needs an existing parent; no other mutation exists | **Chip** (chip-project) | destructive for delete and rename: needs a design (for example, only inside a clean Git tree, so it is recoverable) | `parent_missing` observation; surface test | Medium |
+| **G4** | **Whole-file replace is the only mutation** | Change one line of a 30 KiB file | The model must re-emit the whole file, risking silent loss; mitigated by the write's read-back hash and `git diff`, not prevented | **Chip** (chip-project) | as `write` | design reading; scenario 2 shows the diff catches changes | Medium; couples with G2 |
+| **G5** | `project.git.diff` has no path scope, fails over 32 KiB, omits untracked files | A big working tree; new files | One whole-tree diff; but `status` lists the new file and `read` shows it | Chip (chip-project) | none | `git_status_shows_a_new_file_but_the_diff_does_not` | Low: composes around it |
+| **G6** | **Project tooling is not sandboxed**: `write` + `pax.test` is code execution | Any untrusted or remote use | The boundary is on files the model may touch, not on what the tests do | **Compute / the environment** (isolation), not a new Chip capability | the largest authority in the product | `write_plus_test_is_code_execution...` | **High before untrusted or hosted use**; acceptable for a local trusted developer, as the README states |
+| **G7** | Only the `test` operation is verifiable | Lint, format or type-check the change | PAX is invoked for `test` only | **PAX** (new operations); Chip would consume them as capabilities | as `pax.test` | no failing scenario: **the need is not yet evidenced** | Defer until a case shows it |
+| **G8** | **File contents are sent to the model provider; only `.git` and `.env*` are withheld** | Private repositories with a hosted model | Path rules are a deny-list of two names | **Chip** (path policy) and the operator's choice of provider; **Attn** for human decisions | confidentiality | path rules (code) | Medium; matters before private-repo use |
+| G9 | Execution ids are not unique if a provider repeats response ids | Local servers with constant ids | The id is `model-` plus the provider's response id | Chip | none | surface test | Low |
+| G10 | No real-model run of these scenarios | Knowing whether the product is *effective* | All scenarios use a scripted model | Chip (validation) | none | this document | **High** for the claim; it is the next measurement |
+
+## 9. Shell and process execution
+
+**Does Chip need arbitrary process execution?** Not for the first product. Work that needs a process
+and how it is served:
+
+| Need | Served by | Needs `shell.exec`? |
+| --- | --- | --- |
+| Run the tests / build | `pax.test` (PAX runs the native tool) | No |
+| Inspect Git | fixed-argv `project.git.*` | No |
+| Format, lint, type-check | not served (G7) | No: ask PAX for the operation |
+| Install dependencies, provision tools | the environment / Compute | No: not an agent act |
+| Run the application, a dev server, a one-off script | not served | Evidence absent; it would be a Compute capability with its own authorization |
+
+The narrower model holds. The honest caveat is G6: because the model can write code and PAX runs the
+project's tests, **Chip already has indirect arbitrary execution**, bounded by the files the model may
+touch and not by what the tests do. Adding `shell.exec` would add *direct* execution with no new
+need to justify it; it is not added, and the surface test fails if a capability named like one
+appears. If a real case needs it, it belongs to Compute (the computer), authorized per use.
+
+## 10. Git
+
+| Operation | Classification | Reason |
+| --- | --- | --- |
+| status, diff, diff_stat, log | **required / useful, present** | Needed to inspect state and verify the change |
+| add / stage | unnecessary (alone) | Only matters with commit |
+| commit | **useful later**, not required | The contract ends at "tests pass in the working tree"; commit needs authorship, message and a human decision. Candidate for Chip/project behind explicit authorization (and Attn) once the work contract includes it |
+| branch | unnecessary | Isolation is the environment's job (one environment per work) |
+| checkout | dangerous | Discards or moves working-tree state; would also be the only "revert" |
+| reset | dangerous | Irreversible loss of uncommitted work |
+| push | belongs outside Chip | Network, credentials and publication; a human or CI decision |
+| stash, merge, rebase, clean | dangerous / unnecessary | Rewrite or discard state |
+
+## 11. External systems
+
+None is required for the first product. Each, for a later one:
+
+| System | Generic or application-specific | Owner | Boundary it would need |
+| --- | --- | --- | --- |
+| HTTP / API | generic transport, application-specific meaning | **AppPort** (explicit, per-service capabilities) | allow-listed hosts and methods, no model-chosen URLs, secrets held by the port, response size bounds |
+| Database query | application-specific | **AppPort** | read-only by default, parameterised, per-database credentials held outside Chip |
+| Browser | generic | **AppPort** (a browser service) or Compute (a session) | origin allow-list, no ambient credentials, isolated profile |
+| Shell / process | generic | **Compute** | section 9 |
+| Artifacts (files outside the project) | generic | **AppPort** or the environment | separate roots, never a model-supplied absolute path |
+| Cloud / service mutation | application-specific | **AppPort**, with **Attn** for approval | explicit, auditable, reversible where possible |
+| Secrets | cross-cutting | the **environment / AppPort** hold them; Chip never sees them | never in model context |
+| Messaging | application-specific | **AppPort**; **Attn** for human-facing decisions | outbound only, rate-limited, approval for anything irreversible |
+
+## 12. Ownership
+
+| Owner | Capabilities and concerns |
+| --- | --- |
+| **Rust Chip** | deciding to invoke an authorized capability; invocation validation; bounded progression; failure and recovery; escalation; goal evaluation (G1); the project file and Git-read capabilities as implemented in `chip-project` (G2, G3, G4, G5, G8, G9) |
+| **PAX** | project test interpretation and structured evidence; new verification operations (G7) |
+| **Compute** | the computer: processes, sessions, isolation and sandboxing (G6), provisioning |
+| **AppPort** | explicit application and service capabilities: HTTP, databases, browsers, messaging |
+| **Attn** | human authority and decisions: approvals for commits, publication, anything irreversible |
+
+## 13. Validation
+
+Every product capability is **L3**: exercised against the real dependency (real filesystem, real
+`git`, real PAX and cargo) by `chip-project`'s and `chip-pax`'s tests and by the scenarios above,
+with a scripted model. **None is L4**: no real-model run of these scenarios is recorded. The
+opt-in real-model tests in `chip-cli/tests` have not been run for this audit. A product-grade claim
+for any capability stops at L3 until they are.
+
+## 14. Deliberately excluded
+
+Shell or process execution; network and HTTP; browser; database; secrets; messaging; cloud or service
+mutation; Git mutation (commit, branch, checkout, reset, push); delete, rename and create-directory
+(not excluded forever: G3, awaiting a design); file access outside the project root; any
+model-supplied command, executable, argument vector, working directory, root, status, observation or
+receipt.
+
+## 15. Follow-up PRs, in order of evidence
+
+1. **Run the scenarios against a real model (G10).** It decides whether the rest matters. Measure
+   with the performance harness's L2 tier; record valid and invalid decisions, recoveries and
+   verified goals per model call.
+2. **A completion contract for non-mutating goals (G1).** A Chip decision about the work contract,
+   with no new authority. Smallest form: let a goal declare that it is satisfied by an observed
+   answer or by a passing test with no change, evaluated by the runtime.
+3. **Ranged `project.read` (G2).** Read-only, no new authority, and the evidence is in this repository.
+   Partial edit (G4) follows only if real-model runs show whole-file replacement losing content.
+4. **A design for create-directory / delete / rename (G3)**, with the recoverability condition decided
+   first.
+5. **Sandbox the project tooling (G6)**, in Compute or the environment, before any untrusted or
+   hosted use.
+6. **Path and secrecy policy for what is sent to a provider (G8)**, before private repositories.
+
+Not on the list, because no evidence supports them: a shell, HTTP, a browser, a database, Git
+mutation, new PAX operations.

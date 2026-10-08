@@ -10,6 +10,9 @@ workspace.
 > responsibility, a clear boundary, evidence that it works, and a reason to exist in the current
 > product. Everything else is labelled honestly. Compiling is not validation.
 
+For the capability-level view (what the product can do, its gaps and their owners), see
+[`capabilities.md`](capabilities.md).
+
 ## 1. Product definition
 
 **Rust Chip is an agent runtime that turns model intelligence into bounded, verifiable action.**
