@@ -15,10 +15,13 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use chip_cli::local_environment::{LocalEnvironment, opaque_id};
-use chip_cli::software_work::{CompleteWhenVerified, SoftwareWork, run_software_work_with_budget};
+use chip_cli::software_work::{
+    CompleteWhenVerified, GoalKind, SoftwareWork, run_software_work_kind,
+    run_software_work_with_budget,
+};
 use chip_core::{
-    EnvironmentDescription, ExecutionEvent, ObservationKind, WorkEvent, WorkId, WorkLimits,
-    WorkOutcome,
+    EnvironmentDescription, ExecutionEvent, LocalWorkPolicy, NoLocalPolicy, ObservationKind,
+    WorkEvent, WorkId, WorkLimits, WorkOutcome,
 };
 use chip_pax::PaxExecutor;
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
@@ -182,6 +185,40 @@ async fn run(dir: &Path, replies: Vec<String>) -> (SoftwareWork, Arc<Script>) {
     (work, model)
 }
 
+/// A run of the given kind. `Chip's own policy` for the kind decides locally what Chip may decide;
+/// `policy` overrides it where a test needs the model, not the runtime, to be the one that finishes.
+async fn run_kind(
+    dir: &Path,
+    kind: GoalKind,
+    policy: Option<&dyn LocalWorkPolicy>,
+    replies: Vec<String>,
+) -> (SoftwareWork, Arc<Script>) {
+    let env = LocalEnvironment::new(
+        opaque_id(dir),
+        dir,
+        PaxExecutor::new(dir),
+        EnvironmentDescription::default(),
+    );
+    let model = Script::new(replies);
+    let work = run_software_work_kind(
+        kind,
+        WorkId::new("scenario"),
+        model.clone(),
+        "scripted".into(),
+        &env,
+        match kind {
+            GoalKind::Change => GOAL,
+            GoalKind::Verify => "Determine whether the project currently passes its tests.",
+            GoalKind::Inspect => "Find where `len` is defined and report it.",
+        },
+        LIMITS,
+        policy.unwrap_or_else(|| kind.policy()),
+        None,
+    )
+    .await;
+    (work, model)
+}
+
 fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -243,9 +280,10 @@ fn last_output(w: &SoftwareWork) -> &str {
 
 // ---- the five scenarios -----------------------------------------------------------------------------
 
-/// Scenario 1. Inspecting works. Reporting what was found does not complete the work: the product's
-/// goal is "a file changed and PAX passed after it", so a claim of completion is refused, and a
-/// finding can only be delivered as the reason for a block. (An audit finding: see capabilities.md.)
+/// Scenario 1, as change work (the default kind). Inspecting works, but a change goal is only
+/// satisfied by "a file changed and PAX passed after it", so a claim of completion that changed
+/// nothing is refused. Read-only goals have their own kind: see
+/// `inspect_completes_on_a_grounded_answer_without_a_change_or_a_test`.
 #[tokio::test(flavor = "multi_thread")]
 async fn scenario_1_inspect_can_observe_but_not_complete() {
     let dir = project("s1", FAILING_TEST);
@@ -475,8 +513,10 @@ async fn scenario_4_a_declared_capability_outside_its_authority_is_refused_befor
     assert!(!dir.parent().unwrap().join("escape.txt").exists());
 }
 
-/// Scenario 5. A goal that already holds cannot be completed: completion requires a content-changing
-/// write followed by a passing test, so the honest no-op ends as a refused claim. (An audit finding.)
+/// Scenario 5, as change work (the default kind). A change goal needs a content-changing write
+/// followed by a passing test, so a project that already passes is not "completed" by claiming it.
+/// The honest no-op is a verify goal: see
+/// `an_already_satisfied_project_completes_as_a_verify_goal_not_through_a_fake_write`.
 #[tokio::test(flavor = "multi_thread")]
 async fn scenario_5_a_noop_is_verified_but_cannot_complete() {
     let dir = project("s5", PASSING_TEST);
@@ -631,4 +671,412 @@ async fn write_plus_test_is_code_execution_through_the_projects_own_tooling() {
         "the model's code ran, outside the project root"
     );
     let _ = std::fs::remove_file(&marker);
+}
+
+// ---- goal-aware completion ----------------------------------------------------------------------------
+//
+// The model proposes; Chip evaluates; reality provides the evidence; only Chip establishes
+// completion. Each kind below is judged from observations, and a model's claim never completes
+// anything by itself.
+
+fn pax_passed(w: &SoftwareWork) -> usize {
+    w.report
+        .observations
+        .iter()
+        .filter(|o| {
+            o.output
+                .as_deref()
+                .is_some_and(|t| t.contains("\"status\":\"passed\""))
+        })
+        .count()
+}
+
+/// Inspect: observations, then an answer that cites what was observed. Chip accepts it; the
+/// model's claim is checked against the observations and was not what completed the work.
+#[tokio::test(flavor = "multi_thread")]
+async fn inspect_completes_on_a_grounded_answer_without_a_change_or_a_test() {
+    let dir = project("inspect-ok", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (w, m) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            list("."),
+            search("len"),
+            read("src/lib.rs"),
+            complete("`len` is defined in src/lib.rs (line 1) and returns the byte length."),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(&w.report.outcome, WorkOutcome::Completed { summary } if summary.contains("src/lib.rs")),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        started(&w),
+        3,
+        "three real observations, nothing else: {}",
+        describe(&w)
+    );
+    assert_eq!(w.pax_executions(), 0, "no test was needed to answer");
+    assert!(w.verified, "grounded in what was observed");
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert_eq!(before, snapshot(&dir), "nothing changed");
+    assert!(
+        m.request(3).contains("pub fn len"),
+        "the model was shown the file it cites"
+    );
+    w.audit.assert_clean();
+}
+
+/// Inspect: a claim reality does not support is refused, and the refusal is the runtime's.
+#[tokio::test(flavor = "multi_thread")]
+async fn inspect_refuses_an_answer_that_is_not_grounded_in_the_observations() {
+    let dir = project("inspect-bad", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let observe = || vec![list("."), read("src/lib.rs")];
+    let with = |answer: &str| {
+        let mut replies = observe();
+        replies.push(complete(answer));
+        replies
+    };
+    for (what, answer) in [
+        ("cites nothing", "It is defined somewhere in the library."),
+        (
+            "cites a file that was not observed",
+            "It is in src/other.rs.",
+        ),
+        ("cites only part of a longer path", "It is in mysrc/lib.rs."),
+        ("cites a longer extension", "It is in src/lib.rs2."),
+        ("is empty", "   "),
+    ] {
+        let (w, _) = run_kind(&dir, GoalKind::Inspect, None, with(answer)).await;
+        assert!(
+            blocked_with(&w, "not supported by the observations"),
+            "{what}: {}",
+            describe(&w)
+        );
+        assert!(!w.verified, "{what}");
+        assert_eq!(
+            w.exit_status(),
+            chip_cli::verify::EXIT_NOT_VERIFIED,
+            "{what}"
+        );
+        assert_eq!(before, snapshot(&dir), "{what}");
+    }
+    // A listing alone does not ground a claim about a file that was never listed or read either.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![list("tests"), complete("It is in src/lib.rs.")],
+    )
+    .await;
+    assert!(
+        blocked_with(&w, "not supported by the observations"),
+        "{}",
+        describe(&w)
+    );
+}
+
+/// Inspect: no observation, or a change, and the claim is refused however well it is worded.
+#[tokio::test(flavor = "multi_thread")]
+async fn inspect_requires_observation_and_forbids_change() {
+    let dir = project("inspect-guard", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    // Nothing observed: there is nothing to ground an answer in.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![complete("src/lib.rs defines len.")],
+    )
+    .await;
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert_eq!(started(&w), 0);
+    assert_eq!(before, snapshot(&dir));
+    // A change was made: this was not a read-only inspection, so it cannot complete as one.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            complete("src/lib.rs defines len."),
+        ],
+    )
+    .await;
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert!(!w.verified);
+}
+
+/// Verify: the runtime completes the work itself when PAX passes an unchanged project. The model
+/// makes one call and never claims completion.
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_completes_when_the_unchanged_project_passes() {
+    let dir = project("verify-ok", PASSING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (w, m) = run_kind(&dir, GoalKind::Verify, None, vec![pax_test()]).await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(w.verified && w.goal_satisfied == Some(true));
+    assert_eq!(pax_passed(&w), 1, "PAX really passed");
+    assert_eq!((w.writes, w.changed_writes), (0, 0));
+    assert_eq!(
+        m.calls(),
+        1,
+        "the runtime completed it; the model claimed nothing"
+    );
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert_eq!(before, snapshot(&dir));
+    w.audit.assert_clean();
+
+    // The same with some inspection first; and an identical-bytes write changes nothing, so it
+    // neither counts as a change nor as evidence.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Verify,
+        None,
+        vec![
+            list("."),
+            read("src/lib.rs"),
+            write("src/lib.rs", OLD_LIB),
+            pax_test(),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        (w.writes, w.changed_writes),
+        (1, 0),
+        "the write changed no bytes"
+    );
+    assert_eq!(before, snapshot(&dir));
+}
+
+/// Verify: a failing project does not complete, whatever the model says afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_does_not_complete_when_the_tests_fail() {
+    let dir = project("verify-fail", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (w, m) = run_kind(
+        &dir,
+        GoalKind::Verify,
+        None,
+        vec![pax_test(), complete("Looks fine to me.")],
+    )
+    .await;
+    assert!(
+        !matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert_eq!(pax_passed(&w), 0);
+    assert!(!w.verified && w.goal_satisfied == Some(false));
+    // The failure reached the decision that followed it.
+    assert!(
+        m.request(1).contains("\\\"status\\\":\\\"failed\\\""),
+        "{}",
+        m.request(1)
+    );
+    assert!(
+        m.request(1).contains("canonical"),
+        "the compiler's diagnostics, naming what is missing, reached the model"
+    );
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(before, snapshot(&dir));
+}
+
+/// A project that already satisfies a change goal needs no manufactured change: it is a verify
+/// goal. As a change goal it still cannot complete, and an identical write is no shortcut.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_already_satisfied_project_completes_as_a_verify_goal_not_through_a_fake_write() {
+    let dir = project("noop", PASSING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (w, _) = run_kind(&dir, GoalKind::Verify, None, vec![list("."), pax_test()]).await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!((w.writes, w.changed_writes), (0, 0), "no write was needed");
+    assert_eq!(before, snapshot(&dir));
+    // As change work, passing without a change is not completion, and writing the same bytes is not
+    // a change.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Change,
+        None,
+        vec![write("src/lib.rs", OLD_LIB), pax_test()],
+    )
+    .await;
+    assert!(
+        !matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(!w.verified && w.changed_writes == 0);
+    assert_eq!(before, snapshot(&dir));
+}
+
+/// Verification goes stale when the project changes after it. The model is made the one that asks
+/// to finish (Chip's own completion is switched off), so only the evaluation can refuse it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_verification_cannot_complete_a_project_that_changed_after_it() {
+    let dir = project("stale", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    // Change work: write, test (passes), write again, claim. The pass no longer covers the files.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Change,
+        Some(&NoLocalPolicy),
+        vec![
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+            write(
+                "src/lib.rs",
+                &format!("{RIGHT}\n// edited after the test\n"),
+            ),
+            complete("the tests pass"),
+        ],
+    )
+    .await;
+    assert_eq!(pax_passed(&w), 1, "PAX did pass once");
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert!(
+        !w.verified,
+        "the earlier pass does not cover the final state"
+    );
+
+    // The same sequence, re-tested after the last change, is accepted.
+    let dir = project("stale-ok", FAILING_TEST);
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Change,
+        Some(&NoLocalPolicy),
+        vec![
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+            write(
+                "src/lib.rs",
+                &format!("{RIGHT}\n// edited after the test\n"),
+            ),
+            pax_test(),
+            complete("the tests pass"),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(w.verified);
+
+    // Verify work: a passing test, then a change, is no longer a statement about the project as
+    // it was, so the claim is refused.
+    let dir = project("stale-verify", PASSING_TEST);
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Verify,
+        Some(&NoLocalPolicy),
+        vec![
+            pax_test(),
+            write("src/lib.rs", RIGHT),
+            complete("it passes"),
+        ],
+    )
+    .await;
+    assert_eq!(pax_passed(&w), 1);
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert!(!w.verified);
+}
+
+/// The model cannot manufacture completion in any kind: with no evidence, "complete" is refused,
+/// nothing executes as a side effect, and nothing changes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completion_claim_without_evidence_is_refused_for_every_kind() {
+    let dir = project("claim", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    for kind in GoalKind::ALL {
+        let (w, m) = run_kind(
+            &dir,
+            kind,
+            Some(&NoLocalPolicy),
+            vec![complete("Looks good. src/lib.rs is fine.")],
+        )
+        .await;
+        assert!(
+            blocked_with(&w, "completion refused"),
+            "{kind:?}: {}",
+            describe(&w)
+        );
+        assert_eq!(started(&w), 0, "{kind:?}: nothing executed");
+        assert_eq!(m.calls(), 1, "{kind:?}: no retry");
+        assert!(
+            !w.verified && w.exit_status() == chip_cli::verify::EXIT_NOT_VERIFIED,
+            "{kind:?}"
+        );
+        assert_eq!(before, snapshot(&dir), "{kind:?}");
+        w.audit.assert_clean();
+    }
+}
+
+/// A non-mutating goal is no way around the invocation boundary: an undeclared capability is
+/// refused whatever the kind.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_kind_widens_the_invocation_boundary() {
+    let dir = project("kinds-boundary", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    for kind in GoalKind::ALL {
+        let (w, _) = run_kind(
+            &dir,
+            kind,
+            None,
+            vec![request("shell.exec", r#"{"command":"ls"}"#)],
+        )
+        .await;
+        assert!(
+            matches!(&w.report.outcome, WorkOutcome::Failed { reason } if reason.contains("unknown capability")),
+            "{kind:?}: {}",
+            describe(&w)
+        );
+        assert_eq!(started(&w), 0, "{kind:?}");
+    }
 }

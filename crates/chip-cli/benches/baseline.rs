@@ -1724,7 +1724,7 @@ async fn real_model(report: &mut Report, _opts: &Opts) {
         EnvironmentDescription::default(),
     );
     let (w, _) = runtime
-        .run(WorkId::new("l2"), "Add a function `canonical(s: &str) -> String` to src/lib.rs that sorts the `&`-separated pairs, so the project's tests pass.", WorkLimits { max_turns: 12, max_executions: 8 }, None, &env)
+        .run(WorkId::new("l2"), "Add a function `canonical(s: &str) -> String` to src/lib.rs that sorts the `&`-separated pairs, so the project's tests pass.", chip_cli::software_work::GoalKind::Change, WorkLimits { max_turns: 12, max_executions: 8 }, None, &env)
         .await;
     let m = w.report.measurement();
     let overhead = w

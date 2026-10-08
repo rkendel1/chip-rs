@@ -172,8 +172,19 @@ async fn chip_work(
     path: &std::ffi::OsStr,
     extra: &[(&str, &Path)],
 ) -> (Option<i32>, String) {
+    chip_work_args(dir, url, path, extra, &[]).await
+}
+
+async fn chip_work_args(
+    dir: &Path,
+    url: &str,
+    path: &std::ffi::OsStr,
+    extra: &[(&str, &Path)],
+    args: &[&str],
+) -> (Option<i32>, String) {
     let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_chip"));
     cmd.args(["work", "probe goal"])
+        .args(args)
         .current_dir(dir)
         .env_remove("PAX_BIN")
         .env("PATH", path)
@@ -273,4 +284,82 @@ async fn no_pax_at_all_still_stops_chip_work_before_a_model_is_asked() {
         0,
         "no model was asked: {text}"
     );
+}
+
+/// `chip work --kind verify`: the runtime completes a passing, unchanged project itself, after one
+/// model call that asked for the tests and claimed nothing. Exit status 0, PAX resolved once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_verify_goal_completes_a_passing_project_with_one_model_call() {
+    let pax = CountingPax::new("verify", "0.3.0");
+    let dir = project("verify");
+    let before = std::fs::read(dir.join("src/lib.rs")).unwrap();
+    let (url, requests) =
+        model(|_| r#"{"decision":"request_capability","capability":"pax.test"}"#).await;
+    let (code, text) = chip_work_args(
+        &dir,
+        &url,
+        &pax.path_env(),
+        &[],
+        &["--kind", "verify", "--json"],
+    )
+    .await;
+    assert_eq!(code, Some(0), "{text}");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "the model asked for the tests and nothing else: {text}"
+    );
+    assert_eq!((pax.count("version"), pax.count("run")), (1, 1));
+    let json: serde_json::Value =
+        serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{e}: {text}"));
+    assert_eq!(json["goal_kind"], "verify");
+    assert_eq!(json["terminal_state"], "completed");
+    assert_eq!(json["verified"], true);
+    assert_eq!(json["changed_writes"], 0);
+    assert_eq!(std::fs::read(dir.join("src/lib.rs")).unwrap(), before);
+}
+
+/// `chip work --kind inspect`: a grounded answer completes; the default kind still refuses it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_inspect_goal_completes_on_a_grounded_answer_and_the_default_kind_does_not() {
+    fn script(step: usize) -> &'static str {
+        match step {
+            0 => {
+                r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#
+            }
+            _ => r#"{"decision":"complete","summary":"`one` is defined in src/lib.rs."}"#,
+        }
+    }
+    let pax = CountingPax::new("inspect", "0.3.0");
+    let dir = project("inspect");
+    let (url, requests) = model(script).await;
+    let (code, text) = chip_work_args(
+        &dir,
+        &url,
+        &pax.path_env(),
+        &[],
+        &["--kind", "inspect", "--json"],
+    )
+    .await;
+    assert_eq!(code, Some(0), "{text}");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    let json: serde_json::Value =
+        serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{e}: {text}"));
+    assert_eq!(json["goal_kind"], "inspect");
+    assert_eq!(json["terminal_state"], "completed");
+    assert!(json["answer"].as_str().unwrap().contains("src/lib.rs"));
+    assert_eq!(
+        (pax.count("version"), pax.count("run")),
+        (0, 0),
+        "answering needed no PAX process"
+    );
+
+    let (url, _) = model(script).await;
+    let (code, text) = chip_work(&dir, &url, &pax.path_env(), &[]).await;
+    assert_eq!(
+        code,
+        Some(1),
+        "as change work the same answer is refused: {text}"
+    );
+    assert!(text.contains("completion refused"), "{text}");
 }

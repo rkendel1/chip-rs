@@ -153,6 +153,8 @@ model ──judgment──▶ Chip ──pax.test──▶ pax --dir <cwd> --jso
 ```sh
 cd ~/src/project
 chip work "Fix the failing tests in this project"                       # model from the environment
+chip work --kind verify "Does this project pass its tests?"             # no change needed
+chip work --kind inspect "Where is the request parsed? Cite the file."  # read-only
 chip work --provider ollama --model qwen3-coder "Fix the failing tests"  # fully local
 chip work --provider anthropic --model claude-haiku-4-5-20251001 --json "<goal>"
 ```
@@ -199,10 +201,19 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   Inherent limit: code the model writes is run by the project's own test tooling, so `project.write`
   plus `pax.test` is code execution *through the project's tooling*. Chip bounds what the model may do
   to files; it does not sandbox the project.
-* **Goal.** Complete only when PAX established `passed` *after the last change* that altered a file. A
-  pass that predates a later change does not count, a write alone is not completion, and a model's
-  claim of completion is refused until reality supports it. The runtime completes the work itself as
-  soon as the goal holds.
+* **Goal and its kind.** The model proposes; Chip evaluates; reality provides the evidence; only Chip
+  establishes completion. A model's claim of completion is a proposal and is refused until the
+  observations support it. How completion is judged depends on the goal's *kind*, chosen by whoever
+  submits the goal (`--kind`), never by the model and never inferred from the goal's words:
+  * `change` (default): complete only when PAX established `passed` *after the last change* that
+    altered a file. A pass that predates a later change does not count, and a write alone is not
+    completion. The runtime completes the work itself as soon as that holds.
+  * `verify`: complete when PAX established `passed` and this work changed no file ("does the project
+    pass its tests as it is?"). The runtime completes it itself.
+  * `inspect`: read-only. The model proposes an answer with `complete`; Chip accepts it only if
+    read-only observations occurred, no file was changed, and the answer cites a file Chip observed.
+    Accepted means *grounded in observation*, not proven correct.
+  See [`docs/product/capabilities.md`](docs/product/capabilities.md) section 2a.
 * **Revisiting a capability.** A note that one invocation failed or fell short names that invocation
   (`project.read (path="src/a.rs")`); another input to the same capability is a different invocation
   and is never ruled out by it. Every read, list, search, write and test run is performed again when
@@ -255,7 +266,9 @@ started only when a work runs `pax.test`.
 | `POST /v1/work/{id}/cancel` | queued: removed, `cancelled`. Running: `cancellation_requested` (advisory). Ended: 409 |
 | `GET /v1/metrics` | service-level counts and queue/duration statistics |
 
-The only accepted body field is `goal`. A body naming anything else (ids, receipts, observations,
+The accepted body fields are `goal` and, optionally, `kind` (`change` by default, `verify` or
+`inspect`; anything else is 400 `invalid_kind`). The kind says how Chip judges completion and grants
+nothing. A body naming anything else (ids, receipts, observations,
 evidence, executable, argv, cwd, workspace root, capability, provider, model, endpoint, priority...)
 is rejected with 400 `unknown_field`. Errors are `{"error":{"code","message"}}`.
 

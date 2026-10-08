@@ -20,12 +20,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chip_core::{
-    Agent, CapabilityId, ContextReport, DeduplicatedEscalationContext, EnvironmentDescription,
-    Environments, ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary, Observation,
-    ObservationInvariant, ObservationPredicate, SafetyAudit, WorkDecision, WorkEnvironment,
-    WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
-    WorkUtilityMeasurement, WorkView, audit_safety, context_report, measure_utility,
-    verify_trajectory,
+    Agent, AnswerPredicate, CapabilityId, ContextReport, DeduplicatedEscalationContext,
+    EnvironmentDescription, Environments, ExecutionObserver, LocalWorkPolicy,
+    ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant, ObservationPredicate,
+    SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits,
+    WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
+    context_report, measure_utility, verify_trajectory,
 };
 #[cfg(test)]
 use chip_pax::PaxExecutor;
@@ -47,7 +47,7 @@ const LIMIT_CEILING: usize = 50;
 const MAX_GOAL_BYTES: usize = 2000;
 
 /// What the model is told about how work is judged: Chip-owned text, not something it can edit.
-const RULES: &str = "Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). The repository's state can be observed, never changed, with project.git.status, project.git.diff, project.git.diff_stat and project.git.log; the working tree may already hold changes that are not yours, and they must be preserved. Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes.";
+const COMMON_RULES: &str = "Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). The repository's state can be observed, never changed, with project.git.status, project.git.diff, project.git.diff_stat and project.git.log; the working tree may already hold changes that are not yours, and they must be preserved.";
 
 /// What a goal may be, from any surface: non-empty after trimming, plain text, bounded.
 pub fn goal_is_acceptable(goal: &str) -> bool {
@@ -56,8 +56,260 @@ pub fn goal_is_acceptable(goal: &str) -> bool {
         && !goal.chars().any(|c| c.is_control() && c != '\n')
 }
 
+/// The goal as the model is told it, for change-and-verify work.
 pub fn goal_text(goal: &str) -> String {
-    format!("{} {RULES}", goal.trim())
+    goal_text_for(GoalKind::Change, goal)
+}
+
+/// The goal as the model is told it, with how Chip will judge this kind of goal.
+pub fn goal_text_for(kind: GoalKind, goal: &str) -> String {
+    format!("{} {COMMON_RULES} {}", goal.trim(), kind.completion_rule())
+}
+
+/// What kind of completion a goal needs. It is chosen by whoever submits the goal (`--kind`, or
+/// `kind` on the service), never by the model and never inferred from the goal's words. Every kind
+/// is judged by Chip from observations; none lets the model's claim complete the work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GoalKind {
+    /// Change files so the tests pass. Completion: a content-changing write was observed, and PAX
+    /// then established `passed` with no later change. The runtime completes the work itself.
+    #[default]
+    Change,
+    /// Establish whether the project, as it is, passes its tests. Completion: PAX established
+    /// `passed` and this work changed no file. The runtime completes the work itself.
+    Verify,
+    /// Observe and answer. Completion: the model proposes an answer; Chip accepts it only if
+    /// read-only observations occurred, no file was changed, and the answer cites a file Chip
+    /// observed. "Accepted" means grounded in observation, not proven correct.
+    Inspect,
+}
+
+impl GoalKind {
+    pub const ALL: [GoalKind; 3] = [GoalKind::Change, GoalKind::Verify, GoalKind::Inspect];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Change => "change",
+            Self::Verify => "verify",
+            Self::Inspect => "inspect",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.name() == text)
+    }
+
+    fn completion_rule(self) -> &'static str {
+        match self {
+            Self::Change => {
+                "Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes."
+            }
+            Self::Verify => {
+                "This goal asks about the project as it is, so do not change any file. Chip decides completion: the work is complete only when pax.test passes and this work has changed no file, as pax.test itself establishes."
+            }
+            Self::Inspect => {
+                "This goal asks only for observation, so do not change any file. When you can answer, reply with the complete decision and put your answer in its summary, citing the project-relative paths of the files you observed with project.list, project.search or project.read. Chip decides completion: it accepts the answer only if it cites at least one such file and this work has changed no file."
+            }
+        }
+    }
+
+    /// The outcome Chip evaluates from observations after every execution.
+    pub fn required_observation(self) -> Arc<dyn ObservationPredicate> {
+        match self {
+            Self::Change => Arc::new(VerifiedChange),
+            Self::Verify => Arc::new(VerifiedState),
+            Self::Inspect => Arc::new(InspectionObserved),
+        }
+    }
+
+    /// What the model's proposed answer must satisfy when it asks to complete, if anything.
+    pub fn required_answer(self) -> Option<Arc<dyn AnswerPredicate>> {
+        matches!(self, Self::Inspect).then(|| Arc::new(GroundedAnswer) as Arc<dyn AnswerPredicate>)
+    }
+
+    /// Chip's own local decisions for this kind: it completes change and verify work itself the
+    /// moment their outcome holds, and decides nothing for an inspection (the model answers).
+    pub fn policy(self) -> &'static dyn LocalWorkPolicy {
+        match self {
+            Self::Change => &CompleteWhenVerified,
+            Self::Verify => &CompleteWhenStateVerified,
+            Self::Inspect => &NoLocalPolicy,
+        }
+    }
+
+    /// Whether the recorded work satisfies this kind of goal, re-evaluated from the observations
+    /// (and, for an inspection, the accepted answer) and from nothing else.
+    pub fn verified(self, observations: &[Observation], outcome: &WorkOutcome) -> bool {
+        match self {
+            Self::Change => VerifiedChange.satisfied_by_trajectory(observations),
+            Self::Verify => VerifiedState.satisfied_by_trajectory(observations),
+            Self::Inspect => match outcome {
+                WorkOutcome::Completed { summary } => {
+                    InspectionObserved.satisfied_by_trajectory(observations)
+                        && GroundedAnswer.accepts(summary, observations)
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Whether any recorded observation is a content-changing project write.
+fn changed_a_file(observations: &[Observation]) -> bool {
+    observations
+        .iter()
+        .any(|o| write_summary(o).is_some_and(|(_, changed)| changed))
+}
+
+/// The first line of a successful observation as JSON: the shape every project observation has.
+fn project_line(observation: &Observation) -> Option<serde_json::Value> {
+    if observation.kind != chip_core::ObservationKind::ExecutionCompleted
+        || observation.status != chip_core::ExecutionStatus::Success
+    {
+        return None;
+    }
+    serde_json::from_str(observation.output.as_deref()?.lines().next()?).ok()
+}
+
+/// "PAX established `passed` for the test operation, and this work changed no project file." A
+/// pass that follows a content-changing write is a pass of something this work made, not of the
+/// project as it was, so any such write means the goal cannot be met. Read from the recorded
+/// observations in order and nothing else.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VerifiedState;
+
+impl ObservationPredicate for VerifiedState {
+    fn describe(&self) -> String {
+        "PAX established the test operation as passed, and this work changed no project file"
+            .to_string()
+    }
+
+    fn satisfied_by(&self, _observation: &Observation) -> bool {
+        false
+    }
+
+    fn satisfied_by_trajectory(&self, observations: &[Observation]) -> bool {
+        !changed_a_file(observations) && observations.iter().any(|o| PaxTestPassed.satisfied_by(o))
+    }
+}
+
+/// Chip completes a verification the moment its own evaluation says the project passes unchanged.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompleteWhenStateVerified;
+
+impl LocalWorkPolicy for CompleteWhenStateVerified {
+    fn propose(&self, view: &WorkView<'_>) -> Option<WorkDecision> {
+        VerifiedState
+            .satisfied_by_trajectory(view.observations)
+            .then(|| WorkDecision::Complete {
+                summary: "pax.test passed and this work changed no file".to_string(),
+            })
+    }
+}
+
+/// "The project was observed read-only: at least one successful list, search, read or Git
+/// observation, and no content-changing write." It does not complete the work by itself (an
+/// inspection is completed by an accepted answer); it is the evidence the answer is checked
+/// against.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InspectionObserved;
+
+impl ObservationPredicate for InspectionObserved {
+    fn describe(&self) -> String {
+        "the project was observed with at least one successful read-only capability, and this work changed no project file".to_string()
+    }
+
+    fn satisfied_by(&self, _observation: &Observation) -> bool {
+        false
+    }
+
+    fn satisfied_by_trajectory(&self, observations: &[Observation]) -> bool {
+        !changed_a_file(observations)
+            && observations.iter().any(|o| {
+                project_line(o)
+                    .and_then(|v| v["capability"].as_str().map(str::to_string))
+                    .is_some_and(|c| {
+                        [PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ].contains(&c.as_str())
+                            || GIT_CAPABILITIES.contains(&c.as_str())
+                    })
+            })
+    }
+}
+
+/// The files Chip observed: a successful read's path, the files a search matched, the files a
+/// listing showed. Directories are not files, and a failed observation observed nothing.
+fn observed_files(observations: &[Observation]) -> std::collections::BTreeSet<String> {
+    let mut files = std::collections::BTreeSet::new();
+    for o in observations {
+        let Some(head) = project_line(o) else {
+            continue;
+        };
+        let body = o.output.as_deref().unwrap_or_default();
+        match head["capability"].as_str() {
+            Some(PROJECT_READ) => {
+                if let Some(path) = head["path"].as_str() {
+                    files.insert(path.to_string());
+                }
+            }
+            Some(PROJECT_SEARCH) => {
+                for row in body.split("--- matches ---\n").nth(1).unwrap_or("").lines() {
+                    if let Some((path, _)) = row.split_once(':') {
+                        files.insert(path.to_string());
+                    }
+                }
+            }
+            Some(PROJECT_LIST) => {
+                for row in body.split("--- entries ---\n").nth(1).unwrap_or("").lines() {
+                    if let Some(rest) = row.strip_prefix("file ") {
+                        if let Some((path, _size)) = rest.rsplit_once(' ') {
+                            files.insert(path.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    files
+}
+
+/// Whether `answer` names `path` as a whole path, not as part of a longer one.
+fn cites(answer: &str, path: &str) -> bool {
+    let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/');
+    answer.match_indices(path).any(|(at, _)| {
+        let before = answer[..at].chars().next_back();
+        let after = answer[at + path.len()..].chars();
+        let mut after = after.clone();
+        let next = after.next();
+        let following = after.next();
+        let before_ok = before.is_none_or(|c| !is_path_char(c));
+        // A sentence's full stop or a `:line` may follow; a longer name or extension may not.
+        let after_ok = match next {
+            None => true,
+            Some('.') => following.is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_')),
+            Some(c) => !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/')),
+        };
+        before_ok && after_ok
+    })
+}
+
+/// "The answer cites at least one file Chip observed." The answer is never believed: it is checked
+/// against what the observations contain. This establishes that the answer is anchored in something
+/// Chip saw, not that it is true; arbitrary natural-language answers cannot be verified here.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GroundedAnswer;
+
+impl AnswerPredicate for GroundedAnswer {
+    fn describe(&self) -> String {
+        "the answer cites at least one project file that was observed with project.list, project.search or project.read".to_string()
+    }
+
+    fn accepts(&self, answer: &str, observations: &[Observation]) -> bool {
+        !answer.trim().is_empty()
+            && observed_files(observations)
+                .iter()
+                .any(|path| cites(answer, path))
+    }
 }
 
 /// "PAX established `passed` for the test operation, and a change to a project file was observed
@@ -104,16 +356,30 @@ impl LocalWorkPolicy for CompleteWhenVerified {
     }
 }
 
-/// The one supported piece of work, over one project.
+/// Change-and-verify work over one project.
 pub fn spec(
     id: WorkId,
     goal: &str,
     invariants: Vec<Arc<dyn ObservationInvariant>>,
     limits: WorkLimits,
 ) -> WorkSpec {
-    let mut spec = WorkSpec::new(id, WorkGoal::new(goal_text(goal)))
+    spec_for(GoalKind::Change, id, goal, invariants, limits)
+}
+
+/// Work of the given kind over one project.
+pub fn spec_for(
+    kind: GoalKind,
+    id: WorkId,
+    goal: &str,
+    invariants: Vec<Arc<dyn ObservationInvariant>>,
+    limits: WorkLimits,
+) -> WorkSpec {
+    let mut spec = WorkSpec::new(id, WorkGoal::new(goal_text_for(kind, goal)))
         .with_limits(limits)
-        .with_required_observation(Arc::new(VerifiedChange));
+        .with_required_observation(kind.required_observation());
+    if let Some(answer) = kind.required_answer() {
+        spec = spec.with_required_answer(answer);
+    }
     // The environment says what its observations must satisfy; Chip applies it.
     for invariant in invariants {
         spec = spec.with_observation_invariant(invariant);
@@ -162,6 +428,8 @@ pub struct Identity {
 /// What a run of software work established.
 pub struct SoftwareWork {
     pub goal: String,
+    /// What kind of completion the goal needed.
+    pub kind: GoalKind,
     pub report: WorkReport,
     pub audit: SafetyAudit,
     pub trajectory_violations: usize,
@@ -291,13 +559,41 @@ pub async fn run_software_work_with_budget(
     policy: &dyn LocalWorkPolicy,
     context_budget_bytes: Option<usize>,
 ) -> SoftwareWork {
+    run_software_work_kind(
+        GoalKind::Change,
+        id,
+        model,
+        model_name,
+        environment,
+        goal,
+        limits,
+        policy,
+        context_budget_bytes,
+    )
+    .await
+}
+
+/// [`run_software_work_with_budget`] for a goal of the given kind. The kind decides how Chip
+/// judges completion; `policy` is Chip's own local decisions (normally [`GoalKind::policy`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_software_work_kind(
+    kind: GoalKind,
+    id: WorkId,
+    model: Arc<dyn ModelProvider>,
+    model_name: String,
+    environment: &dyn WorkEnvironment,
+    goal: &str,
+    limits: WorkLimits,
+    policy: &dyn LocalWorkPolicy,
+    context_budget_bytes: Option<usize>,
+) -> SoftwareWork {
     let set = environment.capabilities();
     let agent = Agent::with_model(model, model_name)
         .with_capabilities(set.clone())
         .with_executor(set)
         .with_observer(Arc::new(ExecutionObserver))
         .with_max_output_tokens(WORK_MAX_OUTPUT_TOKENS);
-    let mut spec = spec(id, goal, environment.observation_invariants(), limits);
+    let mut spec = spec_for(kind, id, goal, environment.observation_invariants(), limits);
     if let Some(bytes) = context_budget_bytes {
         spec = spec.with_context_budget_bytes(bytes);
     }
@@ -317,7 +613,7 @@ pub async fn run_software_work_with_budget(
         WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
         _ => None,
     });
-    let verified = VerifiedChange.satisfied_by_trajectory(&report.observations);
+    let verified = kind.verified(&report.observations, &report.outcome);
     let written: Vec<(String, bool)> = report
         .observations
         .iter()
@@ -325,6 +621,7 @@ pub async fn run_software_work_with_budget(
         .collect();
     SoftwareWork {
         goal: goal.trim().to_string(),
+        kind,
         audit,
         trajectory_violations,
         utility,
@@ -423,12 +720,18 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
     }
     line(format!(
         "Verified: {}",
-        if w.verified {
-            "yes (pax.test passed after the last change)"
-        } else {
-            "no"
+        match (w.verified, w.kind) {
+            (true, GoalKind::Change) => "yes (pax.test passed after the last change)",
+            (true, GoalKind::Verify) => "yes (pax.test passed and no file was changed)",
+            (true, GoalKind::Inspect) =>
+                "grounded (the answer cites a file that was observed; its correctness is not established)",
+            (false, _) => "no",
         }
     ));
+    line(format!("Goal kind: {}", w.kind.name()));
+    if let (GoalKind::Inspect, WorkOutcome::Completed { summary }) = (w.kind, &w.report.outcome) {
+        line(format!("Answer: {summary}"));
+    }
     if let Some(reason) = outcome_reason(&w.report.outcome) {
         line(format!("Outcome: {reason}"));
     }
@@ -542,6 +845,11 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "model": id.map(|i| i.model.as_str()),
         "endpoint": id.map(|i| i.endpoint.as_str()),
         "goal": w.goal,
+        "goal_kind": w.kind.name(),
+        "answer": match (w.kind, &w.report.outcome) {
+            (GoalKind::Inspect, WorkOutcome::Completed { summary }) => Some(summary.as_str()),
+            _ => None,
+        },
         "terminal_state": m.terminal_state().name(),
         "outcome_reason": outcome_reason(&w.report.outcome),
         "goal_satisfied": w.goal_satisfied,
@@ -601,13 +909,16 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip work \"<goal>\" [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
+        "usage: chip work \"<goal>\" [--kind change|verify|inspect] [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
     );
     eprintln!(
         "       provider/model/endpoint: command line, then CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, then the provider's default endpoint; a model is always required"
     );
     eprintln!(
         "       --context-budget-bytes N (or CHIP_CONTEXT_BUDGET_BYTES): the most bytes of message content one model request may carry; a request over it is not sent"
+    );
+    eprintln!(
+        "       --kind: change (default) edits files until the tests pass; verify establishes that the project passes its tests unchanged; inspect observes and answers, citing the files it observed. Chip, not the model, decides completion for every kind"
     );
     eprintln!("       works on the project in the current directory");
     EXIT_USAGE
@@ -761,6 +1072,7 @@ impl WorkRuntime {
         &self,
         id: WorkId,
         goal: &str,
+        kind: GoalKind,
         limits: WorkLimits,
         control: Option<Arc<RunControl>>,
         environment: &dyn WorkEnvironment,
@@ -777,14 +1089,15 @@ impl WorkRuntime {
             inner: Shared(inner),
             replies: replies.clone(),
         });
-        let mut result = run_software_work_with_budget(
+        let mut result = run_software_work_kind(
+            kind,
             id,
             model,
             self.model_name.clone(),
             environment,
             goal,
             limits,
-            &CompleteWhenVerified,
+            kind.policy(),
             self.context_budget,
         )
         .await;
@@ -798,6 +1111,7 @@ pub async fn work(args: &[String]) -> i32 {
     let mut selection = crate::provider_selection::Selection::default();
     let (mut json, mut print_reply) = (false, false);
     let mut goal: Option<String> = None;
+    let mut kind = GoalKind::Change;
     let (mut max_turns, mut max_executions) = (DEFAULT_MAX_TURNS, DEFAULT_MAX_EXECUTIONS);
     let mut context_budget: Option<usize> = None;
     let mut i = 0;
@@ -816,6 +1130,16 @@ pub async fn work(args: &[String]) -> i32 {
                     "--provider" => selection.provider = Some(given),
                     "--model" => selection.model = Some(given),
                     _ => selection.endpoint = Some(given),
+                }
+            }
+            "--kind" => {
+                i += 1;
+                match args.get(i).and_then(|k| GoalKind::parse(k)) {
+                    Some(k) => kind = k,
+                    None => {
+                        eprintln!("error: --kind takes one of: change, verify, inspect");
+                        return usage();
+                    }
                 }
             }
             "--max-turns" => {
@@ -904,7 +1228,14 @@ pub async fn work(args: &[String]) -> i32 {
         max_executions,
     };
     let (result, replies) = runtime
-        .run(work_id, &goal, limits, None, environment.environment())
+        .run(
+            work_id,
+            &goal,
+            kind,
+            limits,
+            None,
+            environment.environment(),
+        )
         .await;
     let (identity, resolved) = (
         runtime.identity.clone(),
@@ -2477,6 +2808,67 @@ mod tests {
         assert!(w.context.repetition.new >= 4);
         // The PAX result after the write is its own execution: the goal was evaluated from it.
         assert!(w.verified, "pax.test ran after the last change and passed");
+    }
+
+    #[test]
+    fn an_answer_cites_a_path_only_as_a_whole_path() {
+        for (answer, cited) in [
+            ("It is in src/lib.rs.", true),
+            ("see src/lib.rs:12 for it", true),
+            ("`src/lib.rs`, line 3", true),
+            ("src/lib.rs", true),
+            ("in (src/lib.rs)", true),
+            ("It is in mysrc/lib.rs.", false),
+            ("It is in src/lib.rs2.", false),
+            ("It is in src/lib.rs_old.", false),
+            ("It is in other/src/lib.rs.", false),
+            ("It is in src/lib.", false),
+            ("nowhere", false),
+        ] {
+            assert_eq!(cites(answer, "src/lib.rs"), cited, "{answer}");
+        }
+    }
+
+    fn observation(output: &str) -> Observation {
+        Observation {
+            execution_id: chip_core::ExecutionId::new("o"),
+            kind: chip_core::ObservationKind::ExecutionCompleted,
+            status: chip_core::ExecutionStatus::Success,
+            output: Some(output.to_string()),
+            receipt_id: None,
+        }
+    }
+
+    #[test]
+    fn only_successful_observations_of_files_ground_an_answer() {
+        let list = observation(
+            "{\"capability\":\"project.list\",\"path\":\".\"}\n--- entries ---\ndir src\nfile Cargo.toml 80\nfile src/lib.rs 45",
+        );
+        let search = observation(
+            "{\"capability\":\"project.search\",\"path\":\".\"}\n--- matches ---\nsrc/a.rs:3: x\nsrc/b.rs:9: y",
+        );
+        let read = observation(
+            "{\"capability\":\"project.read\",\"path\":\"src/c.rs\"}\n--- content ---\nx",
+        );
+        let mut failed = observation(
+            "{\"capability\":\"project.read\",\"path\":\"src/d.rs\",\"error\":\"too_large\"}",
+        );
+        failed.kind = chip_core::ObservationKind::ExecutionFailed;
+        failed.status = chip_core::ExecutionStatus::Failure;
+        let files: Vec<String> = observed_files(&[list, search, read, failed])
+            .into_iter()
+            .collect();
+        assert_eq!(
+            files,
+            [
+                "Cargo.toml",
+                "src/a.rs",
+                "src/b.rs",
+                "src/c.rs",
+                "src/lib.rs"
+            ],
+            "directories and failed observations ground nothing"
+        );
     }
 
     #[test]
