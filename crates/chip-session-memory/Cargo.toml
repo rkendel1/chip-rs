@@ -1,0 +1,36 @@
+[package]
+name = "chip-session-memory"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "EXPERIMENT: native FeltDB as isolated, disposable session working memory for Chip. Not used by any other crate."
+
+# This crate is a leaf. Nothing in the Chip workspace depends on it, and it is removable by deleting
+# this directory and its line in the workspace `members`. It depends on the existing native Rust
+# FeltDB implementation, pinned by commit, and on nothing from Chip's product path (no Chip, FX,
+# PAX or Compute crate is a normal dependency).
+[dependencies]
+feltdb = { git = "https://github.com/rkendel1/flow_db", rev = "9f2354e89743bf1bdc8f1fc825d8259fd80920fe" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# Comparison candidates (see docs/product/session-store-comparison.md). Experiment-only: no product
+# crate depends on this crate, so none of these reaches Chip's runtime.
+rusqlite = { version = "0.40", features = ["bundled"] }
+redb = "4"
+# Journal candidate: framing, CRCs, torn-tail handling and checkpoint files. Raw-bytes API only.
+durability = { version = "0.7", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+# The benchmark's baseline arm uses Chip's real observation types and context-deduplication
+# function. A dev-dependency only: it is not part of this crate's normal dependency graph.
+chip-core = { path = "../chip-core" }
+
+[[bench]]
+name = "session_memory"
+harness = false
+
+[[bench]]
+name = "service_retention"
+harness = false

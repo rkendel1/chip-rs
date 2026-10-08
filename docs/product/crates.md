@@ -141,6 +141,7 @@ member must appear exactly once.
 | `chip-remote-env` | INTEGRATION | KEEP | L3 | L4 |
 | `chip-compute` | INTEGRATION | FROZEN | L2 | L4 |
 | `chip-graph` | EXPERIMENT | FROZEN | L1 | - |
+| `chip-session-memory` | EXPERIMENT | FROZEN | L2 | - |
 | `chip-decision-corpus` | EXPERIMENT | FROZEN | L1 | - |
 | `chip-wasm-decision` | EXPERIMENT | FROZEN | L1 | - |
 | `chip-wasm-decision-host` | EXPERIMENT | FROZEN | L2 | - |

@@ -1,0 +1,463 @@
+{
+  "binary": "/home/user/chip-rs/crates/chip-session-memory/../../target/release/chip",
+  "method": "Real `chip serve` binary, mock model and PAX shim, bounded runs; server process RssAnon read from /proc/<pid>/status after each wave of finished work. Measures retention of finished work in Service.items, not model or PAX behavior.",
+  "scenarios": [
+    {
+      "bytes_retained_per_finished_work": 1374.208,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": "work_not_found",
+        "status": 404
+      },
+      "first_work_still_retrievable_after_all": false,
+      "max_retained_work": 64,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":2020,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":1956,\"execution_ms\":{\"count\":2020,\"max\":0.0,\"total\":0.0},\"failed_work\":0,\"limit_reached_work\":0,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":64,\"model_ms\":{\"count\":2020,\"max\":1.176,\"total\":586.413},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":11.635,\"total\":9467.",
+      "one_events_count": 9,
+      "one_events_json_bytes": 1251,
+      "one_result_json_bytes": 2802,
+      "retained_series": [
+        20,
+        64,
+        64,
+        64,
+        64
+      ],
+      "rss_anon_growth_kib": 2684.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 9172,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 1612,
+          "rss_kib": 9172,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 456,
+          "finished": 520,
+          "hwm_kib": 11488,
+          "label": "after 500 more",
+          "retained_work": 64,
+          "rss_anon_kib": 3928,
+          "rss_kib": 11488,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 956,
+          "finished": 1020,
+          "hwm_kib": 11708,
+          "label": "after 1000 more",
+          "retained_work": 64,
+          "rss_anon_kib": 4148,
+          "rss_kib": 11708,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 1456,
+          "finished": 1520,
+          "hwm_kib": 11832,
+          "label": "after 1500 more",
+          "retained_work": 64,
+          "rss_anon_kib": 4272,
+          "rss_kib": 11832,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 1956,
+          "finished": 2020,
+          "hwm_kib": 11856,
+          "label": "after 2000 more",
+          "retained_work": 64,
+          "rss_anon_kib": 4296,
+          "rss_kib": 11856,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "escape",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 4198.4,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": "work_not_found",
+        "status": 404
+      },
+      "first_work_still_retrievable_after_all": false,
+      "max_retained_work": 256,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":2020,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":1764,\"execution_ms\":{\"count\":2020,\"max\":0.0,\"total\":0.0},\"failed_work\":0,\"limit_reached_work\":0,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":256,\"model_ms\":{\"count\":2020,\"max\":0.578,\"total\":583.743},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":11.464,\"total\":9492",
+      "one_events_count": 9,
+      "one_events_json_bytes": 1251,
+      "one_result_json_bytes": 2802,
+      "retained_series": [
+        20,
+        256,
+        256,
+        256,
+        256
+      ],
+      "rss_anon_growth_kib": 8200.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 9196,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 1620,
+          "rss_kib": 9196,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 264,
+          "finished": 520,
+          "hwm_kib": 16628,
+          "label": "after 500 more",
+          "retained_work": 256,
+          "rss_anon_kib": 9052,
+          "rss_kib": 16628,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 764,
+          "finished": 1020,
+          "hwm_kib": 17004,
+          "label": "after 1000 more",
+          "retained_work": 256,
+          "rss_anon_kib": 9428,
+          "rss_kib": 17004,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 1264,
+          "finished": 1520,
+          "hwm_kib": 17364,
+          "label": "after 1500 more",
+          "retained_work": 256,
+          "rss_anon_kib": 9788,
+          "rss_kib": 17364,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 1764,
+          "finished": 2020,
+          "hwm_kib": 17396,
+          "label": "after 2000 more",
+          "retained_work": 256,
+          "rss_anon_kib": 9820,
+          "rss_kib": 17396,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "escape",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 25616.384,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": null,
+        "status": 200
+      },
+      "first_work_still_retrievable_after_all": true,
+      "max_retained_work": 1000000,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":2020,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":0,\"execution_ms\":{\"count\":2020,\"max\":0.0,\"total\":0.0},\"failed_work\":0,\"limit_reached_work\":0,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":1000000,\"model_ms\":{\"count\":2020,\"max\":0.687,\"total\":592.759},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":10.895,\"total\":904",
+      "one_events_count": 9,
+      "one_events_json_bytes": 1251,
+      "one_result_json_bytes": 2802,
+      "retained_series": [
+        20,
+        520,
+        1020,
+        1520,
+        2020
+      ],
+      "rss_anon_growth_kib": 50032.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 9084,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 1620,
+          "rss_kib": 9084,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 0,
+          "finished": 520,
+          "hwm_kib": 21996,
+          "label": "after 500 more",
+          "retained_work": 520,
+          "rss_anon_kib": 14532,
+          "rss_kib": 21996,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 0,
+          "finished": 1020,
+          "hwm_kib": 34416,
+          "label": "after 1000 more",
+          "retained_work": 1020,
+          "rss_anon_kib": 26952,
+          "rss_kib": 34416,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 0,
+          "finished": 1520,
+          "hwm_kib": 46748,
+          "label": "after 1500 more",
+          "retained_work": 1520,
+          "rss_anon_kib": 39284,
+          "rss_kib": 46748,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 0,
+          "finished": 2020,
+          "hwm_kib": 59116,
+          "label": "after 2000 more",
+          "retained_work": 2020,
+          "rss_anon_kib": 51652,
+          "rss_kib": 59116,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "escape",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 6533.12,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": "work_not_found",
+        "status": 404
+      },
+      "first_work_still_retrievable_after_all": false,
+      "max_retained_work": 64,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":0,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":1956,\"execution_ms\":{\"count\":2020,\"max\":1.418,\"total\":1460.303},\"failed_work\":0,\"limit_reached_work\":2020,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":64,\"model_ms\":{\"count\":2020,\"max\":3.717,\"total\":5035.283},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":115.187,\"tot",
+      "one_events_count": 97,
+      "one_events_json_bytes": 8758,
+      "one_result_json_bytes": 5018,
+      "retained_series": [
+        20,
+        64,
+        64,
+        64,
+        64
+      ],
+      "rss_anon_growth_kib": 12760.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 11540,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 3976,
+          "rss_kib": 11540,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 456,
+          "finished": 520,
+          "hwm_kib": 23112,
+          "label": "after 500 more",
+          "retained_work": 64,
+          "rss_anon_kib": 15548,
+          "rss_kib": 23112,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 956,
+          "finished": 1020,
+          "hwm_kib": 23552,
+          "label": "after 1000 more",
+          "retained_work": 64,
+          "rss_anon_kib": 15988,
+          "rss_kib": 23552,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 1456,
+          "finished": 1520,
+          "hwm_kib": 23644,
+          "label": "after 1500 more",
+          "retained_work": 64,
+          "rss_anon_kib": 16080,
+          "rss_kib": 23644,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 1956,
+          "finished": 2020,
+          "hwm_kib": 24300,
+          "label": "after 2000 more",
+          "retained_work": 64,
+          "rss_anon_kib": 16736,
+          "rss_kib": 24300,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "read",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 20453.376,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": "work_not_found",
+        "status": 404
+      },
+      "first_work_still_retrievable_after_all": false,
+      "max_retained_work": 256,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":0,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":1764,\"execution_ms\":{\"count\":2020,\"max\":2.098,\"total\":1477.634},\"failed_work\":0,\"limit_reached_work\":2020,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":256,\"model_ms\":{\"count\":2020,\"max\":4.667,\"total\":5083.585},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":119.566,\"to",
+      "one_events_count": 97,
+      "one_events_json_bytes": 8758,
+      "one_result_json_bytes": 5019,
+      "retained_series": [
+        20,
+        256,
+        256,
+        256,
+        256
+      ],
+      "rss_anon_growth_kib": 39948.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 11536,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 3976,
+          "rss_kib": 11536,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 264,
+          "finished": 520,
+          "hwm_kib": 48000,
+          "label": "after 500 more",
+          "retained_work": 256,
+          "rss_anon_kib": 40440,
+          "rss_kib": 48000,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 764,
+          "finished": 1020,
+          "hwm_kib": 49240,
+          "label": "after 1000 more",
+          "retained_work": 256,
+          "rss_anon_kib": 41680,
+          "rss_kib": 49240,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 1264,
+          "finished": 1520,
+          "hwm_kib": 51352,
+          "label": "after 1500 more",
+          "retained_work": 256,
+          "rss_anon_kib": 43792,
+          "rss_kib": 51352,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 1764,
+          "finished": 2020,
+          "hwm_kib": 51484,
+          "label": "after 2000 more",
+          "retained_work": 256,
+          "rss_anon_kib": 43924,
+          "rss_kib": 51484,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "read",
+      "works_after_warmup": 2000
+    },
+    {
+      "bytes_retained_per_finished_work": 121264.128,
+      "file_kib": 32,
+      "first_work_lookup": {
+        "error_code": null,
+        "status": 200
+      },
+      "first_work_still_retrievable_after_all": true,
+      "max_retained_work": 1000000,
+      "metrics_excerpt": "{\"active_work\":0,\"blocked_work\":0,\"cancelled_work\":0,\"completed_work\":0,\"escalated_work\":0,\"evicted_work\":0,\"execution_ms\":{\"count\":2020,\"max\":1.432,\"total\":1461.314},\"failed_work\":0,\"limit_reached_work\":2020,\"max_concurrent_work\":1,\"max_queued_work\":32,\"max_retained_work\":1000000,\"model_ms\":{\"count\":2020,\"max\":4.527,\"total\":5093.385},\"queue_length\":0,\"queue_wait_ms\":{\"count\":2020,\"max\":120.007,\"t",
+      "one_events_count": 97,
+      "one_events_json_bytes": 8758,
+      "one_result_json_bytes": 5019,
+      "retained_series": [
+        20,
+        520,
+        1020,
+        1520,
+        2020
+      ],
+      "rss_anon_growth_kib": 236844.0,
+      "samples": [
+        {
+          "evicted_work": 0,
+          "finished": 20,
+          "hwm_kib": 11316,
+          "label": "after warm-up",
+          "retained_work": 20,
+          "rss_anon_kib": 3948,
+          "rss_kib": 11316,
+          "submitted_work": 20
+        },
+        {
+          "evicted_work": 0,
+          "finished": 520,
+          "hwm_kib": 70928,
+          "label": "after 500 more",
+          "retained_work": 520,
+          "rss_anon_kib": 63560,
+          "rss_kib": 70928,
+          "submitted_work": 520
+        },
+        {
+          "evicted_work": 0,
+          "finished": 1020,
+          "hwm_kib": 129984,
+          "label": "after 1000 more",
+          "retained_work": 1020,
+          "rss_anon_kib": 122616,
+          "rss_kib": 129984,
+          "submitted_work": 1020
+        },
+        {
+          "evicted_work": 0,
+          "finished": 1520,
+          "hwm_kib": 189016,
+          "label": "after 1500 more",
+          "retained_work": 1520,
+          "rss_anon_kib": 181648,
+          "rss_kib": 189016,
+          "submitted_work": 1520
+        },
+        {
+          "evicted_work": 0,
+          "finished": 2020,
+          "hwm_kib": 248160,
+          "label": "after 2000 more",
+          "retained_work": 2020,
+          "rss_anon_kib": 240792,
+          "rss_kib": 248160,
+          "submitted_work": 2020
+        }
+      ],
+      "scenario": "read",
+      "works_after_warmup": 2000
+    }
+  ],
+  "schema": "chip.service-retention.v2"
+}

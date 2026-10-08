@@ -9,8 +9,11 @@
 //! interface. It binds to loopback by default, has no authentication and no CORS, and is not a
 //! remote or multi-user service. Remote exposure and authentication are intentionally out of scope.
 //!
-//! **In memory only.** The work registry lives for the life of the process. Nothing is persisted;
-//! when the process exits, every work item and its events are gone.
+//! **In memory only, and bounded.** The work registry lives for the life of the process. Nothing is
+//! persisted; when the process exits, every work item and its events are gone. Finished work is
+//! kept only up to `--max-retained-work` items (default 256): when more finish, the oldest finished
+//! item is evicted and later lookups answer 410 `work_expired`. Queued and running work, and work
+//! that ended `escalated`, are never evicted. Counts in `/v1/metrics` stay cumulative.
 //!
 //! Routes (all JSON):
 //!
@@ -20,6 +23,9 @@
 //! - `GET  /v1/work/{id}/events`
 //! - `POST /v1/work/{id}/cancel`
 //!
+//! An id the service no longer retains answers 410 `work_expired` on all three `{id}` routes; an id
+//! it never issued (or forgot so long ago that even its tombstone is gone) answers 404.
+//!
 //! The client supplies a goal, and optionally how completion is judged (`kind`), and nothing else: provider, model, endpoint, executable, workspace
 //! root, ids, receipts, observations and evidence are all runtime concerns, and a request that
 //! names any of them is refused, not ignored.
@@ -27,7 +33,7 @@
 //! Exit status: 0 normal end (the service runs until it is stopped), 2 usage, 3 required
 //! infrastructure unavailable (no model selected, no usable PAX; nothing ran), 4 could not listen.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,13 +69,23 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Work admission limits. Both bounds are about work trajectories, not HTTP requests.
 pub const DEFAULT_MAX_CONCURRENT_WORK: usize = 2;
 pub const DEFAULT_MAX_QUEUED_WORK: usize = 32;
+/// How many finished works are kept for lookup. A finished work costs on the order of 25 KB (a
+/// one-turn blocked run) to 120 KB (a long run that reads files), measured on the real binary, so
+/// the default bounds retained results to tens of MiB. A caller that needs more says so.
+pub const DEFAULT_MAX_RETAINED_WORK: usize = 256;
 const MAX_CONCURRENT_CEILING: usize = 64;
 const MAX_QUEUED_CEILING: usize = 1024;
+const MAX_RETAINED_CEILING: usize = 1_000_000;
+/// Evicted ids remembered so a lookup can say "expired" instead of "never existed". Ids only.
+const MAX_TOMBSTONES: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Capacity {
     pub max_concurrent: usize,
     pub max_queued: usize,
+    /// Finished works kept in memory (at least 1). Active work and works that ended `escalated`
+    /// do not count against it and are never evicted.
+    pub max_retained: usize,
 }
 
 impl Default for Capacity {
@@ -77,6 +93,7 @@ impl Default for Capacity {
         Self {
             max_concurrent: DEFAULT_MAX_CONCURRENT_WORK,
             max_queued: DEFAULT_MAX_QUEUED_WORK,
+            max_retained: DEFAULT_MAX_RETAINED_WORK,
         }
     }
 }
@@ -123,6 +140,56 @@ struct Item {
 struct Scheduler {
     queue: VecDeque<String>,
     active: usize,
+    /// Finished works that may be evicted, oldest finish first. Works that ended `escalated` are
+    /// not in it: the service has no way to resolve an escalation, so it keeps them all.
+    evictable: VecDeque<String>,
+    /// Ids already evicted, oldest first, bounded by `MAX_TOMBSTONES`.
+    tombstones: VecDeque<String>,
+    tombstone_set: HashSet<String>,
+    /// What the evicted works contributed to the service-level counts, so those stay cumulative.
+    retired: Totals,
+    evicted: u64,
+}
+
+/// Service-level counts and statistics that outlive the works they describe.
+#[derive(Default, Clone)]
+struct Totals {
+    started: usize,
+    by_state: HashMap<&'static str, usize>,
+    wait: Stat,
+    duration: Stat,
+    model: Stat,
+    execution: Stat,
+}
+
+impl Totals {
+    fn add_started_running(&mut self, item: &Item, admitted: Instant) {
+        self.started += 1;
+        self.wait.add(
+            admitted
+                .saturating_duration_since(item.submitted)
+                .as_secs_f64()
+                * 1e3,
+        );
+    }
+
+    fn add_finished(&mut self, f: &Finished) {
+        *self.by_state.entry(f.state).or_default() += 1;
+        if f.ran {
+            self.started += 1;
+            self.wait.add(f.queue_wait.as_secs_f64() * 1e3);
+            if let Some(d) = f.work_duration {
+                self.duration.add(d.as_secs_f64() * 1e3);
+            }
+            let m = &f.result["measurement"];
+            if let Some(v) = m["model_latency_ms"].as_f64() {
+                self.model.add(v);
+            }
+            if let Some(v) = m["compute_latency_ms"].as_f64() {
+                self.execution.add(v);
+            }
+        }
+    }
 }
 
 /// Locks, ignoring poison: a panic in one work's task must not wedge the scheduler.
@@ -145,6 +212,8 @@ pub struct Service {
     items: Mutex<HashMap<String, Arc<Item>>>,
     rejected: AtomicU64,
     issued: AtomicU64,
+    /// Works accepted since the process started (the registry no longer holds them all).
+    submitted: AtomicU64,
     /// Only a loopback listener can check `Host`: a client that names another host is a browser
     /// being steered to this port by a name that is not ours.
     loopback_hosts_only: bool,
@@ -159,6 +228,9 @@ impl Service {
         capacity: Capacity,
     ) -> Result<Arc<Self>, String> {
         let isolated = environments.isolation_capacity();
+        if capacity.max_retained == 0 {
+            return Err("the service must retain at least one finished work".into());
+        }
         if capacity.max_concurrent > isolated {
             return Err(format!(
                 "concurrent work requires isolated environments: {} may run at once but the environment provides {isolated}",
@@ -177,6 +249,7 @@ impl Service {
             items: Mutex::new(HashMap::new()),
             rejected: AtomicU64::new(0),
             issued: AtomicU64::new(0),
+            submitted: AtomicU64::new(0),
             loopback_hosts_only,
         }))
     }
@@ -203,6 +276,53 @@ impl Service {
         lock(&self.items).get(id).cloned()
     }
 
+    /// The work for a client's id, or the response that says why there is none: 410 if it
+    /// finished and was evicted under the retention limit, 404 if the service has no record of it.
+    /// A request that already holds the `Arc` is unaffected by a later eviction.
+    fn lookup(&self, id: &str) -> Result<Arc<Item>, Response> {
+        if let Some(item) = self.item(id) {
+            return Ok(item);
+        }
+        if lock(&self.sched).tombstone_set.contains(id) {
+            Err(expired_work())
+        } else {
+            Err(unknown_work())
+        }
+    }
+
+    /// Records that `id` just reached a terminal state `state`, then evicts the oldest evictable
+    /// finished works while more than `max_retained` are held. Called with the scheduler locked
+    /// (lock order: `sched`, then `items` or one item's `phase`), after the item's phase is
+    /// `Finished`. Only finished works are ever candidates: a queued or running work is not in
+    /// `evictable`, and neither is one that ended `escalated`.
+    fn retire(&self, sched: &mut Scheduler, id: &str, state: &'static str) {
+        if state == "escalated" {
+            return;
+        }
+        sched.evictable.push_back(id.to_string());
+        while sched.evictable.len() > self.capacity.max_retained {
+            let Some(old) = sched.evictable.pop_front() else {
+                break;
+            };
+            let Some(item) = lock(&self.items).remove(&old) else {
+                continue;
+            };
+            if let Phase::Finished(f) = &*lock(&item.phase) {
+                sched.retired.add_finished(f);
+            }
+            sched.evicted += 1;
+            if sched.tombstone_set.insert(old.clone()) {
+                sched.tombstones.push_back(old);
+            }
+            let cap = (self.capacity.max_retained * 4).min(MAX_TOMBSTONES);
+            while sched.tombstones.len() > cap {
+                if let Some(gone) = sched.tombstones.pop_front() {
+                    sched.tombstone_set.remove(&gone);
+                }
+            }
+        }
+    }
+
     /// Registers and enqueues. Returns the id and whether admission was immediate.
     fn submit(self: &Arc<Self>, goal: String, kind: GoalKind) -> Result<(String, bool), Response> {
         let mut sched = lock(&self.sched);
@@ -226,6 +346,7 @@ impl Service {
             phase: Mutex::new(Phase::Queued),
         });
         lock(&self.items).insert(id.clone(), item.clone());
+        self.submitted.fetch_add(1, Ordering::SeqCst);
         sched.queue.push_back(id.clone());
         self.admit_available(&mut sched);
         let admitted = !matches!(*lock(&item.phase), Phase::Queued);
@@ -260,6 +381,7 @@ impl Service {
             item.goal.clone(),
             item.kind,
         );
+        let id_for_retire = id.clone();
         let work_id = WorkId::new(id);
         let owner = item.clone();
         let task = tokio::spawn(async move {
@@ -323,9 +445,11 @@ impl Service {
                 .control
                 .first_model_call()
                 .map(|t| t.saturating_duration_since(admitted));
+            let state = finished.state;
             let mut sched = lock(&service.sched);
             *lock(&item.phase) = Phase::Finished(Box::new(finished));
             sched.active -= 1;
+            service.retire(&mut sched, id_for_retire.as_str(), state);
             service.admit_available(&mut sched);
         });
     }
@@ -385,8 +509,9 @@ impl Service {
     }
 
     fn get_work(&self, id: &str) -> Response {
-        let Some(item) = self.item(id) else {
-            return unknown_work();
+        let item = match self.lookup(id) {
+            Ok(item) => item,
+            Err(response) => return response,
         };
         let sched = lock(&self.sched);
         let phase = lock(&item.phase);
@@ -444,8 +569,9 @@ impl Service {
     }
 
     fn get_events(&self, id: &str) -> Response {
-        let Some(item) = self.item(id) else {
-            return unknown_work();
+        let item = match self.lookup(id) {
+            Ok(item) => item,
+            Err(response) => return response,
         };
         let phase = lock(&item.phase);
         let (complete, events) = match &*phase {
@@ -461,8 +587,9 @@ impl Service {
     }
 
     fn cancel(&self, id: &str) -> Response {
-        let Some(item) = self.item(id) else {
-            return unknown_work();
+        let item = match self.lookup(id) {
+            Ok(item) => item,
+            Err(response) => return response,
         };
         let mut sched = lock(&self.sched);
         let mut phase = lock(&item.phase);
@@ -486,6 +613,7 @@ impl Service {
                     first_model_call: None,
                     work_duration: None,
                 }));
+                self.retire(&mut sched, id, "cancelled");
                 Response::ok(
                     200,
                     json!({
@@ -514,56 +642,37 @@ impl Service {
     /// Service-level counts, derived on demand from the registry so they cannot drift from it.
     /// Per-work agent metrics stay on the work (`result.measurement`, `result.context`).
     fn metrics(&self) -> Response {
-        let items: Vec<Arc<Item>> = lock(&self.items).values().cloned().collect();
+        // The scheduler first: eviction moves a work from the registry into `retired` while holding
+        // it, so reading both under it counts every work exactly once.
         let sched = lock(&self.sched);
-        let (mut queued, mut started, mut active) = (0usize, 0usize, 0usize);
-        let mut by_state: HashMap<&'static str, usize> = HashMap::new();
-        let (mut wait, mut duration, mut model, mut execution) = (
-            Stat::default(),
-            Stat::default(),
-            Stat::default(),
-            Stat::default(),
-        );
+        let items: Vec<Arc<Item>> = lock(&self.items).values().cloned().collect();
+        let (mut queued, mut active) = (0usize, 0usize);
+        // Evicted works' contributions are carried in `retired`, so these stay cumulative.
+        let mut totals = sched.retired.clone();
+        let mut escalated_retained = 0usize;
         for item in &items {
             match &*lock(&item.phase) {
                 Phase::Queued => queued += 1,
                 Phase::Running { admitted } => {
-                    started += 1;
                     active += 1;
-                    wait.add(
-                        admitted
-                            .saturating_duration_since(item.submitted)
-                            .as_secs_f64()
-                            * 1e3,
-                    );
+                    totals.add_started_running(item, *admitted);
                 }
                 Phase::Finished(f) => {
-                    *by_state.entry(f.state).or_default() += 1;
-                    if f.ran {
-                        started += 1;
-                        wait.add(f.queue_wait.as_secs_f64() * 1e3);
-                        if let Some(d) = f.work_duration {
-                            duration.add(d.as_secs_f64() * 1e3);
-                        }
-                        let m = &f.result["measurement"];
-                        if let Some(v) = m["model_latency_ms"].as_f64() {
-                            model.add(v);
-                        }
-                        if let Some(v) = m["compute_latency_ms"].as_f64() {
-                            execution.add(v);
-                        }
+                    if f.state == "escalated" {
+                        escalated_retained += 1;
                     }
+                    totals.add_finished(f);
                 }
             }
         }
-        let count = |k: &str| by_state.get(k).copied().unwrap_or(0);
+        let count = |k: &str| totals.by_state.get(k).copied().unwrap_or(0);
         Response::ok(
             200,
             json!({
-                "submitted_work": items.len(),
+                "submitted_work": self.submitted.load(Ordering::SeqCst),
                 "rejected_work": self.rejected.load(Ordering::SeqCst),
                 "queued_work": queued,
-                "started_work": started,
+                "started_work": totals.started,
                 "active_work": active,
                 "completed_work": count("completed"),
                 "blocked_work": count("blocked"),
@@ -574,16 +683,20 @@ impl Service {
                 "max_concurrent_work": self.capacity.max_concurrent,
                 "max_queued_work": self.capacity.max_queued,
                 "queue_length": sched.queue.len(),
-                "queue_wait_ms": wait.json(),
-                "work_duration_ms": duration.json(),
-                "model_ms": model.json(),
-                "execution_ms": execution.json(),
+                "retained_work": items.len(),
+                "retained_escalated_work": escalated_retained,
+                "evicted_work": sched.evicted,
+                "max_retained_work": self.capacity.max_retained,
+                "queue_wait_ms": totals.wait.json(),
+                "work_duration_ms": totals.duration.json(),
+                "model_ms": totals.model.json(),
+                "execution_ms": totals.execution.json(),
             }),
         )
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Stat {
     count: usize,
     total: f64,
@@ -605,6 +718,16 @@ impl Stat {
 
 fn unknown_work() -> Response {
     Response::error(404, "work_not_found", "Unknown work id")
+}
+
+/// The work finished and the service no longer holds it: its result and events were evicted to
+/// keep memory bounded. This says nothing about how the work ended.
+fn expired_work() -> Response {
+    Response::error(
+        410,
+        "work_expired",
+        "This work finished and its result was evicted under the retention limit (--max-retained-work); how it ended is no longer available",
+    )
 }
 
 /// A goal, and optionally its kind, from a body that is `{"goal": "<text>"}` or
@@ -965,10 +1088,10 @@ pub async fn run(listener: TcpListener, service: Arc<Service>) {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]"
+        "usage: chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N] [--max-retained-work N]"
     );
     eprintln!(
-        "       defaults: {DEFAULT_HOST}:{DEFAULT_PORT}, {DEFAULT_MAX_CONCURRENT_WORK} work at once (1 to {MAX_CONCURRENT_CEILING}), {DEFAULT_MAX_QUEUED_WORK} queued (0 to {MAX_QUEUED_CEILING}). The model comes from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, as for `work`; works on the project in the current directory"
+        "       defaults: {DEFAULT_HOST}:{DEFAULT_PORT}, {DEFAULT_MAX_CONCURRENT_WORK} work at once (1 to {MAX_CONCURRENT_CEILING}), {DEFAULT_MAX_QUEUED_WORK} queued (0 to {MAX_QUEUED_CEILING}), {DEFAULT_MAX_RETAINED_WORK} finished works kept (1 to {MAX_RETAINED_CEILING}; older ones answer 410). The model comes from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, as for `work`; works on the project in the current directory"
     );
     EXIT_USAGE
 }
@@ -980,11 +1103,13 @@ struct ServeArgs {
     addr: SocketAddr,
     max_concurrent: Option<usize>,
     max_queued: usize,
+    max_retained: usize,
 }
 
 fn parse_args(args: &[String]) -> Result<ServeArgs, i32> {
     let (mut host, mut port) = (DEFAULT_HOST.to_string(), DEFAULT_PORT);
     let (mut max_concurrent, mut max_queued) = (None, DEFAULT_MAX_QUEUED_WORK);
+    let mut max_retained = DEFAULT_MAX_RETAINED_WORK;
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
@@ -1020,6 +1145,15 @@ fn parse_args(args: &[String]) -> Result<ServeArgs, i32> {
                     return Err(usage());
                 }
             },
+            "--max-retained-work" => match given.parse::<usize>() {
+                Ok(n) if (1..=MAX_RETAINED_CEILING).contains(&n) => max_retained = n,
+                _ => {
+                    eprintln!(
+                        "error: --max-retained-work needs a number from 1 to {MAX_RETAINED_CEILING}"
+                    );
+                    return Err(usage());
+                }
+            },
             _ => {
                 eprintln!("error: unexpected argument `{flag}`");
                 return Err(usage());
@@ -1039,6 +1173,7 @@ fn parse_args(args: &[String]) -> Result<ServeArgs, i32> {
         addr: SocketAddr::new(ip, port),
         max_concurrent,
         max_queued,
+        max_retained,
     })
 }
 
@@ -1055,6 +1190,7 @@ pub async fn serve_in(args: &[String], environments: Option<Arc<Environments>>) 
         addr,
         max_concurrent,
         max_queued,
+        max_retained,
     } = match parse_args(args) {
         Ok(parsed) => parsed,
         Err(code) => return code,
@@ -1102,6 +1238,7 @@ pub async fn serve_in(args: &[String], environments: Option<Arc<Environments>>) 
     let capacity = Capacity {
         max_concurrent: max_concurrent.unwrap_or(DEFAULT_MAX_CONCURRENT_WORK.min(isolated)),
         max_queued,
+        max_retained,
     };
     let service = match Service::new(runtime, environments, addr.ip().is_loopback(), capacity) {
         Ok(service) => service,
@@ -1326,6 +1463,7 @@ mod tests {
         Capacity {
             max_concurrent,
             max_queued,
+            max_retained: DEFAULT_MAX_RETAINED_WORK,
         }
     }
 
@@ -1568,6 +1706,7 @@ mod tests {
             addr: "127.0.0.1:8765".parse().unwrap(),
             max_concurrent: None,
             max_queued: 32,
+            max_retained: DEFAULT_MAX_RETAINED_WORK,
         };
         assert_eq!(parse_args(&none), Ok(default));
         assert_eq!(DEFAULT_MAX_CONCURRENT_WORK, 2);
@@ -1587,7 +1726,8 @@ mod tests {
             Ok(ServeArgs {
                 addr: "127.0.0.1:9000".parse().unwrap(),
                 max_concurrent: Some(5),
-                max_queued: 0
+                max_queued: 0,
+                max_retained: DEFAULT_MAX_RETAINED_WORK
             })
         );
         for bad in [
@@ -2770,5 +2910,355 @@ mod tests {
         assert_eq!(m["queue_wait_ms"]["count"], 2);
         assert_eq!(m["work_duration_ms"]["count"], 2);
         assert_eq!(m["model_ms"]["count"], 2);
+    }
+
+    // ---- bounded retention of finished work ----------------------------------------------------
+
+    const ESCALATE: &str = r#"{"decision":"escalate","reason":"scripted escalation"}"#;
+
+    fn retaining(max_concurrent: usize, max_retained: usize) -> Capacity {
+        Capacity {
+            max_concurrent,
+            max_queued: 64,
+            max_retained,
+        }
+    }
+
+    fn code(r: &Reply) -> String {
+        r.body["error"]["code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Finished work is kept only up to the limit; the oldest finished goes first, and a lookup of
+    /// an evicted id says so (410 `work_expired`) instead of pretending it never existed (404) or
+    /// that it failed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn finished_work_is_bounded_and_the_oldest_is_evicted_first() {
+        let model = Model::new(&[("BRAVO", &[BLOCK; 8])]).arc();
+        let (addr, service, _d) = start_with(model, "retain-order", retaining(1, 3)).await;
+        let mut ids = Vec::new();
+        for n in 0..6 {
+            let id = submit(addr, &format!("BRAVO number {n}"));
+            // Sequential, so the finish order is the submission order.
+            assert_eq!(finished(addr, &id).await["status"], "blocked");
+            ids.push(id);
+            let held = lock(&service.items).len();
+            assert!(held <= 3, "after {} finished, {held} held", n + 1);
+        }
+        assert_eq!(lock(&service.items).len(), 3);
+        for old in &ids[..3] {
+            for (method, path) in [
+                ("GET", format!("/v1/work/{old}")),
+                ("GET", format!("/v1/work/{old}/events")),
+                ("POST", format!("/v1/work/{old}/cancel")),
+            ] {
+                let r = call(addr, method, &path, None);
+                assert_eq!(r.status, 410, "{method} {path}");
+                assert_eq!(code(&r), "work_expired");
+                // Not a representation of how the work ended.
+                assert!(r.body.get("status").is_none() && r.body.get("result").is_none());
+            }
+        }
+        for kept in &ids[3..] {
+            assert_eq!(get(addr, kept)["status"], "blocked");
+            assert!(!events(addr, kept).is_empty());
+        }
+        // An id the service never issued is still plain not-found.
+        let r = call(addr, "GET", "/v1/work/work_0000000000000000", None);
+        assert_eq!((r.status, code(&r).as_str()), (404, "work_not_found"));
+
+        // Metrics stay cumulative: eviction does not rewrite history.
+        let m = metrics(addr);
+        assert_eq!(m["submitted_work"], 6);
+        assert_eq!(m["blocked_work"], 6);
+        assert_eq!(m["started_work"], 6);
+        assert_eq!(m["retained_work"], 3);
+        assert_eq!(m["evicted_work"], 3);
+        assert_eq!(m["max_retained_work"], 3);
+        assert_eq!(m["work_duration_ms"]["count"], 6);
+    }
+
+    /// Queued and running work is never a candidate, however small the limit.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queued_and_running_work_is_never_evicted() {
+        let model = Model::new(&[
+            ("ALPHA", &[BLOCK]),
+            ("BRAVO", &[BLOCK; 6]),
+            ("CHARLIE", &[BLOCK]),
+        ])
+        .gated(&["ALPHA", "CHARLIE"])
+        .arc();
+        let (addr, service, _d) = start_with(model.clone(), "retain-active", retaining(2, 1)).await;
+        let running = submit(addr, "ALPHA runs until released");
+        until("ALPHA to be in flight", || model.entered("ALPHA") == 1).await;
+        // CHARLIE is admitted second and also held; the next two wait their turn only if both
+        // slots are busy, so fill them.
+        let held = submit(addr, "CHARLIE also held");
+        until("CHARLIE to be in flight", || model.entered("CHARLIE") == 1).await;
+        let queued: Vec<String> = (0..3)
+            .map(|n| submit(addr, &format!("BRAVO queued {n}")))
+            .collect();
+        for id in &queued {
+            assert_eq!(status(addr, id), "queued");
+        }
+        // Release one slot: BRAVO works run and finish while ALPHA is still running, with a limit
+        // of one finished work.
+        model.release("CHARLIE");
+        // Finished work may be evicted the moment the next one finishes, so wait on the
+        // cumulative counts rather than on any one id.
+        until("four works to finish", || {
+            metrics(addr)["blocked_work"].as_u64() == Some(4)
+        })
+        .await;
+        let _ = &held;
+        assert_eq!(
+            status(addr, &running),
+            "running",
+            "running work is not evicted"
+        );
+        // One finished work plus the one still running.
+        assert_eq!(lock(&service.items).len(), 2);
+        model.release("ALPHA");
+        until("the last work to finish", || {
+            metrics(addr)["blocked_work"].as_u64() == Some(5)
+        })
+        .await;
+        assert_eq!(
+            lock(&service.items).len(),
+            1,
+            "now only one finished work remains"
+        );
+        let m = metrics(addr);
+        assert_eq!(m["submitted_work"], 5);
+        assert_eq!(m["blocked_work"], 5);
+        assert_eq!(m["active_work"], 0);
+    }
+
+    /// The service cannot resolve an escalation, so it keeps every work that ended `escalated`:
+    /// they are exempt from the limit, counted separately, and still reported.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn work_that_ended_escalated_is_never_evicted() {
+        let model = Model::new(&[("ALPHA", &[ESCALATE; 3]), ("BRAVO", &[BLOCK; 8])]).arc();
+        let (addr, service, _d) = start_with(model, "retain-escalated", retaining(1, 2)).await;
+        let mut escalated = Vec::new();
+        for n in 0..3 {
+            let id = submit(addr, &format!("ALPHA escalate {n}"));
+            assert_eq!(finished(addr, &id).await["status"], "escalated");
+            escalated.push(id);
+        }
+        let mut blocked = Vec::new();
+        for n in 0..5 {
+            let id = submit(addr, &format!("BRAVO block {n}"));
+            assert_eq!(finished(addr, &id).await["status"], "blocked");
+            blocked.push(id);
+        }
+        for id in &escalated {
+            assert_eq!(
+                get(addr, id)["status"],
+                "escalated",
+                "an escalation is never dropped"
+            );
+        }
+        assert_eq!(
+            call(addr, "GET", &format!("/v1/work/{}", blocked[0]), None).status,
+            410
+        );
+        assert_eq!(status(addr, &blocked[4]), "blocked");
+        assert_eq!(lock(&service.items).len(), 3 + 2);
+        let m = metrics(addr);
+        assert_eq!(m["escalated_work"], 3);
+        assert_eq!(m["retained_escalated_work"], 3);
+        assert_eq!(m["evicted_work"], 3);
+        assert_eq!(m["blocked_work"], 5);
+    }
+
+    /// A request that already holds a work is unaffected by that work being evicted.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_request_holding_a_work_survives_its_eviction() {
+        let model = Model::new(&[("BRAVO", &[BLOCK; 4])]).arc();
+        let (addr, service, _d) = start_with(model, "retain-held", retaining(1, 1)).await;
+        let first = submit(addr, "BRAVO first");
+        finished(addr, &first).await;
+        let held = service.lookup(&first).ok().expect("still retained");
+        let second = submit(addr, "BRAVO second");
+        finished(addr, &second).await;
+        assert_eq!(
+            call(addr, "GET", &format!("/v1/work/{first}"), None).status,
+            410
+        );
+        assert!(
+            matches!(&*lock(&held.phase), Phase::Finished(f) if f.state == "blocked"),
+            "the held work is intact and says how it ended"
+        );
+    }
+
+    /// Many works finishing, many readers: the bound holds, every answer is one of the documented
+    /// ones, and no count is lost.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn eviction_under_concurrent_work_and_readers_keeps_the_bound() {
+        let model = Model::new(&[("BRAVO", &[BLOCK; 64])]).arc();
+        let (addr, service, _d) = start_with(model, "retain-concurrent", retaining(4, 5)).await;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let readers: Vec<_> = (0..3)
+            .map(|_| {
+                let (stop, ids) = (stop.clone(), ids.clone());
+                std::thread::spawn(move || {
+                    let mut seen = 0usize;
+                    while !stop.load(Ordering::SeqCst) {
+                        let snapshot: Vec<String> = lock(&ids).clone();
+                        for id in snapshot.iter().rev().take(12) {
+                            let r = call(addr, "GET", &format!("/v1/work/{id}"), None);
+                            // 404 is possible for an id evicted long enough ago that even its
+                            // tombstone is gone; it is never a 5xx, a 200 with no result, or
+                            // anything undocumented.
+                            assert!(
+                                matches!(r.status, 200 | 404 | 410),
+                                "{} {}",
+                                r.status,
+                                r.body
+                            );
+                            match r.status {
+                                410 => assert_eq!(code(&r), "work_expired"),
+                                404 => assert_eq!(code(&r), "work_not_found"),
+                                _ => assert!(r.body["status"].is_string()),
+                            }
+                            seen += 1;
+                        }
+                        let m = call(addr, "GET", "/v1/metrics", None);
+                        assert_eq!(m.status, 200);
+                    }
+                    seen
+                })
+            })
+            .collect();
+        for wave in 0..5 {
+            let batch: Vec<String> = (0..8)
+                .map(|n| submit(addr, &format!("BRAVO wave {wave} number {n}")))
+                .collect();
+            lock(&ids).extend(batch.iter().cloned());
+            until("the wave to finish", || {
+                let m = metrics(addr);
+                m["blocked_work"].as_u64().unwrap() == (wave as u64 + 1) * 8
+            })
+            .await;
+            // Never more than the limit of finished works, and nothing is running now.
+            assert!(lock(&service.items).len() <= 5, "wave {wave}");
+        }
+        stop.store(true, Ordering::SeqCst);
+        for r in readers {
+            assert!(r.join().unwrap() > 0, "a reader ran");
+        }
+        let m = metrics(addr);
+        assert_eq!(m["submitted_work"], 40);
+        assert_eq!(m["blocked_work"], 40);
+        assert_eq!(m["retained_work"], 5);
+        assert_eq!(m["evicted_work"], 35);
+        assert_eq!(m["active_work"], 0);
+        assert_eq!(m["queue_length"], 0);
+    }
+
+    /// A work cancelled while queued is finished work like any other, and counts against the limit.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelled_queued_work_is_retired_like_any_finished_work() {
+        let model = Model::new(&[("ALPHA", &[BLOCK])]).gated(&["ALPHA"]).arc();
+        let (addr, service, _d) = start_with(model.clone(), "retain-cancel", retaining(1, 1)).await;
+        let running = submit(addr, "ALPHA holds the only slot");
+        until("ALPHA to be in flight", || model.entered("ALPHA") == 1).await;
+        let a = submit(addr, "ALPHA queued one");
+        let b = submit(addr, "ALPHA queued two");
+        assert_eq!(
+            call(addr, "POST", &format!("/v1/work/{a}/cancel"), None).status,
+            200
+        );
+        assert_eq!(
+            call(addr, "POST", &format!("/v1/work/{b}/cancel"), None).status,
+            200
+        );
+        // Limit one: the first cancelled work is gone, the second kept, the running one untouched.
+        assert_eq!(
+            call(addr, "GET", &format!("/v1/work/{a}"), None).status,
+            410
+        );
+        assert_eq!(status(addr, &b), "cancelled");
+        assert_eq!(status(addr, &running), "running");
+        assert_eq!(lock(&service.items).len(), 2);
+        let m = metrics(addr);
+        assert_eq!(m["cancelled_work"], 2);
+        assert_eq!(m["submitted_work"], 3);
+        model.release("ALPHA");
+        finished(addr, &running).await;
+    }
+
+    /// "Expired" is remembered for a bounded number of ids (four times the limit); past that the
+    /// service honestly knows nothing and says 404.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_memory_of_evicted_ids_is_bounded_too() {
+        let model = Model::new(&[("BRAVO", &[BLOCK; 16])]).arc();
+        let (addr, service, _d) = start_with(model, "retain-tombstones", retaining(1, 1)).await;
+        let mut ids = Vec::new();
+        for n in 0..10 {
+            let id = submit(addr, &format!("BRAVO number {n}"));
+            until("it to finish", || {
+                metrics(addr)["blocked_work"].as_u64() == Some(n as u64 + 1)
+            })
+            .await;
+            ids.push(id);
+        }
+        // Ten finished, one kept, nine evicted; tombstones for the newest four evictions.
+        assert_eq!(lock(&service.sched).tombstones.len(), 4);
+        assert_eq!(get(addr, &ids[9])["status"], "blocked");
+        for id in &ids[5..9] {
+            assert_eq!(
+                call(addr, "GET", &format!("/v1/work/{id}"), None).status,
+                410
+            );
+        }
+        for id in &ids[..5] {
+            assert_eq!(
+                call(addr, "GET", &format!("/v1/work/{id}"), None).status,
+                404
+            );
+        }
+        assert_eq!(metrics(addr)["evicted_work"], 9);
+    }
+
+    #[test]
+    fn the_retention_limit_is_a_validated_flag_and_zero_is_refused() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(DEFAULT_MAX_RETAINED_WORK, 256);
+        assert_eq!(
+            parse_args(&a(&["--max-retained-work", "10"]))
+                .unwrap()
+                .max_retained,
+            10
+        );
+        assert_eq!(
+            parse_args(&a(&["--max-retained-work", "1000000"]))
+                .unwrap()
+                .max_retained,
+            1_000_000
+        );
+        for bad in ["0", "1000001", "-1", "many", ""] {
+            assert!(
+                parse_args(&a(&["--max-retained-work", bad])).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(parse_args(&a(&["--max-retained-work"])).is_err());
+        // The constructor refuses a service that would retain nothing.
+        let env = Arc::new(Environments::new(Pool::isolated("zero-retain", 1)));
+        let r = Service::new(
+            runtime(Model::new(&[]).arc()),
+            env,
+            true,
+            Capacity {
+                max_retained: 0,
+                ..Capacity::default()
+            },
+        );
+        assert!(r.is_err());
     }
 }
