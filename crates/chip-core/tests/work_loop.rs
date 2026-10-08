@@ -1170,3 +1170,37 @@ async fn capabilities_are_described_once_not_per_iteration() {
     assert_eq!(discoveries, 1);
     assert!(report.summary.turns >= 4);
 }
+
+/// The product installs no local reasoner. A locally proposed request with no valid evidence is then
+/// not run on Chip's own say-so: the model is asked once, and nothing has executed by then.
+#[tokio::test]
+async fn with_no_reasoner_a_request_without_valid_evidence_escalates_instead_of_running() {
+    let (fx, exec) = (Fx::new(), Exec::ok());
+    let policy = ScriptedPolicy::new(vec![Some(run("op.perform", "e1"))]);
+    let model = ModelScript::new(vec![WorkDecision::Block {
+        reason: "stop".into(),
+    }]);
+    let agent = Agent::new(fx.clone())
+        .with_capabilities(Arc::new(Caps))
+        .with_executor(exec.clone())
+        .with_observer(Arc::new(ExecutionObserver));
+    let report = agent.run_work(&spec("g"), &policy, &model).await;
+
+    assert_eq!(exec.calls(), 0, "nothing ran on the local proposal");
+    assert_eq!(fx.calls(), 1, "the model was asked, once");
+    assert_eq!(
+        report.outcome,
+        WorkOutcome::Blocked {
+            reason: "stop".into()
+        }
+    );
+    let reason = report
+        .events
+        .iter()
+        .find_map(|e| match e {
+            WorkEvent::ModelEscalation { reason, .. } => Some(reason.clone()),
+            _ => None,
+        })
+        .expect("an escalation");
+    assert!(reason.contains("no valid evidence"), "{reason}");
+}

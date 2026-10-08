@@ -15,34 +15,12 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, ExecutionObserver,
-    LocalWorkPolicy, ModelDecisionBoundary, ObservationKind, TestLocalReasoner, WorkDecision,
-    WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkSpec, WorkView, audit_safety,
-    measure_utility, verify_trajectory,
+    ModelDecisionBoundary, TestLocalReasoner, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome,
+    WorkSpec, audit_safety, measure_utility, verify_trajectory,
 };
 use chip_pax::{PAX_TEST_CAPABILITY, PaxExecutor, PaxTestPassed, parse_execution_result};
 
-use crate::horizon::Recording;
-
-/// Ask the model first. Afterwards propose to complete if the execution completed and to block if
-/// it did not. The loop, not this policy, decides whether a completion is allowed: it is refused
-/// unless PAX established `passed`.
-pub(crate) struct ReactToObservation;
-
-impl LocalWorkPolicy for ReactToObservation {
-    fn propose(&self, view: &WorkView<'_>) -> Option<WorkDecision> {
-        if view.turn == 0 {
-            return None;
-        }
-        Some(match view.observations.last().map(|o| o.kind) {
-            Some(ObservationKind::ExecutionCompleted) => WorkDecision::Complete {
-                summary: "pax.test completed".into(),
-            },
-            _ => WorkDecision::Block {
-                reason: "pax.test did not establish the goal".into(),
-            },
-        })
-    }
-}
+use crate::verify::{ReactToObservation, Recording};
 
 pub async fn test_pax_work(args: &[String]) -> i32 {
     let workdir = match args

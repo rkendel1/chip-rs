@@ -1,5 +1,12 @@
 //! The compact state a local decision engine consumes.
 //!
+//! **Experimental residue; the work loop does not use it.** `CapabilityDecisionState`,
+//! `GraphStateToken` and `ImpactState` come from the local-decision research (the tiny model, the
+//! Wasm decision module and their corpora). Nothing in `Agent` or `run_work` reads them, and no
+//! product command does; only the experiment crates and `chip-cli`'s research commands. They stay
+//! here because those crates and their golden files depend on this canonical encoding.
+//! (`chip-graph` defines a separate type of the same name.) See `docs/product/crates.md`.
+//!
 //! Everything a local decision needs is compiled into this value once, and the hot path then
 //! operates on it without any repository discovery: no file reads, no Git, no network, no
 //! environment, no clock, no model, no execution. It is plain data, so it behaves the same

@@ -164,10 +164,29 @@ the environment contract. *Authority:* Chip's. *Deps:* `fx-core` only. *Ships:* 
 runtime:* yes. *Tests:* 267, including architecture tests that forbid Compute, FeltDB and AppPort
 dependencies and pin invocation-boundary behaviour. *Real dependency:* none by itself; its
 real-execution evidence is through `chip-compute` (PR36-38, see section 6). *Contains non-product
-surface:* `reasoning.rs` (`LocalReasoner`, `TestLocalReasoner`), `decision_state.rs`
-(`CapabilityDecisionState`, `GraphStateToken`) and escalation-context policies from the
-local-decision research. These stay in the core crate and are not what the product relies on, with
-one exception noted in section 8.
+surface, audited:*
+
+* `reasoning.rs` (`LocalReasoner`, `ReasoningInput`, `TestLocalReasoner`): the seam the
+  local-reasoner experiments plug into, and a **test double**. The product installs no reasoner:
+  `chip work`, `chip verify` and `chip serve` never call `with_local_reasoner`. With none installed,
+  a locally proposed request that has no valid evidence escalates to the model (tested in
+  `chip-core/tests/work_loop.rs`), which is the same fail-closed behaviour the double gave. In the
+  product configuration that branch is not even reachable: the product's local policy only ever
+  proposes `Complete` or nothing, and every product capability is evidence-reuse-prohibited, so a
+  proposed request is executed, not assessed. `TestLocalReasoner` stays for tests, for the reference
+  baseline the experiments are measured against, and for `chip-cli`'s proof and benchmark commands.
+  `crates/chip-cli/tests/product_path.rs` keeps it out of the product modules.
+* `decision_state.rs` (`CapabilityDecisionState`, `GraphStateToken`, `ImpactState`): **experimental
+  residue.** Nothing in `Agent` or `run_work` reads it; only the experiment crates and `chip-cli`'s
+  research commands do. Kept because those crates and their golden files depend on the encoding. A
+  test pins that the work loop does not use it. (`chip-graph` defines a separate `GraphStateToken`.)
+* Escalation-context policies (`EscalationContextPolicy`, `FullEscalationContext`,
+  `DeduplicatedEscalationContext`): **product.** Deciding what the model is told at an escalation is
+  part of the agency loop, and both policies are used: `chip work` uses the deduplicating one,
+  `chip verify` the full one. The trait is small and has two product implementations, so it stays.
+  Their origin in the local-decision research does not make them research code.
+* The evidence store and `assess_evidence` (PR11-13): the store is used for recorded evidence and the
+  audit; the reuse/assess path is exercised by tests and proof commands, and by no product command.
 
 **`chip-cli`** (PRODUCT, L3). *Problem:* the one executable, `chip`, and the library an embedder
 uses (`service::serve_in`). The product surface is `chip work`, `chip serve`, `chip verify`,
@@ -352,9 +371,14 @@ experiments only measure model robustness against that mechanism.
 * **Experiment code ships in the binary.** `chip-cli` links the graph, decision, Wasm and Compute
   crates unconditionally, so the product binary carries unproven code and subcommands. Making them
   opt-in features is a follow-up and was deliberately not done here, because it changes the CLI.
-* **`TestLocalReasoner` is in the production path.** `chip work` and `chip verify` call
-  `with_local_reasoner(TestLocalReasoner::default())` (continue on valid evidence, escalate
-  otherwise). The type is named as a test double, lives in `chip-core`, and has no product owner.
+* **`TestLocalReasoner` left the production path** (previously `chip work` and `chip verify` installed
+  it; it was never consulted, see section 5). It remains a documented test double. The proof and
+  benchmark commands of `chip-cli` still use it and are linked into the same binary.
+* **Product code still calls one proof module.** `software_work.rs` and `verify.rs` render the
+  canonical measurement through `work_demo::measurement_json`, which lives in the demo module. It is
+  pinned as the only such coupling (`crates/chip-cli/tests/product_path.rs`); moving it is a
+  follow-up. (`verify`'s local policy `ReactToObservation` and the reply recorder `Recording` used
+  to be imported from the `--test-pax-work` and PR39 proof modules and now live in `verify.rs`.)
 * **Tolerated Markdown fence.** `ModelDecisionBoundary` accepts one code fence around the whole reply.
   It is documented and tested but is a narrow exception to "no repair" (`AGENTS.md` Invariant 6).
 * **Isolation:** concurrent isolated environments are not demonstrated in this repository; the
@@ -393,3 +417,14 @@ Removed `examples/single_turn.rs` (outside any package, never built, referenced 
 unused `tokio` dev-dependency of `chip-remote-env`. Every workspace crate has a purpose (product,
 integration, experiment or proof), so none was removed. No crate was renamed, merged or moved, and
 no abstraction was added.
+
+## 12. Product reasoning boundary
+
+`chip work`, `chip verify` and `chip serve` install no local reasoner. Their runtime-owned decisions
+are: the local policy (`CompleteWhenVerified` for work; `ReactToObservation` for verify, which asks
+the model first), the strict model decision (`ModelDecisionBoundary`), capability and invocation
+validation, goal evaluation from authoritative observations (a completion is refused until the
+goal's observation holds), the work limits, and, for any locally proposed request without valid
+evidence, escalation to the model. `crates/chip-cli/tests/product_path.rs` pins that the product
+modules name no reasoner, use only product crates and product modules, and construct their `Agent`
+without one; the same file pins that the work loop does not read `decision_state.rs`.

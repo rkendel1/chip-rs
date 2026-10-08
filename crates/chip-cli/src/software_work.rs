@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex};
 use chip_core::{
     Agent, CapabilityId, ContextReport, DeduplicatedEscalationContext, EnvironmentDescription,
     Environments, ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary, Observation,
-    ObservationInvariant, ObservationPredicate, SafetyAudit, TestLocalReasoner, WorkDecision,
-    WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
+    ObservationInvariant, ObservationPredicate, SafetyAudit, WorkDecision, WorkEnvironment,
+    WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
     WorkUtilityMeasurement, WorkView, audit_safety, context_report, measure_utility,
     verify_trajectory,
 };
@@ -36,10 +36,9 @@ use chip_project::{
 };
 use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
-use crate::horizon::Recording;
 use crate::local_environment::LocalEnvironmentProvider;
 use crate::verify::{
-    EXIT_NOT_VERIFIED, EXIT_RUNTIME_FAILURE, EXIT_UNAVAILABLE, EXIT_USAGE, EXIT_VERIFIED,
+    EXIT_NOT_VERIFIED, EXIT_RUNTIME_FAILURE, EXIT_UNAVAILABLE, EXIT_USAGE, EXIT_VERIFIED, Recording,
 };
 
 pub const DEFAULT_MAX_TURNS: usize = 12;
@@ -297,7 +296,6 @@ pub async fn run_software_work_with_budget(
         .with_capabilities(set.clone())
         .with_executor(set)
         .with_observer(Arc::new(ExecutionObserver))
-        .with_local_reasoner(Arc::new(TestLocalReasoner::default()))
         .with_max_output_tokens(WORK_MAX_OUTPUT_TOKENS);
     let mut spec = spec(id, goal, environment.observation_invariants(), limits);
     if let Some(bytes) = context_budget_bytes {

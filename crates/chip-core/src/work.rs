@@ -1993,9 +1993,18 @@ impl Agent {
                             )];
                             (None, Some((format!("local reasoner: {reason}"), evidence)))
                         }
+                        // No reasoner is installed (the product configuration): a locally proposed
+                        // request without valid evidence is not run on Chip's own say-so. The
+                        // model is asked, exactly as for an `Escalate` verdict.
                         Err(AgentError::Reasoning(ReasoningError::Unavailable(_))) => (
                             None,
-                            Some(("no local reasoner is available".to_string(), Vec::new())),
+                            Some((
+                                "no valid evidence for the locally proposed request".to_string(),
+                                vec![format!(
+                                    "{}: no valid evidence (absent or stale)",
+                                    request.capability_id
+                                )],
+                            )),
                         ),
                         Err(e) => {
                             return WorkOutcome::Failed {

@@ -61,6 +61,13 @@ pub trait LocalReasoner: Send + Sync {
 
 /// Deterministic reasoner with an explicit policy per evidence state. The default
 /// continues on valid evidence and escalates on stale or unknown evidence.
+///
+/// **A test double. It is not part of the product.** `chip work`, `chip verify` and `chip serve`
+/// install no reasoner at all: with none installed, a locally proposed request that has no valid
+/// evidence is escalated to the model (see `Agent::run_work`). This type exists for tests, for the
+/// reference baseline the reasoner experiments are measured against, and for the proof and
+/// benchmark commands of `chip-cli`. `crates/chip-cli/tests/product_path.rs` keeps it out of the
+/// product path.
 #[derive(Debug, Clone)]
 pub struct TestLocalReasoner {
     valid: LocalReasoningResult,
