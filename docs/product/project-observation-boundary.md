@@ -53,7 +53,7 @@ on the search path and pins a minimum release).
 
 **Pinned release.** Chip is built, tested and benchmarked against PAX **0.4.1**, tag `v0.4.1`, commit
 `674f3b3143874d1a692aca103b33f89da31a82ac` (CI installs exactly that tag and checks that commit;
-`chip_pax::PINNED_PAX` records it). `project.observe` requires PAX >= 0.4.1: the version is the
+`chip_pax::PINNED_PAX` records it). `project.observe` is explicit (not in the default capability set; `CHIP_ENABLE_PROJECT_OBSERVE=true`) and requires PAX >= 0.4.1: the version is the
 compatibility contract, and support is never detected by running an unsupported command. An older PAX
 fails with `PAX observation requires >= 0.4.1; found <version>`. `pax.test` keeps its own minimum (0.3.0).
 

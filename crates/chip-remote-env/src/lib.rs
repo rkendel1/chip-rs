@@ -221,6 +221,16 @@ impl Executor for RemoteCapabilityBackend {
 pub fn project_capability_set(root: &Path, pax: PaxExecutor) -> CapabilitySet {
     CapabilitySet::new()
         .with(Arc::new(ProjectExecutor::new(root)))
+        .with(Arc::new(pax))
+}
+
+/// [`project_capability_set`] with `project.observe` as well. The observation is available, bounded and
+/// tested, and is **not** part of the default surface: a model is not offered it unless whoever
+/// configures the work asks for it, because offering it costs prompt on every call and has not been
+/// shown to pay for itself (`docs/product/observe-benchmark.md`).
+pub fn project_capability_set_observing(root: &Path, pax: PaxExecutor) -> CapabilitySet {
+    CapabilitySet::new()
+        .with(Arc::new(ProjectExecutor::new(root)))
         .with(Arc::new(PaxObserve::new(pax.clone())))
         .with(Arc::new(pax))
 }

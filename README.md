@@ -188,7 +188,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 | `project.read` | `path`; optional `offset`, `length` (bytes) | reads a UTF-8 file and records its real content; a call returns at most 32 KiB, so a larger file is read in ranges (`offset`, `length` <= 32768); a range that splits a multi-byte character is refused, not altered |
 | `project.write` | `path`, `content` | atomically creates or replaces a UTF-8 file (at most 32 KiB), reads it back, records what the filesystem holds |
 | `project.git.status`, `project.git.diff`, `project.git.diff_stat`, `project.git.log` | none (`log`: a bounded count) | read-only Git observations; Chip fixes every argument; nothing mutating is expressible |
-| `project.observe` | `scope` (required): `file:`, `path:`, `crate:` or `module:` | bounded, deterministic project structure (source files, modules, declarations, tests, manifests) observed by PAX and rendered compactly by Chip; facts, never relevance; `complete`, `partial` and failure states are explicit, and a partial observation is never shown as complete |
+| `project.observe` (explicit: `CHIP_ENABLE_PROJECT_OBSERVE=true`) | `scope` (required): `file:`, `path:`, `crate:` or `module:` | bounded, deterministic project structure (source files, modules, declarations, tests, manifests) observed by PAX and rendered compactly by Chip; facts, never relevance; `complete`, `partial` and failure states are explicit, and a partial observation is never shown as complete |
 | `pax.test` | none | runs `pax --dir <project> --json test` and records PAX's `pax.execution-result.v1` |
 
 * **The model owns only a project-relative path, a literal query, and file content.** It cannot
@@ -233,6 +233,10 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   later successful write or a later test run could legitimately have changed things, the check is
   relaxed to "it still exists"), evidence reused where the spec prohibits it, and events after the
   terminal state. It reads recorded observations and events, never the loop's own counters.
+* **Decision frontier.** What a work has left unresolved is kept by the runtime, from observations alone, and
+  reported as a compact `frontier` block; a step that advances the work or adds information is never counted
+  as a wrong decision or a recovery merely because the goal is not yet met
+  ([`docs/product/decision-frontier.md`](docs/product/decision-frontier.md)).
 * **Metrics.** Lists, searches, reads, writes, tests, failed observations, recoveries, tokens and
   latency, and useful work per model call and per execution. Useful work is a *verified* goal (`verified`, not
   merely `goal_satisfied`): model claims, writes alone, a dispatched capability, stale evidence,

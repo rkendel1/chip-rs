@@ -21,10 +21,10 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, AnswerPredicate, CapabilityId, ContextReport, DeduplicatedEscalationContext,
-    EnvironmentDescription, Environments, ExecutionObserver, LocalWorkPolicy,
-    ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant, ObservationPredicate,
-    SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits,
-    WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
+    EnvironmentDescription, Environments, ExecutionObserver, FrontierItemSpec, FrontierKind,
+    LocalWorkPolicy, ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant,
+    ObservationPredicate, SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId,
+    WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
     context_report, measure_utility, verify_trajectory,
 };
 #[cfg(test)]
@@ -137,6 +137,42 @@ impl GoalKind {
             Self::Change => &CompleteWhenVerified,
             Self::Verify => &CompleteWhenStateVerified,
             Self::Inspect => &NoLocalPolicy,
+        }
+    }
+
+    /// The unresolved questions this kind of work starts with. They are the kind's own completion
+    /// semantics, broken at the joints the runtime can already tell apart; they are not a plan, and the
+    /// model does not write or maintain them. Resolving every one is not completion: the goal's own
+    /// evaluation decides that.
+    pub fn frontier(self) -> Vec<FrontierItemSpec> {
+        match self {
+            Self::Change => vec![
+                FrontierItemSpec::new(
+                    FrontierKind::MissingEvidence,
+                    "Has the project's current state been observed?",
+                    Arc::new(ProjectContentObserved),
+                ),
+                FrontierItemSpec::new(
+                    FrontierKind::MissingEvidence,
+                    "Has the requested change been made to the project?",
+                    Arc::new(ProjectChanged),
+                ),
+                FrontierItemSpec::new(
+                    FrontierKind::UnverifiedHypothesis,
+                    "Does the changed project pass verification?",
+                    Arc::new(VerifiedChange),
+                ),
+            ],
+            Self::Verify => vec![FrontierItemSpec::new(
+                FrontierKind::UnverifiedHypothesis,
+                "Does the unchanged project pass verification?",
+                Arc::new(VerifiedState),
+            )],
+            Self::Inspect => vec![FrontierItemSpec::new(
+                FrontierKind::MissingEvidence,
+                "Has the project been observed read-only, with no file changed?",
+                Arc::new(InspectionObserved),
+            )],
         }
     }
 
@@ -261,6 +297,47 @@ impl ObservationPredicate for InspectionObserved {
                             || GIT_CAPABILITIES.contains(&c.as_str())
                     })
             })
+    }
+}
+
+/// "Some project content has been observed": a successful list, search, read, structure observation
+/// or Git observation. It does not say which content, and a later change does not take it back.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProjectContentObserved;
+
+impl ObservationPredicate for ProjectContentObserved {
+    fn describe(&self) -> String {
+        "the project was observed with at least one successful read-only capability".to_string()
+    }
+
+    fn satisfied_by(&self, observation: &Observation) -> bool {
+        project_line(observation)
+            .and_then(|v| v["capability"].as_str().map(str::to_string))
+            .is_some_and(|c| {
+                [
+                    PROJECT_LIST,
+                    PROJECT_SEARCH,
+                    PROJECT_READ,
+                    PROJECT_OBSERVE_CAPABILITY,
+                ]
+                .contains(&c.as_str())
+                    || GIT_CAPABILITIES.contains(&c.as_str())
+            })
+    }
+}
+
+/// "A project file was changed": a content-changing write was observed. A write of identical bytes is
+/// not a change. A later write does not take it back.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProjectChanged;
+
+impl ObservationPredicate for ProjectChanged {
+    fn describe(&self) -> String {
+        "a content-changing project write was observed".to_string()
+    }
+
+    fn satisfied_by(&self, observation: &Observation) -> bool {
+        write_summary(observation).is_some_and(|(_, changed)| changed)
     }
 }
 
@@ -408,6 +485,9 @@ pub fn spec_for(
     if let Some(answer) = kind.required_answer() {
         spec = spec.with_required_answer(answer);
     }
+    for item in kind.frontier() {
+        spec = spec.with_frontier_item(item);
+    }
     // The environment says what its observations must satisfy; Chip applies it.
     for invariant in invariants {
         spec = spec.with_observation_invariant(invariant);
@@ -418,7 +498,8 @@ pub fn spec_for(
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_SEARCH).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_READ).unwrap())
         .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_WRITE).unwrap())
-        .with_evidence_reuse_prohibited(CapabilityId::new(PAX_TEST_CAPABILITY).unwrap());
+        .with_evidence_reuse_prohibited(CapabilityId::new(PAX_TEST_CAPABILITY).unwrap())
+        .with_evidence_reuse_prohibited(CapabilityId::new(PROJECT_OBSERVE_CAPABILITY).unwrap());
     // Repository state changes between requests too: a Git observation is never answered from memory.
     for id in GIT_CAPABILITIES {
         spec = spec.with_evidence_reuse_prohibited(CapabilityId::new(id).unwrap());
@@ -923,6 +1004,25 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "paths_written": w.paths_written,
         "failed_observations": u.failed_observations,
         "recoveries": u.recoveries,
+        // What the work left unresolved, kept by the runtime from observations. Resolving it is not
+        // completion, verification or useful work.
+        "frontier": {
+            "opened": u.frontier_opened,
+            "resolved": u.frontier_resolved,
+            "invalidated": u.frontier_invalidated,
+            "remaining": u.frontier_remaining,
+            "progress_events": u.frontier_progress_events,
+        },
+        // What each executed decision did for the work. A decision is wrong only if it did nothing; a
+        // step that left the goal unmet is not wrong, and recovery begins at a failure, an invalidation
+        // or a decision that did nothing.
+        "decisions": {
+            "wrong_valid": u.wrong_valid_decisions,
+            "supporting": u.supporting_decisions,
+            "recovery_turns": u.recovery_turns,
+            "recovery_executions": u.recovery_executions,
+            "recovery_model_calls": u.recovery_model_calls,
+        },
         "capability_requests": w.capability_requests(),
         "invalid_decisions": u.invalid_decisions,
         "invalid_inputs": w.invalid_inputs(),
@@ -957,6 +1057,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
             "git_scope": a.violations_of(chip_project::GIT_SCOPE),
             "git_observation_invalid": a.violations_of(chip_project::GIT_OBSERVATION_INVALID),
             "forged_observations": forged_observations(a),
+            "frontier_without_evidence": a.frontier_without_evidence,
         },
         "exit_status": w.exit_status(),
         "measurement": measurement,
@@ -1262,8 +1363,16 @@ pub async fn work(args: &[String]) -> i32 {
         }
     };
     // The local machine is the environment: one project directory, owned by this one work.
+    let observe =
+        match crate::local_environment::project_observe_from_env(|n| std::env::var(n).ok()) {
+            Ok(observe) => observe,
+            Err(why) => {
+                eprintln!("error: {why}");
+                return EXIT_UNAVAILABLE;
+            }
+        };
     let provider = match LocalEnvironmentProvider::prepare(&root).await {
-        Ok(provider) => provider,
+        Ok(provider) => provider.with_project_observe(observe),
         Err(why) => {
             eprintln!("error: {why}");
             return EXIT_UNAVAILABLE;
@@ -1378,7 +1487,23 @@ mod tests {
         let mut audited: Vec<String> = declared().iter().map(|c| c.to_string()).collect();
         offered.sort();
         audited.sort();
+        // The default environment offers everything the audit knows except the explicit capability...
+        audited.retain(|c| c != PROJECT_OBSERVE_CAPABILITY);
         assert_eq!(offered, audited);
+        // ...and the environment that asks for it offers exactly what the audit knows.
+        let mut observing: Vec<String> = env
+            .with_project_observe()
+            .capabilities()
+            .capabilities()
+            .await
+            .unwrap()
+            .iter()
+            .map(|d| d.id.to_string())
+            .collect();
+        let mut all: Vec<String> = declared().iter().map(|c| c.to_string()).collect();
+        observing.sort();
+        all.sort();
+        assert_eq!(observing, all);
     }
 
     struct Script {

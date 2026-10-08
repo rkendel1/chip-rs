@@ -31,6 +31,10 @@ use std::time::Duration;
 
 use fx_core::ModelResponse;
 
+use crate::frontier::{
+    DecisionFrontier, FrontierItemId, FrontierItemSpec, FrontierKind, FrontierTracker,
+    OutputProduced, Transition,
+};
 use crate::{
     Agent, AgentDecision, AgentError, Assessment, Capability, CapabilityEvent, CapabilityId,
     CapabilityRequest, DecisionBoundary, DecisionError, EvidenceLookup, ExecutionError,
@@ -822,6 +826,38 @@ pub enum WorkEvent {
         /// Required outputs still unobserved after this evaluation; the work may complete at zero.
         remaining: usize,
     },
+    /// A frontier item was opened: a requirement at the start of the work (turn 0), a successor to an
+    /// invalidated item, or the question whether a capability succeeds after it failed.
+    FrontierOpened {
+        work_id: WorkId,
+        turn: usize,
+        item: FrontierItemId,
+        kind: FrontierKind,
+        question: String,
+    },
+    /// An authoritative observation answered a frontier item. `evidence` is the execution whose
+    /// observation did.
+    FrontierResolved {
+        work_id: WorkId,
+        turn: usize,
+        item: FrontierItemId,
+        evidence: ExecutionId,
+    },
+    /// A later observation showed a resolved item no longer holds. A successor is opened.
+    FrontierInvalidated {
+        work_id: WorkId,
+        turn: usize,
+        item: FrontierItemId,
+        evidence: ExecutionId,
+    },
+    /// An execution made frontier progress: it resolved `resolved` open items. Not goal satisfaction,
+    /// not verification and not useful work.
+    FrontierProgress {
+        work_id: WorkId,
+        turn: usize,
+        evidence: ExecutionId,
+        resolved: usize,
+    },
     WorkCompleted {
         work_id: WorkId,
     },
@@ -1245,6 +1281,8 @@ pub struct WorkReport {
     pub work_id: WorkId,
     pub outcome: WorkOutcome,
     pub summary: WorkSummary,
+    /// What the work left unresolved, as the runtime kept it. Not goal satisfaction.
+    pub frontier: DecisionFrontier,
     pub events: Vec<WorkEvent>,
     pub decisions: Vec<DecisionRecord>,
     pub observations: Vec<Observation>,
@@ -1293,6 +1331,13 @@ pub struct WorkSpec {
     pub required_observations: Vec<Arc<dyn ObservationPredicate>>,
     /// Checks the model's proposed answer against the observations when it asks to complete.
     pub required_answers: Vec<Arc<dyn AnswerPredicate>>,
+    /// The frontier items the caller declares for this kind of work, each answered by a predicate over
+    /// the recorded observations. Empty means the frontier is derived from the requirements above
+    /// (one item per required output and per required observation), and the work is judged as
+    /// single-step: an execution that answers nothing is a wrong valid decision. A caller that declares
+    /// items is declaring multi-step work: a successful step that adds new information is support, not
+    /// a wrong decision, even though the goal is not yet met.
+    pub frontier: Vec<FrontierItemSpec>,
     /// Invariants the safety audit checks every recorded observation against.
     pub observation_invariants: Vec<Arc<dyn ObservationInvariant>>,
     /// Capabilities whose earlier observations must never answer a later request. The audit holds
@@ -1363,6 +1408,7 @@ impl WorkSpec {
             required_outputs: Vec::new(),
             required_observations: Vec::new(),
             required_answers: Vec::new(),
+            frontier: Vec::new(),
             observation_invariants: Vec::new(),
             evidence_reuse_prohibited: Vec::new(),
             context_budget_bytes: None,
@@ -1398,6 +1444,36 @@ impl WorkSpec {
     pub fn with_required_observation(mut self, predicate: Arc<dyn ObservationPredicate>) -> Self {
         self.required_observations.push(predicate);
         self
+    }
+
+    /// An unresolved question this kind of work starts with, answered by `item`'s predicate.
+    pub fn with_frontier_item(mut self, item: FrontierItemSpec) -> Self {
+        self.frontier.push(item);
+        self
+    }
+
+    /// Whether the caller declared the frontier (multi-step work) rather than leaving it derived.
+    pub fn declares_frontier(&self) -> bool {
+        !self.frontier.is_empty()
+    }
+
+    /// The frontier this work starts with: the declared items, or one per requirement.
+    fn initial_frontier(&self) -> Vec<FrontierItemSpec> {
+        if self.declares_frontier() {
+            return self.frontier.clone();
+        }
+        let outputs = self.required_outputs.iter().map(|o| {
+            FrontierItemSpec::new(
+                FrontierKind::MissingEvidence,
+                format!("Has the required output {o:?} been produced?"),
+                Arc::new(OutputProduced(o.clone())),
+            )
+        });
+        let observations = self
+            .required_observations
+            .iter()
+            .map(|p| FrontierItemSpec::new(FrontierKind::MissingEvidence, p.describe(), p.clone()));
+        outputs.chain(observations).collect()
     }
 
     /// A condition the proposed answer must satisfy against the observations before the work may
@@ -1451,6 +1527,8 @@ struct Run<'a> {
     satisfied: Vec<bool>,
     /// How many execution identities this work has assigned.
     assigned: usize,
+    /// What the work has left unresolved, kept by the runtime from observations alone.
+    frontier: FrontierTracker,
 }
 
 impl<'a> Run<'a> {
@@ -1532,6 +1610,34 @@ impl<'a> Run<'a> {
                 "{met} of {} required outputs have been observed and verified",
                 self.satisfied.len()
             )
+        }
+    }
+
+    /// Applies one execution's observation to the frontier and records what changed. Reads the
+    /// observation and the recorded trajectory and nothing else.
+    fn update_frontier(
+        &mut self,
+        turn: usize,
+        request: &CapabilityRequest,
+        observation: &Observation,
+    ) {
+        let transitions = self
+            .frontier
+            .observe(request, observation, &self.observations);
+        let resolved = transitions
+            .iter()
+            .filter(|t| matches!(t, Transition::Resolved { .. }))
+            .count();
+        for t in transitions {
+            self.events.push(frontier_event(&self.spec.id, turn, t));
+        }
+        if resolved > 0 {
+            self.events.push(WorkEvent::FrontierProgress {
+                work_id: self.id(),
+                turn,
+                evidence: observation.execution_id.clone(),
+                resolved,
+            });
         }
     }
 
@@ -1792,6 +1898,7 @@ impl<'a> Run<'a> {
         }
         self.record_origin(request);
         self.observations.push(observation.clone());
+        self.update_frontier(turn, request, &observation);
         self.evaluate_goal(turn, request, &observation);
         Step::Next
     }
@@ -1865,15 +1972,18 @@ impl Agent {
         context_policy: &dyn EscalationContextPolicy,
     ) -> WorkReport {
         let started = Mark::now();
+        let (frontier, opened) = FrontierTracker::new(&spec.initial_frontier());
+        let mut events = vec![WorkEvent::WorkStarted {
+            work_id: spec.id.clone(),
+            goal: spec.goal.as_str().to_string(),
+            limits: spec.limits,
+        }];
+        events.extend(opened.into_iter().map(|t| frontier_event(&spec.id, 0, t)));
         let mut run = Run {
             agent: self,
             spec,
             context_policy,
-            events: vec![WorkEvent::WorkStarted {
-                work_id: spec.id.clone(),
-                goal: spec.goal.as_str().to_string(),
-                limits: spec.limits,
-            }],
+            events,
             observations: Vec::new(),
             origins: Vec::new(),
             decisions: Vec::new(),
@@ -1896,6 +2006,7 @@ impl Agent {
             latency: WorkLatency::default(),
             satisfied: vec![false; spec.required_outputs.len() + spec.required_observations.len()],
             assigned: 0,
+            frontier,
         };
 
         let outcome = self.drive(&mut run, policy, boundary).await;
@@ -1945,6 +2056,7 @@ impl Agent {
             work_id: spec.id.clone(),
             outcome,
             summary,
+            frontier: run.frontier.into_frontier(),
             events: run.events,
             decisions: run.decisions,
             observations: run.observations,
@@ -2148,6 +2260,34 @@ impl Agent {
     }
 }
 
+fn frontier_event(work_id: &WorkId, turn: usize, transition: Transition) -> WorkEvent {
+    match transition {
+        Transition::Opened {
+            item,
+            kind,
+            question,
+        } => WorkEvent::FrontierOpened {
+            work_id: work_id.clone(),
+            turn,
+            item,
+            kind,
+            question,
+        },
+        Transition::Resolved { item, evidence } => WorkEvent::FrontierResolved {
+            work_id: work_id.clone(),
+            turn,
+            item,
+            evidence,
+        },
+        Transition::Invalidated { item, evidence } => WorkEvent::FrontierInvalidated {
+            work_id: work_id.clone(),
+            turn,
+            item,
+            evidence,
+        },
+    }
+}
+
 /// Prompt and completion tokens the provider reported, summed over the trajectory.
 fn events_usage(events: &[WorkEvent]) -> (u64, u64) {
     events.iter().fold((0, 0), |(p, c), e| match e {
@@ -2194,6 +2334,9 @@ pub struct SafetyAudit {
     /// An observation left out of a request that its capability's contract did not allow to be
     /// left out, or that no later identical observation made redundant.
     pub unjustified_omissions: usize,
+    /// A frontier transition (resolved, invalidated, or progress) that names an execution with no
+    /// recorded observation before it: a transition not grounded in anything that happened.
+    pub frontier_without_evidence: usize,
     pub details: Vec<String>,
 }
 
@@ -2213,6 +2356,7 @@ impl SafetyAudit {
             && self.limit_violations == 0
             && self.context_budget_violations == 0
             && self.unjustified_omissions == 0
+            && self.frontier_without_evidence == 0
             && self.invariant_violations.values().all(|n| *n == 0)
             && self.stale_evidence_reuse == 0
             && self.events_after_terminal == 0
@@ -2245,9 +2389,26 @@ pub fn audit_safety(
     let mut completion_decided = false;
     let mut terminal_seen = false;
     let mut observations_known = 0usize;
+    let mut observed_executions: Vec<&ExecutionId> = Vec::new();
     for event in &report.events {
         if matches!(event, WorkEvent::EvidenceReused { .. }) {
             observations_known += 1;
+        }
+        match event {
+            WorkEvent::ObservationRecorded { execution_id, .. } => {
+                observed_executions.push(execution_id);
+            }
+            WorkEvent::FrontierResolved { evidence, .. }
+            | WorkEvent::FrontierInvalidated { evidence, .. }
+            | WorkEvent::FrontierProgress { evidence, .. }
+                if !observed_executions.contains(&evidence) =>
+            {
+                audit.frontier_without_evidence += 1;
+                audit.details.push(format!(
+                    "a frontier transition names execution {evidence}, which has no recorded observation"
+                ));
+            }
+            _ => {}
         }
         if terminal_seen {
             audit.events_after_terminal += 1;
@@ -2466,13 +2627,28 @@ pub struct WorkUtilityMeasurement {
     /// The run ended on a decision the runtime refused (an unusable reply, or an invocation
     /// that carried what the capability does not take).
     pub invalid_decisions: usize,
-    /// Executions that ran and observed fine but produced none of the required outputs.
+    /// Executions that ran and observed fine and did **nothing for the work**: no frontier item moved,
+    /// and (for multi-step work) the observation was a byte-identical repeat of an earlier one. Not
+    /// "the goal is not yet met": an execution that made progress or added new information is never
+    /// counted here, however far the goal still is.
     pub wrong_valid_decisions: usize,
+    /// Executions of multi-step work that moved no frontier item but added new information: support for
+    /// the work, not a wrong decision and not progress.
+    pub supporting_decisions: usize,
+    /// Frontier items ever opened, including successors and items opened by failures.
+    pub frontier_opened: usize,
+    pub frontier_resolved: usize,
+    pub frontier_invalidated: usize,
+    /// Frontier items still open at the end: the questions the work did not answer.
+    pub frontier_remaining: usize,
+    /// Executions that resolved at least one frontier item.
+    pub frontier_progress_events: usize,
     /// Requests answered from existing evidence: a valid selection that added no verified work.
     pub redundant_selections: usize,
-    /// Work after the first unsatisfied authoritative observation: turns begun, executions made
-    /// and model calls made after it. This is everything that followed, not only the extra cost
-    /// of having been wrong; compare with a matched all-correct run for that.
+    /// Work after the first miss: turns begun, executions made and model calls made after it. A miss
+    /// is an execution that failed, did nothing for the work, or invalidated an earlier answer: never
+    /// a successful step that merely left the goal unmet. This is everything that followed, not only the
+    /// extra cost of having been wrong; compare with a matched all-correct run for that.
     pub recovery_turns: usize,
     pub recovery_executions: usize,
     pub recovery_model_calls: usize,
@@ -2541,21 +2717,43 @@ pub fn measure_utility(report: &WorkReport, spec: &WorkSpec) -> WorkUtilityMeasu
             .filter(|p| p.satisfied_by_trajectory(&report.observations))
             .count();
 
+    // The frontier, as the event stream recorded it.
+    let multi_step = spec.declares_frontier();
+    let mut resolved_in: std::collections::BTreeMap<usize, usize> = Default::default();
+    let mut invalidated_in: std::collections::BTreeMap<usize, usize> = Default::default();
+    let (mut f_opened, mut f_resolved, mut f_invalidated, mut f_progress) = (0usize, 0, 0, 0);
+    for event in &report.events {
+        match event {
+            WorkEvent::FrontierOpened { .. } => f_opened += 1,
+            WorkEvent::FrontierResolved { turn, .. } => {
+                f_resolved += 1;
+                *resolved_in.entry(*turn).or_default() += 1;
+            }
+            WorkEvent::FrontierInvalidated { turn, .. } => {
+                f_invalidated += 1;
+                *invalidated_in.entry(*turn).or_default() += 1;
+            }
+            WorkEvent::FrontierProgress { .. } => f_progress += 1,
+            _ => {}
+        }
+    }
+
     // One walk over the trajectory: what each turn did, and where the first miss was.
     let (mut turns, mut model_calls, mut executions) = (0usize, 0usize, 0usize);
-    let (mut wrong_valid, mut redundant) = (0usize, 0usize);
-    let mut executed_this_turn = false;
+    let (mut wrong_valid, mut supporting, mut redundant) = (0usize, 0usize, 0usize);
     let mut requested: Option<String> = None;
     let mut by_capability: std::collections::BTreeMap<String, usize> = Default::default();
     let (mut failed_observations, mut recoveries, mut unrecovered) = (0usize, 0usize, 0usize);
     let mut first_miss: Option<usize> = None;
     let (mut input, mut output): (Option<u64>, Option<u64>) = (None, None);
     let add = |slot: &mut Option<u64>, n: u64| *slot = Some(slot.unwrap_or(0) + n);
+    // Observations and their origins run in the order ObservationRecorded / EvidenceReused appear.
+    let mut seen = 0usize;
+    let mut last_success: std::collections::HashMap<&str, &str> = Default::default();
     for (at, event) in report.events.iter().enumerate() {
         match event {
             WorkEvent::DecisionStarted { .. } => {
                 turns += 1;
-                executed_this_turn = false;
             }
             WorkEvent::ModelCalled { usage, .. } => {
                 model_calls += 1;
@@ -2569,31 +2767,64 @@ pub fn measure_utility(report: &WorkReport, spec: &WorkSpec) -> WorkUtilityMeasu
             }
             WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. }) => {
                 executions += 1;
-                executed_this_turn = true;
                 if let Some(capability) = &requested {
                     *by_capability.entry(capability.clone()).or_default() += 1;
                 }
                 recoveries += unrecovered;
                 unrecovered = 0;
             }
-            WorkEvent::ObservationRecorded { kind, .. }
-                if *kind == ObservationKind::ExecutionFailed =>
-            {
-                failed_observations += 1;
-                unrecovered += 1;
+            WorkEvent::ObservationRecorded { kind, turn, .. } => {
+                let (observation, origin) =
+                    (report.observations.get(seen), report.origins.get(seen));
+                seen += 1;
+                let failed = *kind == ObservationKind::ExecutionFailed
+                    || observation.is_some_and(|o| o.status != crate::ExecutionStatus::Success);
+                if failed {
+                    failed_observations += 1;
+                    unrecovered += 1;
+                }
+                // What this execution did for the work, from the frontier events it caused and from
+                // whether it told the model anything it had not already been told.
+                let progressed = resolved_in.get(turn).copied().unwrap_or(0) > 0;
+                let invalidating = invalidated_in.get(turn).copied().unwrap_or(0) > 0;
+                let repeat = match (observation, origin) {
+                    (Some(o), Some(origin)) => {
+                        last_success.get(origin.invocation.as_str()).copied() == o.output.as_deref()
+                            && o.output.is_some()
+                    }
+                    _ => false,
+                };
+                if !failed {
+                    if let (Some(o), Some(origin)) = (observation, origin) {
+                        if let Some(text) = o.output.as_deref() {
+                            last_success.insert(origin.invocation.as_str(), text);
+                        }
+                    }
+                }
+                let miss = if failed || invalidating {
+                    true
+                } else if progressed {
+                    false
+                } else if multi_step && !repeat {
+                    supporting += 1;
+                    false
+                } else {
+                    wrong_valid += 1;
+                    true
+                };
+                if miss {
+                    first_miss.get_or_insert(at);
+                }
             }
-            WorkEvent::EvidenceReused { .. } => redundant += 1,
-            WorkEvent::GoalEvaluated {
-                satisfied: false, ..
-            } if executed_this_turn => {
-                wrong_valid += 1;
-                first_miss.get_or_insert(at);
+            WorkEvent::EvidenceReused { .. } => {
+                seen += 1;
+                redundant += 1;
             }
             _ => {}
         }
     }
 
-    // What followed the first unsatisfied observation.
+    // What followed the first miss.
     let (mut r_turns, mut r_exec, mut r_calls) = (0usize, 0usize, 0usize);
     let mut r_tokens: Option<u64> = None;
     if let Some(miss) = first_miss {
@@ -2633,6 +2864,12 @@ pub fn measure_utility(report: &WorkReport, spec: &WorkSpec) -> WorkUtilityMeasu
         executions,
         invalid_decisions: usize::from(invalid),
         wrong_valid_decisions: wrong_valid,
+        supporting_decisions: supporting,
+        frontier_opened: f_opened,
+        frontier_resolved: f_resolved,
+        frontier_invalidated: f_invalidated,
+        frontier_remaining: f_opened.saturating_sub(f_resolved + f_invalidated),
+        frontier_progress_events: f_progress,
         redundant_selections: redundant,
         recovery_turns: r_turns,
         recovery_executions: r_exec,

@@ -1,6 +1,6 @@
 # `project.observe`: matched baseline-versus-treatment benchmark
 
-Status: **the hypothesis is not supported by this data, and one falsification condition was met.**
+Status: **the hypothesis is not supported by this data, and one falsification condition was met.** As a result `project.observe` is **explicit, not default**: it is offered only when `CHIP_ENABLE_PROJECT_OBSERVE=true`. The treatment arm below ran when it was still offered by default; `scripts/bench-observe.py` now opts the treatment arm in explicitly.
 The capability is implemented, tested and safe (section 5); that it reduces rediscovery cost is not
 shown. Sample sizes are small and the limits in section 6 matter. Reproduce with
 `scripts/bench-observe.py`.

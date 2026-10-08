@@ -260,7 +260,7 @@ Speed is half the bar. These are already available from the work loop and are wh
 | Metric | Source |
 | --- | --- |
 | Valid decisions / invalid decisions rejected | `WorkUtilityMeasurement::invalid_decisions`, decision-parse rows |
-| Unnecessary actions | `wrong_valid_decisions`, `redundant_selections` |
+| Unnecessary actions | `wrong_valid_decisions` (an executed decision that did nothing for the work; a step that merely leaves the goal unmet is **not** one, see [`decision-frontier.md`](decision-frontier.md)), `redundant_selections` |
 | Capability selection accuracy | needs ground truth per task; not in this harness |
 | Successful goal completion | `verified` (the goal re-evaluated from observations) |
 | Recovery rate | `recoveries` / `failed_observations` |

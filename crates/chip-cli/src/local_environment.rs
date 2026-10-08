@@ -50,6 +50,30 @@ impl LocalEnvironment {
     }
 }
 
+impl LocalEnvironment {
+    /// Offers `project.observe` as well. Explicit: the default environment does not.
+    pub fn with_project_observe(mut self) -> Self {
+        self.set = Arc::new(chip_remote_env::project_capability_set_observing(
+            &self.root,
+            self.pax.clone(),
+        ));
+        self
+    }
+}
+
+/// The environment variable that opts a work in to `project.observe`.
+pub const PROJECT_OBSERVE_ENV: &str = "CHIP_ENABLE_PROJECT_OBSERVE";
+
+/// Whether `project.observe` is offered: off unless the variable is exactly `true`. Anything other than
+/// `true` or `false` is a configuration error, never a guess.
+pub fn project_observe_from_env(get: impl Fn(&str) -> Option<String>) -> Result<bool, String> {
+    match get(PROJECT_OBSERVE_ENV).as_deref().map(str::trim) {
+        None | Some("") | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => Err(format!("{PROJECT_OBSERVE_ENV} must be `true` or `false`")),
+    }
+}
+
 impl WorkEnvironment for LocalEnvironment {
     fn id(&self) -> &EnvironmentId {
         &self.id
@@ -90,6 +114,7 @@ pub struct LocalEnvironmentProvider {
     root: PathBuf,
     description: EnvironmentDescription,
     leased: Mutex<Option<WorkId>>,
+    observe: bool,
 }
 
 impl LocalEnvironmentProvider {
@@ -116,7 +141,14 @@ impl LocalEnvironmentProvider {
                 diagnostic: Some(pax_path.display().to_string()),
             },
             leased: Mutex::new(None),
+            observe: false,
         })
+    }
+
+    /// Whether the environments this provider hands out offer `project.observe`. Off unless asked for.
+    pub fn with_project_observe(mut self, offered: bool) -> Self {
+        self.observe = offered;
+        self
     }
 }
 
@@ -135,12 +167,17 @@ impl EnvironmentProvider for LocalEnvironmentProvider {
         }
         *leased = Some(work.clone());
         // A fresh capability set each time; the environment (and its id) is the same directory.
-        Ok(Arc::new(LocalEnvironment::new(
+        let environment = LocalEnvironment::new(
             self.id.clone(),
             &self.root,
             PaxExecutor::new(&self.root),
             self.description.clone(),
-        )))
+        );
+        Ok(Arc::new(if self.observe {
+            environment.with_project_observe()
+        } else {
+            environment
+        }))
     }
 
     fn release(&self, work: &WorkId, _environment: &EnvironmentId) {
@@ -169,6 +206,39 @@ mod tests {
             root: dir.to_path_buf(),
             description: EnvironmentDescription::default(),
             leased: Mutex::new(None),
+            observe: false,
+        }
+    }
+
+    fn get(vars: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn project_observe_is_off_unless_the_variable_is_exactly_true() {
+        assert_eq!(project_observe_from_env(get(&[])), Ok(false));
+        assert_eq!(
+            project_observe_from_env(get(&[(PROJECT_OBSERVE_ENV, "")])),
+            Ok(false)
+        );
+        assert_eq!(
+            project_observe_from_env(get(&[(PROJECT_OBSERVE_ENV, "false")])),
+            Ok(false)
+        );
+        assert_eq!(
+            project_observe_from_env(get(&[(PROJECT_OBSERVE_ENV, "true")])),
+            Ok(true)
+        );
+        for bad in ["1", "yes", "TRUE", "on", "observe"] {
+            let vars: &'static [(&str, &str)] = Box::leak(Box::new([(PROJECT_OBSERVE_ENV, bad)]));
+            assert!(
+                project_observe_from_env(get(vars)).is_err(),
+                "{bad:?} must be a configuration error, not a guess"
+            );
         }
     }
 

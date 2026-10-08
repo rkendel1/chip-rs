@@ -187,6 +187,11 @@ def run_one(binary, task, model, out, repo, tag):
     trace = os.path.join(out, tag, "trace.jsonl")
     proxy = Proxy(cfg["upstream"], trace)
     env = dict(os.environ, **cfg.get("env", {}))
+    if "treatment" in tag:
+        # project.observe is explicit: the treatment arm asks for it, the baseline never does.
+        env["CHIP_ENABLE_PROJECT_OBSERVE"] = "true"
+    else:
+        env.pop("CHIP_ENABLE_PROJECT_OBSERVE", None)
     cmd = [binary, "work", "--kind", spec["kind"], "--provider", cfg["provider"], "--model", cfg["model"],
            "--endpoint", f"http://127.0.0.1:{proxy.port}{cfg['path']}", "--json", spec["goal"]]
     start = time.time()

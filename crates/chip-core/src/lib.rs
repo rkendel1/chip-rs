@@ -3,6 +3,7 @@ mod decision;
 mod decision_state;
 mod environment;
 mod evidence;
+mod frontier;
 mod model_decision;
 mod observation;
 mod reasoning;
@@ -26,6 +27,10 @@ pub use environment::{
     OwnedEnvironment, WorkEnvironment,
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
+pub use frontier::{
+    DecisionFrontier, FrontierItem, FrontierItemId, FrontierItemSpec, FrontierKind,
+    FrontierResolution, FrontierStatus,
+};
 use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use model_decision::{ModelDecisionBoundary, WORK_DECISION_SCHEMA};
 pub use observation::{

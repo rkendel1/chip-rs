@@ -60,30 +60,71 @@ fn documented() -> BTreeMap<String, Row> {
     rows
 }
 
-async fn declared() -> Vec<chip_core::CapabilityDescriptor> {
+/// Capabilities that are documented and tested but are not part of the default surface: a work offers
+/// one only when whoever configures it asks.
+const EXPLICIT: &[&str] = &["project.observe"];
+
+fn environment() -> LocalEnvironment {
     let dir = std::env::temp_dir().join(format!("chip-surface-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let env = LocalEnvironment::new(
+    LocalEnvironment::new(
         opaque_id(&dir),
         &dir,
         PaxExecutor::new(&dir),
         EnvironmentDescription::default(),
-    );
-    env.capabilities().capabilities().await.unwrap()
+    )
+}
+
+/// What `chip work` offers by default.
+async fn declared() -> Vec<chip_core::CapabilityDescriptor> {
+    environment().capabilities().capabilities().await.unwrap()
+}
+
+/// What it offers when the explicit capabilities are asked for.
+async fn declared_with_explicit() -> Vec<chip_core::CapabilityDescriptor> {
+    environment()
+        .with_project_observe()
+        .capabilities()
+        .capabilities()
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
 async fn the_declared_surface_is_exactly_the_documented_one() {
     let documented = documented();
-    let declared = declared().await;
-    let mut ids: Vec<String> = declared.iter().map(|d| d.id.to_string()).collect();
-    ids.sort();
     let mut docs: Vec<String> = documented.keys().cloned().collect();
     docs.sort();
+    // With the explicit capabilities asked for, everything documented is offered and nothing else.
+    let mut all: Vec<String> = declared_with_explicit()
+        .await
+        .iter()
+        .map(|d| d.id.to_string())
+        .collect();
+    all.sort();
     assert_eq!(
-        ids, docs,
+        all, docs,
         "a capability was added, removed or renamed without updating docs/product/capabilities.md"
     );
+    // By default, everything documented except the explicit ones. A capability is not offered by
+    // default by accident: moving one in or out of this list is a visible decision.
+    let mut by_default: Vec<String> = declared().await.iter().map(|d| d.id.to_string()).collect();
+    by_default.sort();
+    let expected: Vec<String> = docs
+        .iter()
+        .filter(|id| !EXPLICIT.contains(&id.as_str()))
+        .cloned()
+        .collect();
+    assert_eq!(
+        by_default, expected,
+        "the default surface is not the documented one minus the explicit capabilities"
+    );
+    for id in EXPLICIT {
+        assert!(
+            documented.contains_key(*id) && !by_default.iter().any(|d| d == id),
+            "{id} is documented and explicit, not default"
+        );
+    }
     for (id, row) in &documented {
         assert!(
             CLASSES.contains(&row.class.as_str()),
@@ -132,7 +173,7 @@ async fn exactly_one_capability_writes_one_runs_tooling_and_one_observes_through
 
 #[tokio::test]
 async fn no_declared_capability_is_a_shell_a_process_a_network_or_a_git_mutation() {
-    for d in declared().await {
+    for d in declared_with_explicit().await {
         let id = d.id.to_string();
         for banned in [
             "shell", "exec", "process", "command", "bash", "http", "fetch", "net", "browser",

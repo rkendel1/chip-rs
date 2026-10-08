@@ -192,13 +192,30 @@ const LIMITS: WorkLimits = WorkLimits {
     max_executions: 10,
 };
 
-async fn run(dir: &Path, replies: Vec<String>) -> (SoftwareWork, Arc<Script>) {
+fn environment(dir: &Path, observing: bool) -> LocalEnvironment {
     let env = LocalEnvironment::new(
         opaque_id(dir),
         dir,
         PaxExecutor::new(dir),
         EnvironmentDescription::default(),
     );
+    if observing {
+        env.with_project_observe()
+    } else {
+        env
+    }
+}
+
+async fn run(dir: &Path, replies: Vec<String>) -> (SoftwareWork, Arc<Script>) {
+    run_with(dir, replies, false).await
+}
+
+async fn run_with(
+    dir: &Path,
+    replies: Vec<String>,
+    observing: bool,
+) -> (SoftwareWork, Arc<Script>) {
+    let env = environment(dir, observing);
     let model = Script::new(replies);
     let work = run_software_work_with_budget(
         WorkId::new("scenario"),
@@ -222,12 +239,30 @@ async fn run_kind(
     policy: Option<&dyn LocalWorkPolicy>,
     replies: Vec<String>,
 ) -> (SoftwareWork, Arc<Script>) {
-    let env = LocalEnvironment::new(
-        opaque_id(dir),
-        dir,
-        PaxExecutor::new(dir),
-        EnvironmentDescription::default(),
-    );
+    run_kind_with(dir, kind, policy, replies, false).await
+}
+
+async fn run_kind_observing(
+    dir: &Path,
+    kind: GoalKind,
+    policy: Option<&dyn LocalWorkPolicy>,
+    replies: Vec<String>,
+) -> (SoftwareWork, Arc<Script>) {
+    run_kind_with(dir, kind, policy, replies, true).await
+}
+
+async fn run_observing(dir: &Path, replies: Vec<String>) -> (SoftwareWork, Arc<Script>) {
+    run_with(dir, replies, true).await
+}
+
+async fn run_kind_with(
+    dir: &Path,
+    kind: GoalKind,
+    policy: Option<&dyn LocalWorkPolicy>,
+    replies: Vec<String>,
+    observing: bool,
+) -> (SoftwareWork, Arc<Script>) {
+    let env = environment(dir, observing);
     let model = Script::new(replies);
     let work = run_software_work_kind(
         kind,
@@ -1051,7 +1086,7 @@ async fn project_observe_does_not_ground_an_answer_and_does_not_change_the_contr
     }
     let before = snapshot(&dir);
     // Observation alone: it names the file and the declaration, and the answer cites them.
-    let (w, m) = run_kind(
+    let (w, m) = run_kind_observing(
         &dir,
         GoalKind::Inspect,
         None,
@@ -1078,7 +1113,7 @@ async fn project_observe_does_not_ground_an_answer_and_does_not_change_the_contr
     w.audit.assert_clean();
 
     // With a read of the file it cites: grounded, never verified, exit 1: exactly as without observe.
-    let (w, _) = run_kind(
+    let (w, _) = run_kind_observing(
         &dir,
         GoalKind::Inspect,
         None,
@@ -1117,7 +1152,7 @@ async fn a_model_cannot_supply_an_observation_or_a_fact() {
         r#"{"scope":"crate:auditfx","observation":"complete"}"#,
         r#"{"facts":"src/lib.rs declares len"}"#,
     ] {
-        let (w, _) = run_kind(
+        let (w, _) = run_kind_observing(
             &dir,
             GoalKind::Inspect,
             None,
@@ -1139,7 +1174,7 @@ async fn a_model_cannot_supply_an_observation_or_a_fact() {
         );
     }
     // Claiming a structure that was never observed does not complete anything.
-    let (w, _) = run_kind(
+    let (w, _) = run_kind_observing(
         &dir,
         GoalKind::Inspect,
         None,
@@ -1160,7 +1195,7 @@ async fn observing_structure_is_cost_and_never_useful_work_by_itself() {
     if !pax_available(&dir) || !observe_available(&dir) {
         return;
     }
-    let (w, _) = run(
+    let (w, _) = run_observing(
         &dir,
         vec![
             observe("crate:auditfx"),
@@ -1187,7 +1222,7 @@ async fn observing_structure_is_cost_and_never_useful_work_by_itself() {
     w.audit.assert_clean();
 
     // And an unverified run that observed plenty did no useful work.
-    let (w, _) = run(
+    let (w, _) = run_observing(
         &dir,
         vec![
             observe("crate:auditfx"),
@@ -1198,6 +1233,401 @@ async fn observing_structure_is_cost_and_never_useful_work_by_itself() {
     .await;
     assert!(!w.verified);
     assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+}
+
+// ---- decision frontier: the accounting of progress and recovery ------------------------------------------
+//
+// Matched scenarios through the real loop, real capabilities and real PAX; only the model is scripted.
+// Each is accounted twice from the same events: as the old edge-based accounting read them (every
+// executed turn whose goal evaluation was false was a "wrong valid decision", and everything after the
+// first one was "recovery"), and as the frontier accounts them. Each prints one row (`--nocapture`).
+
+struct Accounting {
+    legacy_wrong: usize,
+    legacy_recovery_executions: usize,
+}
+
+/// What the retired reading of `GoalEvaluated(satisfied = false)` would have said of these events.
+fn legacy(w: &SoftwareWork) -> Accounting {
+    let mut first_miss = None;
+    let mut wrong = 0;
+    for (at, e) in w.report.events.iter().enumerate() {
+        if matches!(
+            e,
+            WorkEvent::GoalEvaluated {
+                satisfied: false,
+                ..
+            }
+        ) {
+            wrong += 1;
+            first_miss.get_or_insert(at);
+        }
+    }
+    let recovery = first_miss.map_or(0, |at| {
+        w.report.events[at + 1..]
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    WorkEvent::Execution(ExecutionEvent::ExecutionStarted { .. })
+                )
+            })
+            .count()
+    });
+    Accounting {
+        legacy_wrong: wrong,
+        legacy_recovery_executions: recovery,
+    }
+}
+
+fn row(name: &str, w: &SoftwareWork) {
+    let (u, l) = (&w.utility, legacy(w));
+    eprintln!(
+        "FRONTIER-ROW | {name} | {:?} | goal={} verified={} | calls={} execs={} | wrong {}->{} | recovery_execs {}->{} | failed={} supporting={} | frontier opened={} resolved={} invalidated={} remaining={} progress={} | false_completions={}",
+        match &w.report.outcome {
+            WorkOutcome::Completed { .. } => "completed",
+            WorkOutcome::Blocked { .. } => "blocked",
+            WorkOutcome::LimitReached { .. } => "limit",
+            WorkOutcome::Failed { .. } => "failed",
+            WorkOutcome::Escalated { .. } => "escalated",
+        },
+        w.goal_satisfied == Some(true),
+        w.verified,
+        u.model_calls,
+        u.executions,
+        l.legacy_wrong,
+        u.wrong_valid_decisions,
+        l.legacy_recovery_executions,
+        u.recovery_executions,
+        u.failed_observations,
+        u.supporting_decisions,
+        u.frontier_opened,
+        u.frontier_resolved,
+        u.frontier_invalidated,
+        u.frontier_remaining,
+        u.frontier_progress_events,
+        w.audit.false_completions,
+    );
+}
+
+fn frontier_of(w: &SoftwareWork) -> (usize, usize, usize, usize, usize) {
+    let u = &w.utility;
+    (
+        u.frontier_opened,
+        u.frontier_resolved,
+        u.frontier_invalidated,
+        u.frontier_remaining,
+        u.frontier_progress_events,
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s1_many_valid_observations_before_a_verified_change_are_not_wrong_and_not_recovery() {
+    let dir = project("fr-s1", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            list("."),
+            read("src/lib.rs"),
+            read("tests/t.rs"),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+        ],
+    )
+    .await;
+    row("1 many valid observations, then verified", &w);
+    assert!(
+        w.verified && w.goal_satisfied == Some(true),
+        "{}",
+        describe(&w)
+    );
+    let (u, l) = (&w.utility, legacy(&w));
+    assert_eq!(
+        l.legacy_wrong, 4,
+        "the old reading: four misses before the goal was met"
+    );
+    assert_eq!(u.wrong_valid_decisions, 0);
+    assert_eq!(
+        (u.recovery_executions, u.recovery_turns, u.recoveries),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        u.supporting_decisions, 2,
+        "the two reads told the work something new"
+    );
+    assert_eq!(frontier_of(&w), (3, 3, 0, 0, 3));
+    assert_eq!(
+        w.useful_work_per_execution(),
+        Some(0.2),
+        "useful work is the verified goal over its cost"
+    );
+    w.audit.assert_clean();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s2_intermediate_actions_that_leave_the_goal_unmet_are_not_wrong() {
+    let dir = project("fr-s2", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            search("canonical"),
+            read("src/lib.rs"),
+            read("tests/t.rs"),
+            block("stopping here"),
+        ],
+    )
+    .await;
+    row("2 intermediate steps, goal unmet", &w);
+    assert!(!w.verified && w.goal_satisfied == Some(false));
+    let u = &w.utility;
+    assert_eq!(legacy(&w).legacy_wrong, 3);
+    assert_eq!((u.wrong_valid_decisions, u.recovery_executions), (0, 0));
+    assert_eq!(
+        frontier_of(&w),
+        (3, 1, 0, 2, 1),
+        "observed; not changed, not verified"
+    );
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_a_change_that_is_verified_without_looking_first_leaves_the_looking_question_open() {
+    let dir = project("fr-s3", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(&dir, vec![write("src/lib.rs", RIGHT), pax_test()]).await;
+    row("3 change then verification", &w);
+    assert!(w.verified, "{}", describe(&w));
+    assert_eq!(w.utility.wrong_valid_decisions, 0);
+    // Completed and satisfied, with one question never asked: the frontier is not the goal.
+    assert_eq!(frontier_of(&w), (3, 2, 0, 1, 2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s4_a_failed_verification_is_a_failure_on_the_record_not_a_wrong_decision() {
+    let dir = project("fr-s4", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            read("src/lib.rs"),
+            write("src/lib.rs", WRONG),
+            pax_test(),
+            block("giving up"),
+        ],
+    )
+    .await;
+    row("4 verification failure", &w);
+    assert!(!w.verified);
+    let u = &w.utility;
+    assert_eq!(u.failed_observations, 1);
+    assert_eq!(u.wrong_valid_decisions, 0, "the write was a real attempt");
+    assert_eq!(u.recoveries, 0, "nothing followed the failure");
+    // Verification is still open, and the failure raised its own question.
+    assert_eq!(w.report.frontier.remaining(), 2);
+    assert!(
+        w.report
+            .frontier
+            .items()
+            .iter()
+            .any(|i| i.question.contains("pax.test succeed after"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s5_a_failed_execution_begins_recovery_and_its_question_is_answered_by_the_next_success() {
+    let dir = project("fr-s5", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            read("src/main.rs"),
+            read("tests/t.rs"),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+        ],
+    )
+    .await;
+    row("5 execution failure", &w);
+    assert!(w.verified, "{}", describe(&w));
+    let u = &w.utility;
+    assert_eq!((u.failed_observations, u.recoveries), (1, 1));
+    assert_eq!(
+        u.recovery_executions, 3,
+        "everything after the failed read is recovery"
+    );
+    assert_eq!(u.wrong_valid_decisions, 0);
+    let asked = w
+        .report
+        .frontier
+        .items()
+        .iter()
+        .find(|i| i.question.contains("project.read succeed"))
+        .unwrap();
+    assert_eq!(asked.status, chip_core::FrontierStatus::Resolved);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s6_recovery_after_a_failed_verification_is_recovery_and_the_repair_is_not_wrong() {
+    let dir = project("fr-s6", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            read("src/lib.rs"),
+            write("src/lib.rs", WRONG),
+            pax_test(),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+        ],
+    )
+    .await;
+    row("6 recovery after failure", &w);
+    assert!(
+        w.verified && w.goal_satisfied == Some(true),
+        "{}",
+        describe(&w)
+    );
+    let (u, l) = (&w.utility, legacy(&w));
+    assert_eq!(l.legacy_wrong, 4);
+    assert_eq!(u.wrong_valid_decisions, 0);
+    assert_eq!((u.failed_observations, u.recoveries), (1, 1));
+    assert_eq!(
+        u.recovery_executions, 2,
+        "the repair and the second verification"
+    );
+    assert_eq!(
+        frontier_of(&w).3,
+        0,
+        "every question was answered, and the failure's too"
+    );
+    w.audit.assert_clean();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s7_an_unavailable_capability_executes_nothing_and_is_not_a_wrong_decision() {
+    let dir = project("fr-s7", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(&dir, vec![request("shell.run", r#"{"command":"ls"}"#)]).await;
+    row("7 capability unavailable", &w);
+    assert!(
+        matches!(
+            w.report.outcome,
+            WorkOutcome::Blocked { .. } | WorkOutcome::Failed { .. }
+        ),
+        "{}",
+        describe(&w)
+    );
+    let u = &w.utility;
+    assert_eq!(
+        (u.executions, u.wrong_valid_decisions, u.recovery_executions),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        frontier_of(&w),
+        (3, 0, 0, 3, 0),
+        "nothing was observed, so nothing moved"
+    );
+    w.audit.assert_clean();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s8_a_later_change_invalidates_an_earlier_verification() {
+    let dir = project("fr-s8", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    // The model, not Chip's policy, decides what follows a pass.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Change,
+        Some(&NoLocalPolicy),
+        vec![
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+            write("src/lib.rs", WRONG),
+            pax_test(),
+            block("stopping"),
+        ],
+    )
+    .await;
+    row("8 invalidated by a later change", &w);
+    let u = &w.utility;
+    assert_eq!(u.frontier_invalidated, 1, "the pass no longer stands");
+    assert_eq!(
+        w.report.frontier.items().last().map(|i| i.status),
+        Some(chip_core::FrontierStatus::Open)
+    );
+    assert!(
+        u.recovery_executions >= 1,
+        "work after the invalidation is recovery"
+    );
+    assert_eq!(u.wrong_valid_decisions, 0);
+    assert!(!w.verified, "the latest verification failed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s9_an_identical_repeat_is_the_one_kind_of_step_that_is_wrong() {
+    let dir = project("fr-s9", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![read("src/lib.rs"), read("src/lib.rs"), block("stop")],
+    )
+    .await;
+    row("9 identical repeat", &w);
+    let u = &w.utility;
+    // The first read answered the question whether the project had been observed; the identical second
+    // one answered nothing and added nothing.
+    assert_eq!((u.supporting_decisions, u.wrong_valid_decisions), (0, 1));
+    assert_eq!(u.frontier_progress_events, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s10_inspect_is_grounded_without_being_verified_and_its_frontier_follows_the_observation() {
+    let dir = project("fr-s10", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            list("."),
+            read("src/lib.rs"),
+            complete("`len` is declared in src/lib.rs."),
+        ],
+    )
+    .await;
+    row("10 inspect, grounded not verified", &w);
+    assert!(w.grounded && !w.verified && w.goal_satisfied == Some(true));
+    assert_eq!(frontier_of(&w), (1, 1, 0, 0, 1));
+    assert_eq!(w.utility.wrong_valid_decisions, 0);
+    assert_eq!(
+        w.useful_work_per_model_call(),
+        Some(0.0),
+        "grounded is not useful work"
+    );
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
 }
 
 /// Verify: the runtime completes the work itself when PAX passes an unchanged project. The model

@@ -775,6 +775,43 @@ fn event_json(event: &WorkEvent) -> Value {
             "kind": "GoalEvaluated", "turn": turn + 1,
             "satisfied": satisfied, "remaining": remaining,
         }),
+        WorkEvent::FrontierOpened {
+            turn,
+            item,
+            kind,
+            question,
+            ..
+        } => json!({
+            "kind": "FrontierOpened", "turn": turn + 1,
+            "item": item.to_string(), "frontier_kind": kind.name(), "question": question,
+        }),
+        WorkEvent::FrontierResolved {
+            turn,
+            item,
+            evidence,
+            ..
+        } => json!({
+            "kind": "FrontierResolved", "turn": turn + 1,
+            "item": item.to_string(), "evidence": evidence.to_string(),
+        }),
+        WorkEvent::FrontierInvalidated {
+            turn,
+            item,
+            evidence,
+            ..
+        } => json!({
+            "kind": "FrontierInvalidated", "turn": turn + 1,
+            "item": item.to_string(), "evidence": evidence.to_string(),
+        }),
+        WorkEvent::FrontierProgress {
+            turn,
+            evidence,
+            resolved,
+            ..
+        } => json!({
+            "kind": "FrontierProgress", "turn": turn + 1,
+            "evidence": evidence.to_string(), "resolved": resolved,
+        }),
         WorkEvent::WorkCompleted { .. } => json!({"kind": "WorkCompleted"}),
         WorkEvent::WorkEscalated { reason, .. } => {
             json!({"kind": "WorkEscalated", "reason": reason})
@@ -1082,8 +1119,19 @@ pub async fn serve_in(args: &[String], environments: Option<Arc<Environments>>) 
         Some(environments) => environments,
         None => {
             // The environment is the local machine: this project directory, which is mutable.
+            let observe =
+                match crate::local_environment::project_observe_from_env(|n| std::env::var(n).ok())
+                {
+                    Ok(observe) => observe,
+                    Err(why) => {
+                        eprintln!("error: {why}");
+                        return EXIT_UNAVAILABLE;
+                    }
+                };
             match LocalEnvironmentProvider::prepare(&root).await {
-                Ok(provider) => Arc::new(Environments::new(Arc::new(provider))),
+                Ok(provider) => Arc::new(Environments::new(Arc::new(
+                    provider.with_project_observe(observe),
+                ))),
                 Err(why) => {
                     eprintln!("error: {why}");
                     return EXIT_UNAVAILABLE;
@@ -1911,6 +1959,10 @@ mod tests {
                     if let Some(o) = e.as_object_mut() {
                         if o.contains_key("execution_id") {
                             o.insert("execution_id".into(), Value::from("exec"));
+                        }
+                        // A frontier transition cites the execution it rests on, by the same identity.
+                        if o.contains_key("evidence") {
+                            o.insert("evidence".into(), Value::from("exec"));
                         }
                         o.remove("context_bytes");
                     }

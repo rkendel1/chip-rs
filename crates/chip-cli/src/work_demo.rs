@@ -212,6 +212,18 @@ fn describe(event: &WorkEvent) -> String {
             "EvidenceReused: {capability} (receipt {})",
             receipt_id.as_deref().unwrap_or("none")
         ),
+        WorkEvent::FrontierOpened { item, question, .. } => {
+            format!("FrontierOpened: {item} {question}")
+        }
+        WorkEvent::FrontierResolved { item, evidence, .. } => {
+            format!("FrontierResolved: {item} by {evidence}")
+        }
+        WorkEvent::FrontierInvalidated { item, evidence, .. } => {
+            format!("FrontierInvalidated: {item} by {evidence}")
+        }
+        WorkEvent::FrontierProgress { resolved, .. } => {
+            format!("FrontierProgress: {resolved} item(s) resolved")
+        }
         WorkEvent::GoalEvaluated {
             satisfied,
             remaining,
