@@ -14,7 +14,9 @@
 //!   ends the run. A result with more turns and more events.
 //!
 //! `cargo bench -p chip-session-memory --bench service_retention -- [--works N] [--file-kib K]
-//! [--bin PATH] [--out PATH]`. Build the binary first: `cargo build --release -p chip-cli`.
+//! [--limits 64,1000000] [--bin PATH] [--out PATH]`. Each scenario runs once per retention limit
+//! (`chip serve --max-retained-work`); the largest limit stands in for the unbounded behavior the
+//! service had before retention was bounded. Build the binary first: `cargo build --release -p chip-cli`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -103,7 +105,13 @@ fn http(addr: &str, method: &str, path: &str, body: Option<&str>) -> (u16, Strin
     )
 }
 
-fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) -> Value {
+fn run_scenario(
+    bin: &PathBuf,
+    scenario: &str,
+    works: usize,
+    file_kib: usize,
+    max_retained: usize,
+) -> Value {
     let tmp =
         std::env::temp_dir().join(format!("chip-retention-{}-{scenario}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -131,6 +139,7 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
     let model = mock_model(completion(decision));
     let mut child = Command::new(bin)
         .args(["serve", "--host", "127.0.0.1", "--port", "0"])
+        .args(["--max-retained-work", &max_retained.to_string()])
         .current_dir(&tmp)
         .env("CHIP_PROVIDER", "openai-compatible")
         .env("CHIP_MODEL", "mock-model")
@@ -152,7 +161,11 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
         .to_string();
 
     let sample = |label: &str, finished: usize| {
+        let (_, m) = http(&addr, "GET", "/v1/metrics", None);
+        let m: Value = serde_json::from_str(&m).unwrap_or(Value::Null);
         json!({"label": label, "finished": finished,
+               "retained_work": m["retained_work"], "evicted_work": m["evicted_work"],
+               "submitted_work": m["submitted_work"],
                "rss_kib": status_kib(pid, "VmRSS:"), "rss_anon_kib": status_kib(pid, "RssAnon:"),
                "hwm_kib": status_kib(pid, "VmHWM:")})
     };
@@ -182,6 +195,10 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
             let deadline = Instant::now() + Duration::from_secs(120);
             loop {
                 let (status, body) = http(&addr, "GET", &format!("/v1/work/{id}"), None);
+                // A finished work may already have been evicted under the retention limit.
+                if status == 410 {
+                    break;
+                }
                 assert_eq!(status, 200);
                 let v: Value = serde_json::from_str(&body).unwrap();
                 if v["status"] != "running" && v["status"] != "queued" {
@@ -216,7 +233,8 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
     let (_, result_body) = http(&addr, "GET", &format!("/v1/work/{probe}"), None);
     let (_, events_body) = http(&addr, "GET", &format!("/v1/work/{probe}/events"), None);
     let events: Value = serde_json::from_str(&events_body).unwrap();
-    let (first_status, _) = http(&addr, "GET", &format!("/v1/work/{}", ids[0]), None);
+    let (first_status, first_body) = http(&addr, "GET", &format!("/v1/work/{}", ids[0]), None);
+    let first_code: Value = serde_json::from_str(&first_body).unwrap_or(Value::Null);
     let (_, health) = http(&addr, "GET", "/v1/metrics", None);
 
     let first = samples[0]["rss_anon_kib"].as_f64().unwrap();
@@ -224,6 +242,9 @@ fn run_scenario(bin: &PathBuf, scenario: &str, works: usize, file_kib: usize) ->
     let retained = (ids.len() - warm) as f64;
     let out = json!({
         "scenario": scenario, "works_after_warmup": works, "file_kib": file_kib,
+        "max_retained_work": max_retained,
+        "retained_series": samples.iter().map(|s| s["retained_work"].clone()).collect::<Vec<_>>(),
+        "first_work_lookup": {"status": first_status, "error_code": first_code["error"]["code"]},
         "samples": samples,
         "rss_anon_growth_kib": last - first,
         "bytes_retained_per_finished_work": (last - first) * 1024.0 / retained.max(1.0),
@@ -264,23 +285,36 @@ fn main() {
             .to_string_lossy()
             .into_owned()
     }));
+    // `--limits` are retention limits to run each scenario under. 1000000 is the largest the
+    // service accepts and stands in for the old unbounded behavior.
+    let limits: Vec<usize> = get("--limits")
+        .unwrap_or_else(|| "64,1000000".into())
+        .split(',')
+        .map(|v| {
+            v.parse()
+                .expect("--limits is a comma-separated list of numbers")
+        })
+        .collect();
     let mut scenarios = Vec::new();
     for s in ["escape", "read"] {
-        let r = run_scenario(&bin, s, works, file_kib);
-        println!(
-            "{s}: {} works, anon RSS growth {:.0} KiB = {:.0} bytes per finished work; result {} B, {} events {} B; first still retrievable: {}",
-            works,
-            r["rss_anon_growth_kib"].as_f64().unwrap(),
-            r["bytes_retained_per_finished_work"].as_f64().unwrap(),
-            r["one_result_json_bytes"],
-            r["one_events_count"],
-            r["one_events_json_bytes"],
-            r["first_work_still_retrievable_after_all"]
-        );
-        scenarios.push(r);
+        for &limit in &limits {
+            let r = run_scenario(&bin, s, works, file_kib, limit);
+            println!(
+                "{s} limit {limit}: {} works, retained {:?}, anon RSS growth {:.0} KiB; first work lookup {} {}; result {} B, {} events {} B",
+                works,
+                r["retained_series"],
+                r["rss_anon_growth_kib"].as_f64().unwrap(),
+                r["first_work_lookup"]["status"],
+                r["first_work_lookup"]["error_code"],
+                r["one_result_json_bytes"],
+                r["one_events_count"],
+                r["one_events_json_bytes"],
+            );
+            scenarios.push(r);
+        }
     }
     let doc = json!({
-        "schema": "chip.service-retention.v1",
+        "schema": "chip.service-retention.v2",
         "method": "Real `chip serve` binary, mock model and PAX shim, bounded runs; server process RssAnon read from /proc/<pid>/status after each wave of finished work. Measures retention of finished work in Service.items, not model or PAX behavior.",
         "binary": bin.to_string_lossy(),
         "scenarios": scenarios,

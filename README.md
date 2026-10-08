@@ -261,8 +261,8 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 
 ## Runtime service (`chip serve`)
 
-`chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N]`
-(default `127.0.0.1:8765`; as many works at once as the environment can isolate, at most 2 by default, so 1 on the local machine; 32 queued) exposes the same work runtime that
+`chip serve [--host ADDR] [--port PORT] [--max-concurrent-work N] [--max-queued-work N] [--max-retained-work N]`
+(default `127.0.0.1:8765`; as many works at once as the environment can isolate, at most 2 by default, so 1 on the local machine; 32 queued; 256 finished works retained) exposes the same work runtime that
 `chip work` uses over HTTP/JSON. It contains no agent logic: both surfaces prepare a
 `WorkRuntime` (model, PAX, project root) and call `WorkRuntime::run`. The model comes from
 `CHIP_PROVIDER` / `CHIP_MODEL` / `CHIP_ENDPOINT` as for `work`; the project is the current directory.
@@ -273,13 +273,14 @@ started only when a work runs `pax.test`.
 > authentication are intentionally out of scope.** It binds to loopback by default, has no
 > authentication and no CORS, answers only loopback `Host` names when bound to loopback, and is not
 > production-ready for remote or multi-user use. Work is held **in memory for the life of the
-> process only**: nothing is persisted, and a restart forgets every work item.
+> process only**: nothing is persisted, and a restart forgets every work item. Finished work is
+> kept only up to `--max-retained-work` (see *Retention of finished work*).
 
 | Route | |
 | --- | --- |
 | `GET /health` | `{"status":"ok"}`: service health only |
 | `POST /v1/work` | `{"goal": "..."}` -> 202 `{"work_id","status":"running"\|"queued"}`; 429 `queue_full` when the queue is full |
-| `GET /v1/work/{id}` | `status` (`queued`, `running`, or the terminal state), `lifecycle`, `goal`, `cancellation_requested`, `scheduling`, and once ended `result` and `timing` |
+| `GET /v1/work/{id}` | 410 `work_expired` if it finished and was evicted (see *Retention*); otherwise `status` (`queued`, `running`, or the terminal state), `lifecycle`, `goal`, `cancellation_requested`, `scheduling`, and once ended `result` and `timing` |
 | `GET /v1/work/{id}/events` | `{"work_id","complete","events":[...]}` the runtime's recorded trajectory |
 | `POST /v1/work/{id}/cancel` | queued: removed, `cancelled`. Running: `cancellation_requested` (advisory). Ended: 409 |
 | `GET /v1/metrics` | service-level counts and queue/duration statistics |
@@ -289,6 +290,29 @@ The accepted body fields are `goal` and, optionally, `kind` (`change` by default
 nothing. A body naming anything else (ids, receipts, observations,
 evidence, executable, argv, cwd, workspace root, capability, provider, model, endpoint, priority...)
 is rejected with 400 `unknown_field`. Errors are `{"error":{"code","message"}}`.
+
+### Retention of finished work
+
+The service keeps finished work in memory so a client can read its result and events, but only up
+to `--max-retained-work N` items (1 to 1,000,000; default 256). When more finish, the **oldest
+finished** work is evicted. A finished work costs roughly 25 KB (a one-turn blocked run) to 120 KB
+(a long run that reads files) in the measured service, so the default bounds retained results to
+tens of MiB; a caller that needs more raises the limit explicitly.
+
+- Queued and running work is never evicted. A work that ended `escalated` is never evicted either:
+  the service has no way to resolve an escalation, so it keeps them all (reported as
+  `retained_escalated_work`; they do not count against the limit).
+- `GET /v1/work/{id}`, `/events` and `POST /v1/work/{id}/cancel` answer **410** `work_expired` for
+  an id that finished and was evicted. That response says nothing about how the work ended and is
+  never a failure. The ids of evicted work are remembered, as ids only, up to four times the limit
+  (at most 16,384); beyond that an old id answers 404 `work_not_found`, like an id that was never
+  issued.
+- A request that already holds a work when it is evicted completes normally.
+- `/v1/metrics` counts stay cumulative (`submitted_work`, `completed_work`, `blocked_work`, the
+  duration statistics and so on include evicted work). `retained_work`, `evicted_work`,
+  `retained_escalated_work` and `max_retained_work` describe the registry itself.
+- A bound on the *count* of retained items is not a ceiling on RSS: running work and the size of
+  each result also contribute.
 
 ### Concurrent work
 

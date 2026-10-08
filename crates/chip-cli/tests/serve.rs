@@ -394,3 +394,75 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
     .await
     .unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn finished_work_beyond_the_retention_limit_answers_410_through_the_real_binary() {
+    let model = common::start(200, &completion(ESCAPE), Duration::ZERO).await;
+    let (dir, shim, url) = (project("retain"), pax_shim("retain"), model.url.clone());
+    tokio::task::spawn_blocking(move || {
+        let server = launch(
+            command(&dir, &url, &shim),
+            &[
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+                "--max-retained-work",
+                "1",
+            ],
+        );
+        let addr = server.addr.clone();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let (status, _, body) = http(
+                &addr,
+                "POST",
+                "/v1/work",
+                Some(r#"{"goal":"Add a function that sorts the payload."}"#),
+            );
+            assert_eq!(status, 202, "{body}");
+            let id = body["work_id"].as_str().unwrap().to_string();
+            // Sequential, so the oldest is the first to be evicted.
+            for _ in 0..500 {
+                let (_, _, m) = http(&addr, "GET", "/v1/metrics", None);
+                if m["blocked_work"].as_u64() == Some(ids.len() as u64 + 1) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            ids.push(id);
+        }
+        for old in &ids[..2] {
+            for (method, path) in [
+                ("GET", format!("/v1/work/{old}")),
+                ("GET", format!("/v1/work/{old}/events")),
+                ("POST", format!("/v1/work/{old}/cancel")),
+            ] {
+                let (status, _, body) = http(&addr, method, &path, None);
+                assert_eq!(status, 410, "{method} {path}: {body}");
+                assert_eq!(body["error"]["code"], "work_expired");
+            }
+        }
+        let (status, _, body) = http(&addr, "GET", &format!("/v1/work/{}", ids[2]), None);
+        assert_eq!((status, body["status"].as_str()), (200, Some("blocked")));
+        let (_, _, m) = http(&addr, "GET", "/v1/metrics", None);
+        assert_eq!(
+            (
+                m["submitted_work"].as_u64(),
+                m["blocked_work"].as_u64(),
+                m["retained_work"].as_u64()
+            ),
+            (Some(3), Some(3), Some(1))
+        );
+        assert_eq!(m["max_retained_work"], 1);
+        // The flag is validated like its neighbours.
+        let out = command(&dir, &url, &shim)
+            .args(["--max-retained-work", "0"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+    })
+    .await
+    .unwrap();
+}

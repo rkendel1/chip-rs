@@ -66,6 +66,27 @@ shows what the process holds, not a per-object accounting.
 or age cap, with the result projection kept small) removes it. Nothing in the rest of this document
 is a prerequisite.
 
+### Follow-up: bounded retention, measured
+
+A later change bounds it (`chip serve --max-retained-work`, default 256; see the README's
+*Retention of finished work*). The same benchmark, same binary and workloads, 2,000 finished works
+after warm-up, `RssAnon` of the server (`docs/product/service-retention-bounded.json`; the
+1,000,000 limit stands in for the old unbounded behavior):
+
+| Scenario | limit | retained works after 500 / 1,000 / 1,500 / 2,000 | server anon RSS after 500 → 2,000 works |
+|---|---|---|---|
+| `escape` | 64 | 64 / 64 / 64 / 64 | 3.8 → 4.2 MiB |
+| `escape` | 256 | 256 / 256 / 256 / 256 | 8.8 → 9.6 MiB |
+| `escape` | 1,000,000 | 520 / 1,020 / 1,520 / 2,020 | 14.2 → 50.4 MiB |
+| `read` | 64 | 64 / 64 / 64 / 64 | 15.2 → 16.3 MiB |
+| `read` | 256 | 256 / 256 / 256 / 256 | 39.5 → 42.9 MiB |
+| `read` | 1,000,000 | 520 / 1,020 / 1,520 / 2,020 | 62.1 → 235 MiB |
+
+The retained *count* plateaus exactly at the limit. RSS flattens but is not perfectly flat: it
+keeps creeping by a few KiB per hundred works after the plateau (the evicted-id memory fills up to
+four times the limit, and allocator fragmentation), which is why a count bound is not claimed to be
+an RSS ceiling.
+
 ## 3. Candidates and acceptance notes
 
 Stage 1 (SQLite, FeltDB, redb) was run before the scope was narrowed to "requirements first"; it is
