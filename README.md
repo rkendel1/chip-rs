@@ -85,6 +85,11 @@ structure belongs (PAX observes; Chip decides; FX reasons) is a design contract 
 [`docs/product/project-observation-boundary.md`](docs/product/project-observation-boundary.md); it
 is not implemented.
 
+How far Chip gets as a coding agent on a real project, what it recovers from, when it escalates and
+what a person still has to decide is measured end to end in
+[`docs/product/coding-agent-evaluation.md`](docs/product/coding-agent-evaluation.md)
+(`cargo test -p chip-cli --test coding_agent`). Its judgment is scripted; its reality is not.
+
 Performance is a product concern too: Chip should add minimal, bounded overhead around the model and
 the computer. [`docs/product/performance.md`](docs/product/performance.md) records the measured baseline
 and how to reproduce it (`cargo bench -p chip-cli --bench baseline`).

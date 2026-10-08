@@ -1,0 +1,15 @@
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+            }
+            let hint = failure.retry_after();
+            if hint.is_some() {
+                state.paused_for_server();
+            }
+            if !self.retry.permits(state.made()) {
+                return Err(failure.into_error(ErrorKind::RetriesExhausted, state.made()));
+@@@@ REPLACE
+            }
+            let hint = failure.retry_after();
+            if !self.retry.permits(state.made()) {
+                return Err(failure.into_error(ErrorKind::RetriesExhausted, state.made()));
+@@@@ END

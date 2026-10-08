@@ -1,0 +1,20 @@
+@@@@ EDIT src/routes/table.rs
+@@@@ FIND
+
+    pub fn from_config(config: &Config) -> Self {
+        let mut table = Self::new(ExecSettings::from_config(config));
+        for r in &config.routes {
+            table.add(&r.name, &r.prefix, RouteOverrides::from(r));
+        }
+        table
+@@@@ REPLACE
+
+    pub fn from_config(config: &Config) -> Self {
+        let base = ExecSettings::from_config(config);
+        let mut table = Self::new(base);
+        for r in &config.routes {
+            let overrides = RouteOverrides::from(r);
+            table.add(&r.name, &r.prefix, overrides);
+        }
+        table
+@@@@ END

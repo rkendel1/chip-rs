@@ -1,0 +1,17 @@
+[package]
+name = "courier"
+version = "0.7.2"
+edition = "2021"
+description = "A small request-dispatch client: routing, retries, rate limiting, circuit breaking and a request journal."
+license = "MIT"
+
+[lib]
+name = "courier"
+path = "src/lib.rs"
+
+[[bin]]
+name = "courier"
+path = "src/bin/courier.rs"
+
+# The fixture is its own workspace: it is never a member of the Chip workspace that carries it.
+[workspace]
