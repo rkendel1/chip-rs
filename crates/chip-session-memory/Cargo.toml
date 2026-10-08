@@ -1,0 +1,19 @@
+[package]
+name = "chip-session-memory"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+description = "EXPERIMENT: native FeltDB as isolated, disposable session working memory for Chip. Not used by any other crate."
+
+# This crate is a leaf. Nothing in the Chip workspace depends on it, and it is removable by deleting
+# this directory and its line in the workspace `members`. It depends on the existing native Rust
+# FeltDB implementation, pinned by commit, and on nothing from Chip's product path (no Chip, FX,
+# PAX or Compute crate is a normal dependency).
+[dependencies]
+feltdb = { git = "https://github.com/rkendel1/flow_db", rev = "9f2354e89743bf1bdc8f1fc825d8259fd80920fe" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
