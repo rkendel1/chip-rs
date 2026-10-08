@@ -293,6 +293,14 @@ to a few dozen observations.
   the same 72 MiB in 2.5 ms and ends at 9 MiB. The service's unbounded `items` map is the more
   concrete instance of the problem and needs no storage engine.
 
+Keep three concerns separate: *working memory* (ordinary Rust structures with explicit retention
+and compaction), *durable session recovery* (evaluate a storage engine only if cross-run persistence
+or resume after escalation becomes a real requirement), and *platform state* (FeltDB keeps its
+intended durable-state role). If durable session storage does become necessary, benchmark an
+embedded SQL store such as SQLite (for example through `rusqlite`) against FeltDB with the same
+recovery contract and workload. **SQLite was not tested here and nothing in this experiment shows
+it to be better.**
+
 Any WASM-hosting or alternative-store investigation requires its own decision and PR.
 
 ## 9. Reproduction
