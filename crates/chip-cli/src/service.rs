@@ -1899,7 +1899,23 @@ mod tests {
             .await
             .0;
         let direct: Vec<Value> = direct.report.events.iter().map(event_json).collect();
-        assert_eq!(served, direct);
+        // Identity is Chip's and derives from the work id, so the two runs differ only in that
+        // (and in the context bytes that carry it); everything else is the same trajectory.
+        let normalise = |events: Vec<Value>| -> Vec<Value> {
+            events
+                .into_iter()
+                .map(|mut e| {
+                    if let Some(o) = e.as_object_mut() {
+                        if o.contains_key("execution_id") {
+                            o.insert("execution_id".into(), Value::from("exec"));
+                        }
+                        o.remove("context_bytes");
+                    }
+                    e
+                })
+                .collect()
+        };
+        assert_eq!(normalise(served), normalise(direct));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2234,8 +2250,15 @@ mod tests {
         assert!(!eb[0]["goal"].as_str().unwrap().contains("ALPHA"));
         let (xa, xb) = (execution_ids(&ea), execution_ids(&eb));
         assert_eq!((xa.len(), xb.len()), (1, 2));
-        assert!(xa.iter().all(|id| id.contains("alpha")), "{xa:?}");
-        assert!(xb.iter().all(|id| id.contains("bravo")), "{xb:?}");
+        // Execution ids are Chip's: derived from each work's own id, so they cannot collide.
+        assert!(
+            xa.iter().all(|id| id.starts_with(&format!("{a}-exec-"))),
+            "{xa:?}"
+        );
+        assert!(
+            xb.iter().all(|id| id.starts_with(&format!("{b}-exec-"))),
+            "{xb:?}"
+        );
         assert!(!ea.iter().any(|e| e.to_string().contains("bravo")));
         assert!(!eb.iter().any(|e| e.to_string().contains("alpha")));
         assert_eq!(
@@ -2418,7 +2441,10 @@ mod tests {
             assert_eq!(done["result"]["measurement"]["observations"], 1);
             let ev = events(addr, id);
             assert_eq!(execution_ids(&ev).len(), 1);
-            assert!(execution_ids(&ev)[0].contains(own), "{ev:?}");
+            assert!(
+                execution_ids(&ev)[0].starts_with(&format!("{id}-exec-")),
+                "{own}: {ev:?}"
+            );
             assert_eq!(
                 kinds(&ev)
                     .iter()

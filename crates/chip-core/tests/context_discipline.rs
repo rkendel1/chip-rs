@@ -369,6 +369,7 @@ fn only_a_later_identical_observation_of_the_same_invocation_justifies_an_omissi
         capability: id("echo.reusable"),
         invocation: key.into(),
         reusable,
+        provider_response_id: None,
     };
     // Same call, same result, reusable: the earlier copy goes.
     assert_eq!(

@@ -708,6 +708,7 @@ async fn parts(report: &mut Report, opts: &Opts) {
                 capability: CapabilityId::new("project.read").unwrap(),
                 invocation: format!("project.read {{\"path\":\"f{i}\"}}"),
                 reusable: false,
+                provider_response_id: None,
             })
             .collect();
         let decisions: Vec<DecisionRecord> = (0..count)

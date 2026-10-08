@@ -474,6 +474,9 @@ pub struct ObservationOrigin {
     /// The capability's own contract: may an earlier observation of it stand in for a later one?
     /// Only such an observation may ever be left out of a request.
     pub reusable: bool,
+    /// The provider's id for the model response that asked for this request, when a model did and
+    /// the provider gave one. Correlation metadata: not the execution's identity, not a key.
+    pub provider_response_id: Option<String>,
 }
 
 /// Two observations say the same thing about reality: same kind, status and output. Their
@@ -1446,6 +1449,8 @@ struct Run<'a> {
     latency: WorkLatency,
     /// Which of the spec's required outputs some authoritative observation has produced.
     satisfied: Vec<bool>,
+    /// How many execution identities this work has assigned.
+    assigned: usize,
 }
 
 impl<'a> Run<'a> {
@@ -1497,6 +1502,7 @@ impl<'a> Run<'a> {
             capability: request.capability_id.clone(),
             invocation: format!("{}|{:?}", request.capability_id, request.inputs),
             reusable: self.reusable(&request.capability_id),
+            provider_response_id: request.provider_response_id.clone(),
         });
     }
 
@@ -1658,17 +1664,31 @@ impl<'a> Run<'a> {
         let (_, response) = called.map_err(|e| WorkOutcome::Failed {
             reason: format!("model escalation failed: {e}"),
         })?;
-        let decision = boundary
+        let mut decision = boundary
             .interpret(&response, &self.capabilities)
             .map_err(|e| WorkOutcome::Failed {
                 reason: format!("the model's response is not a valid decision: {e}"),
             })?;
+        // Chip, not the provider, names the execution: assigned here, once, where the request is
+        // authorized, and carried unchanged by the execution, its events, its observation and its
+        // evidence. Whatever identity the boundary put on a model's request is replaced.
+        if let WorkDecision::RequestCapability(request) = &mut decision {
+            request.execution_id = self.assign_execution_id();
+        }
         self.decisions.push(DecisionRecord {
             turn,
             source: DecisionSource::Model,
             decision: decision.clone(),
         });
         Ok(decision)
+    }
+
+    /// The next execution identity of this work: `<work id>-exec-<n>`, counting from 1. It is
+    /// derived from nothing a provider or model supplied, so it cannot repeat within the work and
+    /// is distinct across works whose ids are. It is not a cryptographic receipt.
+    fn assign_execution_id(&mut self) -> ExecutionId {
+        self.assigned += 1;
+        ExecutionId::new(format!("{}-exec-{}", self.spec.id, self.assigned))
     }
 
     /// Whether an earlier observation of this capability may answer a request for it again.
@@ -1875,6 +1895,7 @@ impl Agent {
             },
             latency: WorkLatency::default(),
             satisfied: vec![false; spec.required_outputs.len() + spec.required_observations.len()],
+            assigned: 0,
         };
 
         let outcome = self.drive(&mut run, policy, boundary).await;

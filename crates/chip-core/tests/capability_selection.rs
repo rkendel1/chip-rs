@@ -288,7 +288,7 @@ async fn every_declared_capability_the_model_chooses_executes_through_the_execut
                 "{name}: the executor is asked for exactly that"
             );
             // Chip named the execution; the model's text did not.
-            assert!(calls[0].0.starts_with("model-"), "{name}: {}", calls[0].0);
+            assert!(calls[0].0.contains("-exec-"), "{name}: {}", calls[0].0);
 
             assert_eq!(
                 r.model.sent.lock().unwrap().len(),

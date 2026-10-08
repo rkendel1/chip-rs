@@ -22,7 +22,12 @@ pub enum InputValue {
 /// never *how* it is run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityRequest {
+    /// Chip's identity for the execution this request would become. Never taken from a provider.
     pub execution_id: ExecutionId,
+    /// The id the model provider gave the response this request came from, if it gave one. Metadata
+    /// for correlation only: it is not an identity, it may repeat across requests, and nothing is
+    /// keyed by it.
+    pub provider_response_id: Option<String>,
     pub capability_id: CapabilityId,
     pub inputs: BTreeMap<String, InputValue>,
     /// Whether the requester sent an `inputs` member at all, even an empty one. A capability that
@@ -34,6 +39,7 @@ impl CapabilityRequest {
     pub fn new(execution_id: ExecutionId, capability_id: CapabilityId) -> Self {
         Self {
             execution_id,
+            provider_response_id: None,
             capability_id,
             inputs: BTreeMap::new(),
             inputs_present: false,
@@ -127,6 +133,7 @@ impl DecisionBoundary for ScriptedDecision {
                 inputs,
             } => Ok(AgentDecision::RequestCapability(CapabilityRequest {
                 execution_id: execution_id.clone(),
+                provider_response_id: None,
                 capability_id: CapabilityId::new(capability_id.clone())?,
                 inputs_present: !inputs.is_empty(),
                 inputs: inputs.clone(),

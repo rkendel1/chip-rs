@@ -150,10 +150,9 @@ async fn no_declared_capability_is_a_shell_a_process_a_network_or_a_git_mutation
 }
 
 #[tokio::test]
-async fn execution_ids_are_chips_and_derive_from_the_providers_response_id() {
-    // Chip builds the id ("model-" plus the sanitised provider response id); a model cannot supply
-    // one. A provider that repeats a response id repeats the id, and nothing in the audit objects:
-    // recorded in docs/product/capabilities.md as an evidence-identity limit.
+async fn the_boundary_assigns_no_execution_id_and_keeps_the_provider_id_as_metadata() {
+    // Execution identity is Chip's, assigned by the work loop; the provider's response id is only
+    // correlation metadata and is never turned into an execution id.
     use chip_core::{Capability, ModelDecisionBoundary, WorkDecision, WorkDecisionBoundary};
     use fx_core::{ModelResponse, Usage};
     let capabilities: Vec<Capability> = {
@@ -176,27 +175,20 @@ async fn execution_ids_are_chips_and_derive_from_the_providers_response_id() {
         out
     };
     let reply = r#"{"decision":"request_capability","capability":"project.list"}"#;
-    let id_of = |response_id: &str| match ModelDecisionBoundary
+    let request = |response_id: &str| match ModelDecisionBoundary
         .interpret(
             &ModelResponse::new(response_id, reply, Usage::new(1, 1)),
             &capabilities,
         )
         .unwrap()
     {
-        WorkDecision::RequestCapability(r) => r.execution_id.0,
+        WorkDecision::RequestCapability(r) => r,
         other => panic!("{other:?}"),
     };
-    assert_eq!(id_of("resp-1"), "model-resp-1");
-    assert_eq!(
-        id_of("resp-1"),
-        id_of("resp-1"),
-        "a repeated provider id repeats the execution id"
-    );
-    assert_eq!(
-        id_of("a b/../c"),
-        "model-abc",
-        "the provider's id is sanitised, never trusted as written"
-    );
+    let r = request("resp-1");
+    assert!(r.execution_id.is_unassigned());
+    assert_eq!(r.provider_response_id.as_deref(), Some("resp-1"));
+    assert_eq!(request("").provider_response_id, None);
 }
 
 /// `project.read`'s range inputs, through the validation the work loop applies to a model's request:
