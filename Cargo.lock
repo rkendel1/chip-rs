@@ -451,6 +451,7 @@ name = "chip-session-memory"
 version = "0.0.1"
 dependencies = [
  "chip-core",
+ "durability",
  "feltdb",
  "redb",
  "rusqlite",
@@ -783,6 +784,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "durability"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "950ba26be368e2be816d1b59b17cc032f9e374543c3386e82999bde8c8f36c39"
+dependencies = [
+ "crc32fast",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

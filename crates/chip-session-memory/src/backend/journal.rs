@@ -23,8 +23,8 @@
 //!
 //! Durability configuration (what a successful write guarantees):
 //!
-//! * Log entries are flushed to the operating system at every append (`FlushPolicy::PerAppend`,
-//!   no write buffer): they survive the death of the process, not the loss of power.
+//! * Log entries are flushed to the operating system at every append (an explicit `flush()` after
+//!   each one; see `append`): they survive the death of the process, not the loss of power.
 //!   Payload files are written and renamed without fsync.
 //! * [`Backend::synced`] fsyncs the log segment and its directory, every payload file written since
 //!   the last barrier, and the payload directory. With `SYNC_EVERY_WRITE` the same is done for every
@@ -60,11 +60,22 @@ const SEGMENT_BYTES: u64 = 4 * 1024 * 1024;
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum Op {
-    Put { c: String, i: String, v: Value },
-    Del { c: String, i: String },
-    Batch { ops: Vec<Op> },
+    Put {
+        c: String,
+        i: String,
+        v: Value,
+    },
+    Del {
+        c: String,
+        i: String,
+    },
+    Batch {
+        ops: Vec<Op>,
+    },
     /// A checkpoint was published; carries no state of its own.
-    Ckpt { last: u64 },
+    Ckpt {
+        last: u64,
+    },
 }
 
 type Map = BTreeMap<String, BTreeMap<String, Value>>;
@@ -72,7 +83,9 @@ type Map = BTreeMap<String, BTreeMap<String, Value>>;
 fn apply(map: &mut Map, op: &Op) {
     match op {
         Op::Put { c, i, v } => {
-            map.entry(c.clone()).or_default().insert(i.clone(), v.clone());
+            map.entry(c.clone())
+                .or_default()
+                .insert(i.clone(), v.clone());
         }
         Op::Del { c, i } => {
             if let Some(m) = map.get_mut(c) {
@@ -154,6 +167,10 @@ impl Journal {
         let bytes = serde_json::to_vec(op).map_err(p)?;
         let mut wal = self.wal.borrow_mut();
         let id = wal.append_bytes(&bytes).map_err(p)?;
+        // Explicit, because a writer resumed after a restart is hard-wired by the crate to flush
+        // every 64 appends through a 64 KiB buffer, with no setter, and dropping a writer does not
+        // flush. Without this the "flushed at every append" guarantee holds only for a fresh log.
+        wal.flush().map_err(p)?;
         if self.syncing() {
             wal.flush_and_sync().map_err(p)?;
         }
@@ -192,8 +209,11 @@ impl Backend for Journal {
         let init = |e: &dyn std::fmt::Display| E::Init(e.to_string());
         std::fs::create_dir_all(dir.join("payloads")).map_err(|e| init(&e))?;
         let marker = dir.join(Self::FILE);
+        const MARKER: &[u8] = b"chip session journal v1\n";
         if !marker.exists() {
-            std::fs::write(&marker, b"chip session journal v1\n").map_err(|e| init(&e))?;
+            std::fs::write(&marker, MARKER).map_err(|e| init(&e))?;
+        } else if std::fs::read(&marker).map_err(|e| init(&e))? != MARKER {
+            return Err(init(&"the journal marker is not this format and version"));
         }
         // Temporary files an interrupted write left behind are not data.
         for d in [dir.to_path_buf(), dir.join("payloads")] {

@@ -30,7 +30,7 @@ use chip_core::{
     CapabilityId, ExecutionId, ExecutionStatus, Observation, ObservationKind, ObservationOrigin,
     omissions,
 };
-use chip_session_memory::backend::{self, Backend, Felt, Redb, Sqlite};
+use chip_session_memory::backend::{self, Backend, Felt, Journal, Redb, Sqlite};
 use chip_session_memory::packet::packet_and_hash;
 use chip_session_memory::workload::{Event, Workload};
 use chip_session_memory::{Outcome, SessionMemory};
@@ -39,7 +39,7 @@ use sha2::{Digest, Sha256};
 
 /// Every arm. The first four are the original session-memory experiment; the rest compare durable
 /// stores under identical retention (`*_store_all`) and under fsync-every-write (`*_synced`).
-const ALL_ARMS: [&str; 11] = [
+const ALL_ARMS: [&str; 13] = [
     "chip_baseline",
     "memory_compact",
     "felt_store_all",
@@ -51,17 +51,20 @@ const ALL_ARMS: [&str; 11] = [
     "sqlite_synced",
     "redb_synced",
     "redb_default_cache_synced",
+    "journal_store_all",
+    "journal_synced",
 ];
 /// Arms run when `--arms` is not given.
-const DEFAULT_ARMS: [&str; 6] = [
+const DEFAULT_ARMS: [&str; 7] = [
     "chip_baseline",
     "memory_compact",
     "felt_store_all",
     "sqlite_store_all",
     "redb_store_all",
     "redb_default_cache",
+    "journal_store_all",
 ];
-const DURABLE_ARMS: [&str; 9] = [
+const DURABLE_ARMS: [&str; 11] = [
     "felt_store_all",
     "felt_summaries_only",
     "sqlite_store_all",
@@ -71,6 +74,8 @@ const DURABLE_ARMS: [&str; 9] = [
     "sqlite_synced",
     "redb_synced",
     "redb_default_cache_synced",
+    "journal_store_all",
+    "journal_synced",
 ];
 const FELTDB_REV: &str = "9f2354e89743bf1bdc8f1fc825d8259fd80920fe";
 
@@ -733,6 +738,7 @@ fn dispatch<T>(
     felt: impl FnOnce() -> T,
     sqlite: impl FnOnce() -> T,
     redb: impl FnOnce() -> T,
+    journal: impl FnOnce() -> T,
 ) -> T {
     if arm.starts_with("felt") {
         felt()
@@ -740,6 +746,8 @@ fn dispatch<T>(
         sqlite()
     } else if arm.starts_with("redb") {
         redb()
+    } else if arm.starts_with("journal") {
+        journal()
     } else {
         panic!("unknown durable arm {arm}")
     }
@@ -762,6 +770,7 @@ fn child(arm: &str, n: usize, seed: u64, dir: &Path) {
             || arm_store::<Felt>(durable, &w, dir),
             || arm_store::<Sqlite>(durable, &w, dir),
             || arm_store::<Redb>(durable, &w, dir),
+            || arm_store::<Journal>(durable, &w, dir),
         ),
         other => panic!("unknown arm {other}"),
     };
@@ -775,6 +784,7 @@ fn child_kill1(arm: &str, n: usize, seed: u64, dir: &Path) {
         || kill_phase1::<Felt>(arm, &w, dir),
         || kill_phase1::<Sqlite>(arm, &w, dir),
         || kill_phase1::<Redb>(arm, &w, dir),
+        || kill_phase1::<Journal>(arm, &w, dir),
     );
 }
 
@@ -784,6 +794,7 @@ fn child_kill2(arm: &str, dir: &Path) {
         || kill_phase2::<Felt>(arm, dir),
         || kill_phase2::<Sqlite>(arm, dir),
         || kill_phase2::<Redb>(arm, dir),
+        || kill_phase2::<Journal>(arm, dir),
     );
     println!("RESULT {result}");
 }
@@ -851,7 +862,7 @@ fn environment() -> Value {
         "mem_total": mem_total, "rustc": sh("rustc", &["-vV"]).lines().next().unwrap_or_default().to_string(),
         "glibc": sh("ldd", &["--version"]).lines().next().unwrap_or_default().to_string(),
         "profile": if cfg!(debug_assertions) { "debug" } else { "release (cargo bench)" },
-        "feltdb_rev": FELTDB_REV, "sqlite": "rusqlite 0.40.2 with bundled SQLite 3.53.2", "redb": "4.3.0", "build": "cargo bench (release profile)", "filesystem_for_journal": sh("df", &["-T", "--output=fstype", &std::env::temp_dir().to_string_lossy()]).lines().last().unwrap_or_default().to_string(),
+        "feltdb_rev": FELTDB_REV, "sqlite": "rusqlite 0.40.2 with bundled SQLite 3.53.2", "redb": "4.3.0", "durability_crate": "0.7.2 (default-features=false)", "build": "cargo bench (release profile)", "filesystem_for_journal": sh("df", &["-T", "--output=fstype", &std::env::temp_dir().to_string_lossy()]).lines().last().unwrap_or_default().to_string(),
     })
 }
 

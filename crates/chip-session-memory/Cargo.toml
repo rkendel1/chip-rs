@@ -30,3 +30,7 @@ chip-core = { path = "../chip-core" }
 [[bench]]
 name = "session_memory"
 harness = false
+
+[[bench]]
+name = "service_retention"
+harness = false

@@ -36,6 +36,23 @@ fn dir_of(root: &Path, s: &str) -> PathBuf {
     root.join(s)
 }
 
+/// The file whose damage the engine must notice: the store file, or for the journal the first
+/// write-ahead-log segment (it has no single store file).
+fn store_file(session_dir: &Path, name: &str, file: &str) -> PathBuf {
+    if name == "journal" {
+        let mut segs: Vec<PathBuf> = std::fs::read_dir(session_dir.join("wal"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "log"))
+            .collect();
+        segs.sort();
+        segs.remove(0)
+    } else {
+        session_dir.join(file)
+    }
+}
+
 // ----------------------------------------------------------------------- the child processes
 
 fn child_body<B: Backend>(root: &Path, mode: &str) {
@@ -95,6 +112,7 @@ fn child_entry() {
         "feltdb" => child_body::<Felt>(root, mode),
         "sqlite" => child_body::<Sqlite>(root, mode),
         "redb" => child_body::<Redb>(root, mode),
+        "journal" => child_body::<Journal>(root, mode),
         other => panic!("unknown backend {other}"),
     }
 }
@@ -444,7 +462,7 @@ macro_rules! contract {
                 m.checkpoint("c1").unwrap();
                 m.close();
                 drop(m);
-                let path = dir_of(root.path(), "s").join(B::FILE);
+                let path = store_file(&dir_of(root.path(), "s"), B::NAME, B::FILE);
                 // Overwrite the head of the file with text: no engine may treat that as a store.
                 let mut bytes = std::fs::read(&path).unwrap();
                 let n = bytes.len().min(4096);
@@ -482,7 +500,7 @@ macro_rules! contract {
                         .collect();
                     m.close();
                     drop(m);
-                    let path = dir_of(root.path(), "s").join(B::FILE);
+                    let path = store_file(&dir_of(root.path(), "s"), B::NAME, B::FILE);
                     let mut bytes = std::fs::read(&path).unwrap();
                     // If the engine left a WAL, the data may live there; flip in the main file
                     // after a clean close, which is where a checkpointed engine keeps it.
@@ -557,3 +575,30 @@ macro_rules! contract {
 contract!(feltdb, Felt, "feltdb");
 contract!(sqlite, Sqlite, "sqlite");
 contract!(redb, Redb, "redb");
+contract!(journal, Journal, "journal");
+
+/// The journal keeps payloads in plain files that carry no checksum of their own; the observation
+/// record's SHA-256 is the only protection. Show exactly what that does and does not catch.
+#[test]
+fn journal_payload_damage_is_caught_by_the_digest_check_not_by_reopening() {
+    let root = tempfile::tempdir().unwrap();
+    let mut m = rich_in::<Journal>(root.path(), "s");
+    m.checkpoint("c1").unwrap();
+    m.close();
+    drop(m);
+    let file = dir_of(root.path(), "s").join("payloads/o005.json");
+    let mut bytes = std::fs::read(&file).unwrap();
+    let at = bytes.len() / 2;
+    bytes[at] ^= 0x20;
+    std::fs::write(&file, &bytes).unwrap();
+    // Reopening does not read unpinned payloads, so it does not notice...
+    let (mut m, _) = SessionMemory::<Journal>::recover_with(root.path(), "s").unwrap();
+    // ...but compaction verifies every payload against its recorded digest before deleting any.
+    let err = m.compact().expect_err("a damaged payload stops compaction");
+    // Either the file no longer parses or its digest no longer matches; both stop compaction.
+    assert!(
+        matches!(err, SessionMemoryError::Compaction { .. }),
+        "{err}"
+    );
+    assert_eq!(m.reconstruct().unwrap().session.compactions, 0);
+}
