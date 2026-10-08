@@ -529,6 +529,23 @@ impl SoftwareWork {
         }
     }
 
+    /// One verified goal per run, or none. Useful work is verified completion, not the goal's
+    /// condition holding: an inspection that is grounded but not verified, a run that hit a limit,
+    /// and a failed run are none. Like `useful_writes`, it keys off `verified` alone.
+    fn useful_work(&self) -> f64 {
+        if self.verified { 1.0 } else { 0.0 }
+    }
+
+    /// Verified useful work per model call; `None` when no model call was made.
+    pub fn useful_work_per_model_call(&self) -> Option<f64> {
+        (self.utility.model_calls > 0).then(|| self.useful_work() / self.utility.model_calls as f64)
+    }
+
+    /// Verified useful work per execution; `None` when nothing was executed.
+    pub fn useful_work_per_execution(&self) -> Option<f64> {
+        (self.utility.executions > 0).then(|| self.useful_work() / self.utility.executions as f64)
+    }
+
     pub fn invariants_hold(&self) -> bool {
         self.audit.is_clean() && self.trajectory_violations == 0
     }
@@ -908,8 +925,8 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "capability_requests": w.capability_requests(),
         "invalid_decisions": u.invalid_decisions,
         "invalid_inputs": w.invalid_inputs(),
-        "useful_work_per_model_call": u.work_per_model_call(),
-        "useful_work_per_execution": u.work_per_execution(),
+        "useful_work_per_model_call": w.useful_work_per_model_call(),
+        "useful_work_per_execution": w.useful_work_per_execution(),
         "pax": {
             "version": env.verifier_version,
             "last_status": last.as_ref().map(|r| r.status.as_str()),
@@ -2238,6 +2255,8 @@ mod tests {
         assert_eq!(w.utility.verified_outputs, 0);
         assert_eq!(w.utility.work_per_model_call(), Some(0.0));
         assert_eq!(w.utility.work_per_execution(), Some(0.0));
+        assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+        assert_eq!(w.useful_work_per_execution(), Some(0.0));
     }
 
     #[tokio::test(flavor = "multi_thread")]

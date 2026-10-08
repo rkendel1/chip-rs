@@ -279,6 +279,33 @@ fn assert_completed_means_goal_met(w: &SoftwareWork) {
     }
 }
 
+/// Useful work is verified completion: one verified goal over the cost of the run, for a run that
+/// verified; and for every other run, none, however much the goal's condition held.
+fn assert_useful_work_is_one_verified_goal(w: &SoftwareWork) {
+    assert!(w.verified, "{}", describe(w));
+    assert_eq!(
+        w.useful_work_per_model_call(),
+        Some(1.0 / w.utility.model_calls as f64)
+    );
+    assert_eq!(
+        w.useful_work_per_execution(),
+        Some(1.0 / w.utility.executions as f64)
+    );
+}
+
+fn assert_no_useful_work(w: &SoftwareWork) {
+    assert!(!w.verified, "{}", describe(w));
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0), "{}", describe(w));
+    assert_eq!(w.useful_work_per_execution(), Some(0.0), "{}", describe(w));
+    let json: serde_json::Value = serde_json::from_str(&chip_cli::software_work::render_json(
+        w,
+        &EnvironmentDescription::default(),
+    ))
+    .unwrap();
+    assert_eq!(json["useful_work_per_model_call"], 0.0);
+    assert_eq!(json["useful_work_per_execution"], 0.0);
+}
+
 /// `GoalEvaluated::satisfied` of the last evaluation: an edge ("this observation produced it"),
 /// which is not the level `goal_satisfied` reports.
 fn last_goal_edge(w: &SoftwareWork) -> Option<bool> {
@@ -385,6 +412,7 @@ async fn scenario_2_modify_diff_verify_complete() {
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
     assert_completed_means_goal_met(&w);
+    assert_useful_work_is_one_verified_goal(&w);
     assert_eq!(
         m.calls(),
         5,
@@ -812,6 +840,7 @@ async fn a_negative_inspect_answer_citing_read_files_is_grounded_and_never_verif
     assert!(w.grounded, "it cites files Chip observed");
     assert!(!w.verified, "no independent predicate established it");
     assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_no_useful_work(&w);
     assert_eq!(before, snapshot(&dir));
     w.audit.assert_clean();
 
@@ -819,6 +848,36 @@ async fn a_negative_inspect_answer_citing_read_files_is_grounded_and_never_verif
     // runtime's own contradiction, not a not-verified answer.
     w.grounded = false;
     assert_eq!(w.exit_status(), chip_cli::verify::EXIT_RUNTIME_FAILURE);
+}
+
+/// An inspection that observes plenty and never answers: the goal's condition (something was
+/// observed) holds, but nothing was verified, so no useful work was done.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_inspection_that_hits_a_limit_did_no_useful_work() {
+    let dir = project("inspect-limit", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        (0..LIMITS.max_executions + 1).map(|_| list(".")).collect(),
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::LimitReached { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        w.goal_satisfied,
+        Some(true),
+        "the observation condition held"
+    );
+    assert!(!w.grounded && !w.verified);
+    assert_no_useful_work(&w);
+    w.audit.assert_clean();
 }
 
 /// A' from the real-model run: a search row shows the signature, never the body that holds the
@@ -857,6 +916,7 @@ async fn citing_a_search_row_without_observing_the_supporting_bytes_is_not_verif
     assert!(!w.verified);
     assert_completed_means_goal_met(&w);
     assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_no_useful_work(&w);
     // The seam: for an inspection `verified` is false whatever was observed, until an
     // independently owned predicate exists.
     assert!(!GoalKind::Inspect.verified(&w.report.observations, &w.report.outcome));
@@ -968,6 +1028,7 @@ async fn verify_completes_when_the_unchanged_project_passes() {
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
     assert_completed_means_goal_met(&w);
+    assert_useful_work_is_one_verified_goal(&w);
     assert_eq!(pax_passed(&w), 1, "PAX really passed");
     assert_eq!((w.writes, w.changed_writes), (0, 0));
     assert_eq!(

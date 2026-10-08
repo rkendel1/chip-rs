@@ -230,8 +230,10 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   relaxed to "it still exists"), evidence reused where the spec prohibits it, and events after the
   terminal state. It reads recorded observations and events, never the loop's own counters.
 * **Metrics.** Lists, searches, reads, writes, tests, failed observations, recoveries, tokens and
-  latency, and useful work per model call and per execution. Useful work is a verified goal: model
-  claims, writes alone, a dispatched capability, stale evidence and failed test runs are not counted.
+  latency, and useful work per model call and per execution. Useful work is a *verified* goal (`verified`, not
+  merely `goal_satisfied`): model claims, writes alone, a dispatched capability, stale evidence,
+  failed test runs, and an inspection that is only grounded are not counted, so an inspection
+  contributes none until an independent predicate verifies it.
 * **Exit status** (Chip's, never a native exit code): `0` verified; `1` not verified (blocked, limit,
   escalated, or an inspection that is answered and grounded but, as every inspection, not verified); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
   answer, no PAX; nothing ran); `4` runtime failure or a violated safety invariant.
