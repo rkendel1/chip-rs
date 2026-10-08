@@ -140,7 +140,8 @@ async fn no_declared_capability_is_a_shell_a_process_a_network_or_a_git_mutation
         // argument vector, a working directory, a root, a status, an observation or a receipt.
         for input in &d.inputs {
             assert!(
-                ["path", "content", "query", "count"].contains(&input.name.as_str()),
+                ["path", "content", "query", "count", "offset", "length"]
+                    .contains(&input.name.as_str()),
                 "{id} takes an input named {}",
                 input.name
             );
@@ -196,4 +197,91 @@ async fn execution_ids_are_chips_and_derive_from_the_providers_response_id() {
         "model-abc",
         "the provider's id is sanitised, never trusted as written"
     );
+}
+
+/// `project.read`'s range inputs, through the validation the work loop applies to a model's request:
+/// declared names and types only, bounds checked before anything executes.
+#[tokio::test]
+async fn the_read_range_is_a_declared_bounded_integer_input_and_nothing_else_is_accepted() {
+    use chip_core::{
+        Agent, CapabilityError, CapabilityId, CapabilityRequest, ExecutionId, InputValue,
+    };
+    use std::sync::Arc;
+
+    struct NoModel;
+    #[async_trait::async_trait]
+    impl fx_core::ModelProvider for NoModel {
+        async fn complete(
+            &self,
+            _: fx_core::ModelRequest,
+        ) -> Result<fx_core::ModelResponse, fx_core::FxError> {
+            Err(fx_core::FxError::Provider("not used".into()))
+        }
+    }
+    let dir = std::env::temp_dir().join(format!("chip-surface-range-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/lib.rs"), "x").unwrap();
+    let env = LocalEnvironment::new(
+        opaque_id(&dir),
+        &dir,
+        PaxExecutor::new(&dir),
+        EnvironmentDescription::default(),
+    );
+    let agent = Agent::new(Arc::new(NoModel)).with_capabilities(env.capabilities());
+    let request = |inputs: &[(&str, InputValue)], present: bool| {
+        let mut r = CapabilityRequest::new(
+            ExecutionId::new("r"),
+            CapabilityId::new("project.read").unwrap(),
+        );
+        r.inputs = inputs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        r.inputs_present = present;
+        r
+    };
+    let path = || ("path", InputValue::Text("src/lib.rs".into()));
+    use InputValue::{Bool, Integer, Text};
+
+    // Accepted: the declared inputs, with integer values in range.
+    for ok in [
+        vec![path()],
+        vec![path(), ("offset", Integer(0))],
+        vec![path(), ("length", Integer(32_768))],
+        vec![
+            path(),
+            ("offset", Integer(1_000_000)),
+            ("length", Integer(1)),
+        ],
+    ] {
+        let exec = agent.validate_capability_request(&request(&ok, true)).await;
+        assert!(exec.is_ok(), "{ok:?}: {exec:?}");
+        assert_eq!(exec.unwrap().intent, "project.read");
+    }
+    // Refused before any execution: wrong types, out-of-range values, an undeclared input, no path.
+    for (what, bad) in [
+        ("offset as text", vec![path(), ("offset", Text("0".into()))]),
+        ("length as bool", vec![path(), ("length", Bool(true))]),
+        ("negative offset", vec![path(), ("offset", Integer(-1))]),
+        ("zero length", vec![path(), ("length", Integer(0))]),
+        (
+            "length over the limit",
+            vec![path(), ("length", Integer(32_769))],
+        ),
+        ("a gigabyte", vec![path(), ("length", Integer(1 << 30))]),
+        ("an undeclared input", vec![path(), ("whence", Integer(0))]),
+        (
+            "an input of another capability",
+            vec![path(), ("query", Text("x".into()))],
+        ),
+        ("no path", vec![("offset", Integer(0))]),
+    ] {
+        let exec = agent
+            .validate_capability_request(&request(&bad, true))
+            .await;
+        assert!(
+            matches!(exec, Err(CapabilityError::InvalidInput(_))),
+            "{what}: {exec:?}"
+        );
+    }
 }

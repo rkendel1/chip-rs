@@ -1080,3 +1080,126 @@ async fn no_kind_widens_the_invocation_boundary() {
         assert_eq!(started(&w), 0, "{kind:?}");
     }
 }
+
+// ---- large files ----------------------------------------------------------------------------------------
+
+fn read_range(path: &str, offset: usize, length: usize) -> String {
+    request(
+        "project.read",
+        &format!(
+            r#"{{"path":{},"offset":{offset},"length":{length}}}"#,
+            q(path)
+        ),
+    )
+}
+
+/// A file larger than 32 KiB, inspected through bounded ranges. The fixture is real source (this
+/// repository's own work loop, over 100 KB). Range edges are still placed on character boundaries,
+/// as a caller following a `range_splits_character` refusal would (that refusal itself is tested in
+/// `chip-project`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observations() {
+    let dir = project("large", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-core/src/work.rs"),
+    )
+    .unwrap();
+    const MAX: usize = 32 * 1024;
+    assert!(
+        source.len() > 3 * MAX,
+        "the fixture must be larger than three reads"
+    );
+    std::fs::write(dir.join("src/big.rs"), &source).unwrap();
+
+    // The nearest character boundary at or before a byte position.
+    let boundary = |mut at: usize| {
+        while !source.is_char_boundary(at) {
+            at -= 1;
+        }
+        at
+    };
+    // Something only a later part of the file contains.
+    let marker = "fn answer_refused";
+    let at = source.find(marker).expect("a marker in the source");
+    assert!(at > MAX, "the marker lies beyond the first read: {at}");
+
+    let (b1, b2) = (boundary(MAX), boundary(2 * MAX));
+    let (c0, c1, c2) = (0, b1, b2);
+    let middle_start = boundary(at - 200);
+    let final_start = boundary(source.len() - 1000);
+    let (w, m) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            read("src/big.rs"),
+            read_range("src/big.rs", c0, b1 - c0),
+            read_range("src/big.rs", middle_start, 600),
+            read_range("src/big.rs", final_start, MAX),
+            complete("src/big.rs defines `answer_refused`, in the part of the file past the first 32 KiB."),
+        ],
+    )
+    .await;
+    let _ = (c1, c2);
+
+    let outputs: Vec<&str> = w
+        .report
+        .observations
+        .iter()
+        .filter_map(|o| o.output.as_deref())
+        .collect();
+    assert_eq!(outputs.len(), 4);
+    // A whole-file read is still refused; the limit did not move.
+    assert!(
+        outputs[0].contains("\"error\":\"too_large\""),
+        "{}",
+        &outputs[0][..outputs[0].len().min(200)]
+    );
+    // Each range is bounded and is exactly the bytes asked for.
+    let body = |o: &str| o.split("--- content ---\n").nth(1).unwrap().to_string();
+    let (first, middle, last) = (body(outputs[1]), body(outputs[2]), body(outputs[3]));
+    for part in [&first, &middle, &last] {
+        assert!(
+            part.len() <= MAX,
+            "no single observation exceeds the read limit"
+        );
+    }
+    assert_eq!(first, source[..b1]);
+    assert_eq!(middle, source[middle_start..middle_start + 600]);
+    assert_eq!(last, source[final_start..]);
+    // They are distinct portions of the file, and the model saw the later ones.
+    assert!(first != middle && middle != last && first != last);
+    assert!(
+        !first.contains(marker) && middle.contains(marker),
+        "the marker is only in the later range"
+    );
+    assert!(
+        m.request(3).contains(marker),
+        "the model was shown the later range"
+    );
+    assert!(
+        !m.request(2).contains(marker),
+        "and had not seen it before asking"
+    );
+    // The head of each observation says what part of what it is.
+    let head: serde_json::Value = serde_json::from_str(outputs[2].lines().next().unwrap()).unwrap();
+    assert_eq!(head["offset"], middle_start);
+    assert_eq!(head["file_bytes"], source.len());
+    assert_eq!(head["complete"], false);
+    // The answer cites the file; reading it in parts grounds it exactly as a whole read would.
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(w.verified);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("src/big.rs")).unwrap(),
+        source,
+        "nothing changed"
+    );
+    w.audit.assert_clean();
+}

@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chip_core::{
-    CapabilityId, CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest,
-    ExecutionStatus, Executor, InputValue, Observation, ObservationKind,
+    CapabilityError, CapabilityId, CapabilityProvider, ExecutionError, ExecutionId,
+    ExecutionRequest, ExecutionStatus, Executor, InputValue, Observation, ObservationKind,
 };
 use chip_project::{
     MAX_READ_BYTES, MAX_WRITE_BYTES, OUT_OF_ROOT_WRITE, PATH_ESCAPE, PROJECT_READ, PROJECT_WRITE,
@@ -52,6 +52,18 @@ async fn read(
     path: &str,
 ) -> Result<chip_core::ExecutionResult, ExecutionError> {
     run(p, PROJECT_READ, inputs(&[("path", path)])).await
+}
+
+async fn read_range(
+    p: &ProjectExecutor,
+    path: &str,
+    offset: i64,
+    length: i64,
+) -> Result<chip_core::ExecutionResult, ExecutionError> {
+    let mut given = inputs(&[("path", path)]);
+    given.insert("offset".into(), InputValue::Integer(offset));
+    given.insert("length".into(), InputValue::Integer(length));
+    run(p, PROJECT_READ, given).await
 }
 
 async fn write(
@@ -116,7 +128,7 @@ async fn the_capabilities_are_declared_with_their_inputs_and_are_never_answered_
         |i: usize| -> Vec<&str> { found[i].inputs.iter().map(|x| x.name.as_str()).collect() };
     assert_eq!(names(0), ["path"]);
     assert_eq!(names(1), ["query", "path"]);
-    assert_eq!(names(2), ["path"]);
+    assert_eq!(names(2), ["path", "offset", "length"]);
     assert_eq!(names(3), ["path", "content"]);
     for d in &found {
         assert!(
@@ -133,8 +145,9 @@ async fn the_capabilities_are_declared_with_their_inputs_and_are_never_answered_
             "{}",
             d.id
         );
+        // Only `project.read` has optional inputs among the file capabilities: its range.
         assert!(
-            navigation || d.inputs.iter().all(|i| i.required),
+            navigation || d.id.as_str() == PROJECT_READ || d.inputs.iter().all(|i| i.required),
             "{}",
             d.id
         );
@@ -684,4 +697,400 @@ async fn write_summary_reads_only_successful_project_writes() {
         write_summary(&observation(ObservationKind::ExecutionCompleted, &r.output)),
         None
     );
+}
+
+// ---- ranged reads ---------------------------------------------------------------------------------------
+
+const MAX: i64 = MAX_READ_BYTES as i64;
+
+/// A UTF-8 file of known shape: line `n` is `line 00000n\n` (12 bytes), so any byte range can be
+/// predicted exactly.
+fn numbered(lines: usize) -> String {
+    (0..lines).map(|n| format!("line {n:06}\n")).collect()
+}
+
+fn sha(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn content_of(r: &chip_core::ExecutionResult) -> &str {
+    r.output.split("--- content ---\n").nth(1).unwrap()
+}
+
+#[tokio::test]
+async fn a_large_file_is_read_in_bounded_ranges_that_add_up_to_the_file() {
+    let f = fixture("range-large");
+    let p = ProjectExecutor::new(&f.root);
+    let text = numbered(10_000); // 120_000 bytes
+    std::fs::write(f.root.join("src/large.rs"), &text).unwrap();
+    // A whole-file read of it is still refused: the limit did not move.
+    let r = read(&p, "src/large.rs").await.unwrap();
+    assert_eq!(first_line(&r)["error"], "too_large");
+
+    let mut assembled = String::new();
+    let mut offset = 0i64;
+    let mut reads = 0;
+    loop {
+        // 32760 is a multiple of 12, and the file is ASCII, so ranges never split a character.
+        let r = read_range(&p, "src/large.rs", offset, 32_760)
+            .await
+            .unwrap();
+        assert_eq!(r.status, ExecutionStatus::Success, "{}", r.output);
+        let head = first_line(&r);
+        let got = head["bytes"].as_i64().unwrap();
+        assert!(
+            got <= MAX && content_of(&r).len() as i64 == got,
+            "one read is bounded"
+        );
+        assert_eq!(head["offset"], offset);
+        assert_eq!(head["file_bytes"], 120_000);
+        assert_eq!(
+            head["complete"], false,
+            "a range of a larger file is not the file"
+        );
+        assembled.push_str(content_of(&r));
+        offset += got;
+        reads += 1;
+        if got == 0 || offset >= 120_000 {
+            break;
+        }
+    }
+    assert_eq!(reads, 4, "four bounded observations");
+    assert_eq!(
+        assembled, text,
+        "and they are the file, in order, with nothing added"
+    );
+}
+
+#[tokio::test]
+async fn first_middle_and_final_ranges_return_exactly_those_bytes() {
+    let f = fixture("range-positions");
+    let p = ProjectExecutor::new(&f.root);
+    let text = numbered(4_000); // 48_000 bytes
+    std::fs::write(f.root.join("big.txt"), &text).unwrap();
+
+    let first = read_range(&p, "big.txt", 0, MAX).await.unwrap();
+    assert_eq!(content_of(&first), &text[..MAX_READ_BYTES]);
+    let head = first_line(&first);
+    assert_eq!(
+        (head["offset"].as_u64(), head["bytes"].as_u64()),
+        (Some(0), Some(32_768))
+    );
+
+    let middle = read_range(&p, "big.txt", 12_000, 600).await.unwrap();
+    assert_eq!(content_of(&middle), &text[12_000..12_600]);
+    assert_eq!(first_line(&middle)["complete"], false);
+
+    let last = read_range(&p, "big.txt", 40_000, MAX).await.unwrap();
+    assert_eq!(content_of(&last), &text[40_000..]);
+    let head = first_line(&last);
+    assert_eq!(
+        head["bytes"], 8_000,
+        "only what is left; the length is a limit, not a promise"
+    );
+    assert_eq!(head["file_bytes"], 48_000);
+    assert_eq!(
+        head["complete"], false,
+        "the end of the file is not the file"
+    );
+    assert!(40_000 + head["bytes"].as_u64().unwrap() == head["file_bytes"].as_u64().unwrap());
+}
+
+#[tokio::test]
+async fn hashes_and_completeness_say_only_what_was_read() {
+    let f = fixture("range-hash");
+    let p = ProjectExecutor::new(&f.root);
+    std::fs::write(f.root.join("small.txt"), "abcdef").unwrap();
+    // A whole-file read is the whole file: complete, and its hash is the hash of the content.
+    let whole = read(&p, "small.txt").await.unwrap();
+    let head = first_line(&whole);
+    assert_eq!(
+        (
+            head["complete"].as_bool(),
+            head["bytes"].as_u64(),
+            head["file_bytes"].as_u64()
+        ),
+        (Some(true), Some(6), Some(6))
+    );
+    assert_eq!(head["sha256"], sha("abcdef"));
+    // A range covering all of it from the start is complete too; one that does not, is not.
+    let all = read_range(&p, "small.txt", 0, 100).await.unwrap();
+    assert_eq!(first_line(&all)["complete"], true);
+    assert_eq!(first_line(&all)["sha256"], head["sha256"]);
+    let part = read_range(&p, "small.txt", 2, 3).await.unwrap();
+    let ph = first_line(&part);
+    assert_eq!(content_of(&part), "cde");
+    assert_eq!(
+        (ph["complete"].as_bool(), ph["bytes"].as_u64()),
+        (Some(false), Some(3))
+    );
+    // The hash of a range is the hash of the range: no hash of unread bytes is claimed.
+    assert_eq!(ph["sha256"], sha("cde"));
+    assert_ne!(ph["sha256"], head["sha256"]);
+    assert!(
+        ph.get("file_sha256").is_none(),
+        "the whole file was not read to compute one"
+    );
+}
+
+#[tokio::test]
+async fn the_limit_exactly_and_just_over_behave_as_before() {
+    let f = fixture("range-limit");
+    let p = ProjectExecutor::new(&f.root);
+    std::fs::write(f.root.join("exact.txt"), vec![b'a'; MAX_READ_BYTES]).unwrap();
+    std::fs::write(f.root.join("over.txt"), vec![b'a'; MAX_READ_BYTES + 1]).unwrap();
+    let exact = read(&p, "exact.txt").await.unwrap();
+    assert_eq!(exact.status, ExecutionStatus::Success);
+    assert_eq!(first_line(&exact)["complete"], true);
+    assert_eq!(
+        first_line(&read(&p, "over.txt").await.unwrap())["error"],
+        "too_large"
+    );
+    // The same files by range: the exact file is complete in one read, the larger one is not.
+    let r = read_range(&p, "exact.txt", 0, MAX).await.unwrap();
+    assert_eq!(first_line(&r)["complete"], true);
+    let r = read_range(&p, "over.txt", 0, MAX).await.unwrap();
+    assert_eq!(first_line(&r)["bytes"], MAX);
+    assert_eq!(first_line(&r)["complete"], false);
+    let r = read_range(&p, "over.txt", MAX, MAX).await.unwrap();
+    assert_eq!(content_of(&r), "a");
+}
+
+#[tokio::test]
+async fn offsets_at_and_beyond_the_end_are_deterministic() {
+    let f = fixture("range-eof");
+    let p = ProjectExecutor::new(&f.root);
+    std::fs::write(f.root.join("six.txt"), "abcdef").unwrap();
+    std::fs::write(f.root.join("empty.txt"), "").unwrap();
+    // At the end: a successful, empty observation. Not "not found", not an error.
+    let r = read_range(&p, "six.txt", 6, 10).await.unwrap();
+    assert_eq!(r.status, ExecutionStatus::Success);
+    let head = first_line(&r);
+    assert_eq!(
+        (
+            head["bytes"].as_u64(),
+            head["file_bytes"].as_u64(),
+            head["complete"].as_bool()
+        ),
+        (Some(0), Some(6), Some(false))
+    );
+    assert_eq!(content_of(&r), "");
+    // Past the end: a structured failure naming the size, and no content.
+    let r = read_range(&p, "six.txt", 7, 10).await.unwrap();
+    assert_eq!(r.status, ExecutionStatus::Failure);
+    let head = first_line(&r);
+    assert_eq!(
+        (
+            head["error"].as_str(),
+            head["offset"].as_u64(),
+            head["file_bytes"].as_u64()
+        ),
+        (Some("offset_beyond_end"), Some(7), Some(6))
+    );
+    assert!(!r.output.contains("--- content ---"));
+    // An empty file read from its start is the (empty) whole file.
+    let r = read_range(&p, "empty.txt", 0, 10).await.unwrap();
+    assert_eq!(first_line(&r)["complete"], true);
+    // A huge offset is just past the end.
+    let r = read_range(&p, "six.txt", i64::MAX, 10).await.unwrap();
+    assert_eq!(first_line(&r)["error"], "offset_beyond_end");
+}
+
+#[tokio::test]
+async fn a_range_that_splits_a_character_is_refused_never_repaired() {
+    let f = fixture("range-utf8");
+    let p = ProjectExecutor::new(&f.root);
+    // "aé€𝄞z": 1 + 2 + 3 + 4 + 1 bytes = 11. Offsets: a 0, é 1..3, € 3..6, 𝄞 6..10, z 10.
+    let text = "aé€𝄞z";
+    std::fs::write(f.root.join("mb.txt"), text).unwrap();
+    assert_eq!(text.len(), 11);
+
+    // Whole characters at both edges: fine, and exactly those bytes.
+    for (offset, length, expected) in [(0, 3, "aé"), (1, 5, "é€"), (3, 8, "€𝄞z"), (6, 4, "𝄞")]
+    {
+        let r = read_range(&p, "mb.txt", offset, length).await.unwrap();
+        assert_eq!(
+            r.status,
+            ExecutionStatus::Success,
+            "{offset}+{length}: {}",
+            r.output
+        );
+        assert_eq!(content_of(&r), expected, "{offset}+{length}");
+    }
+    // An edge inside a character: refused with how many bytes of partial character sit at each
+    // edge, and no content at all.
+    for (offset, length, leading, trailing) in [
+        (0, 2, 0, 1), // ends inside é
+        (2, 4, 1, 0), // starts inside é
+        (4, 3, 2, 1), // starts and ends inside €... 4..7: 2 bytes of € then 1 of 𝄞
+        (7, 2, 2, 0), // starts inside 𝄞 and stays inside it
+        (0, 8, 0, 2), // ends inside 𝄞
+    ] {
+        let r = read_range(&p, "mb.txt", offset, length).await.unwrap();
+        assert_eq!(r.status, ExecutionStatus::Failure, "{offset}+{length}");
+        let head = first_line(&r);
+        assert_eq!(
+            head["error"], "range_splits_character",
+            "{offset}+{length}: {}",
+            r.output
+        );
+        assert_eq!(
+            (
+                head["leading_partial_bytes"].as_u64(),
+                head["trailing_partial_bytes"].as_u64()
+            ),
+            (Some(leading), Some(trailing)),
+            "{offset}+{length}"
+        );
+        assert!(
+            !r.output.contains("--- content ---") && !r.output.contains('\u{FFFD}'),
+            "{}",
+            r.output
+        );
+    }
+    // Moving the edges as the refusal says succeeds: the caller adjusts, Chip never does.
+    let r = read_range(&p, "mb.txt", 3, 3).await.unwrap();
+    assert_eq!(content_of(&r), "€");
+}
+
+#[tokio::test]
+async fn a_file_that_is_not_utf8_is_still_not_utf8_by_range() {
+    let f = fixture("range-binary");
+    let p = ProjectExecutor::new(&f.root);
+    std::fs::write(f.root.join("bin.dat"), [b'a', 0xff, b'b', 0xfe, 0x00]).unwrap();
+    let r = read_range(&p, "bin.dat", 0, 5).await.unwrap();
+    assert_eq!(first_line(&r)["error"], "not_utf8");
+    // A truncated character at the file's own end is the file's problem, not the range's.
+    std::fs::write(f.root.join("cut.txt"), [b'a', 0xE2, 0x82]).unwrap();
+    let r = read_range(&p, "cut.txt", 0, 3).await.unwrap();
+    assert_eq!(first_line(&r)["error"], "not_utf8");
+}
+
+#[tokio::test]
+async fn range_inputs_are_validated_before_anything_runs() {
+    let f = fixture("range-validate");
+    let p = ProjectExecutor::new(&f.root);
+    let id = CapabilityId::new(PROJECT_READ).unwrap();
+    let with = |extra: &[(&str, InputValue)]| {
+        let mut given = inputs(&[("path", "src/lib.rs")]);
+        for (k, v) in extra {
+            given.insert(k.to_string(), v.clone());
+        }
+        given
+    };
+    use InputValue::{Bool, Integer, Text};
+    for (what, given) in [
+        ("length zero", with(&[("length", Integer(0))])),
+        ("length negative", with(&[("length", Integer(-1))])),
+        (
+            "length over the limit",
+            with(&[("length", Integer(MAX + 1))]),
+        ),
+        (
+            "length enormous",
+            with(&[("length", Integer(1_000_000_000))]),
+        ),
+        ("offset negative", with(&[("offset", Integer(-1))])),
+        ("offset as text", with(&[("offset", Text("0".into()))])),
+        ("length as text", with(&[("length", Text("10".into()))])),
+        ("offset as bool", with(&[("offset", Bool(true))])),
+        (
+            "an input that is not declared",
+            with(&[("whence", Integer(0))]),
+        ),
+        (
+            "a count borrowed from the log",
+            with(&[("count", Integer(5))]),
+        ),
+    ] {
+        assert!(
+            matches!(
+                p.validate_inputs(&id, &given).await,
+                Err(CapabilityError::InvalidInput(_))
+            ),
+            "{what} was accepted"
+        );
+        // And the executor refuses it too, without touching the file.
+        let r = run(&p, PROJECT_READ, given).await;
+        assert!(
+            matches!(r, Err(ExecutionError::InvalidRequest(_))),
+            "{what}: {r:?}"
+        );
+    }
+    // Valid forms: either alone, or both, at the limit.
+    for given in [
+        with(&[("offset", Integer(0))]),
+        with(&[("length", Integer(1))]),
+        with(&[("offset", Integer(0)), ("length", Integer(MAX))]),
+    ] {
+        assert!(p.validate_inputs(&id, &given).await.is_ok());
+    }
+    // A missing path is still refused.
+    let mut no_path = BTreeMap::new();
+    no_path.insert("offset".to_string(), Integer(0));
+    assert!(p.validate_inputs(&id, &no_path).await.is_err());
+}
+
+#[tokio::test]
+async fn ranged_reads_have_exactly_the_path_authority_of_whole_reads() {
+    let f = fixture("range-paths");
+    let p = ProjectExecutor::new(&f.root);
+    std::fs::create_dir_all(f.root.join(".git")).unwrap();
+    std::fs::write(f.root.join(".git/config"), "[core]\n").unwrap();
+    std::fs::write(f.root.join(".env"), "KEY=secret\n").unwrap();
+    std::fs::write(f.root.join(".env.local"), "KEY=secret\n").unwrap();
+    let id = CapabilityId::new(PROJECT_READ).unwrap();
+    for path in [
+        ".git/config",
+        ".env",
+        ".env.local",
+        "../outside/secret.txt",
+        "/etc/passwd",
+        "src/../../outside/secret.txt",
+        "src//lib.rs",
+        "src/lib.rs\0",
+    ] {
+        for range in [None, Some((0i64, 10i64)), Some((5, 1)), Some((0, MAX))] {
+            let mut given = inputs(&[("path", path)]);
+            if let Some((offset, length)) = range {
+                given.insert("offset".into(), InputValue::Integer(offset));
+                given.insert("length".into(), InputValue::Integer(length));
+            }
+            assert!(
+                p.validate_inputs(&id, &given).await.is_err(),
+                "{path} {range:?} passed validation"
+            );
+            let r = run(&p, PROJECT_READ, given).await;
+            assert!(r.is_err(), "{path} {range:?} was executed: {r:?}");
+        }
+    }
+    // The permitted file reads the same by either route.
+    let whole = read(&p, "src/lib.rs").await.unwrap();
+    let ranged = read_range(&p, "src/lib.rs", 0, MAX).await.unwrap();
+    assert_eq!(content_of(&whole), content_of(&ranged));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_ranged_read_cannot_follow_a_symlink_out_of_the_project() {
+    let f = fixture("range-symlink");
+    let p = ProjectExecutor::new(&f.root);
+    std::os::unix::fs::symlink(f.outside.join("secret.txt"), f.root.join("src/link.txt")).unwrap();
+    std::os::unix::fs::symlink(&f.outside, f.root.join("linked_dir")).unwrap();
+    std::os::unix::fs::symlink(f.root.join("src/lib.rs"), f.root.join("inside.txt")).unwrap();
+    for path in ["src/link.txt", "linked_dir/secret.txt", "inside.txt"] {
+        for range in [None, Some((0i64, 5i64))] {
+            let mut given = inputs(&[("path", path)]);
+            if let Some((offset, length)) = range {
+                given.insert("offset".into(), InputValue::Integer(offset));
+                given.insert("length".into(), InputValue::Integer(length));
+            }
+            let r = run(&p, PROJECT_READ, given).await;
+            assert!(r.is_err(), "{path} {range:?}: {r:?}");
+        }
+    }
 }

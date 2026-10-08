@@ -27,16 +27,19 @@ coding agent, no.
   * **inspect**: "where is X defined?" Completes when the model's answer cites a file Chip observed
     and no file was changed (scenario 1). **"Completed" here means grounded in observation, not
     proven correct**: Chip cannot verify an arbitrary natural-language answer.
-* **No** for: files over 32 KiB (cannot be read or written); creating directories, deleting or
-  renaming; anything outside the project; and a guarantee that an inspection answer is right.
+* **Reading is not limited by file size**: `project.read` takes an optional byte `offset` and
+  `length` (at most 32 KiB per observation), so a file of any size is inspectable through bounded
+  observations (G2, closed).
+* **No** for: *changing* a file over 32 KiB (a write replaces the whole file and is limited to
+  32 KiB: G4); creating directories, deleting or renaming; anything outside the project; and a
+  guarantee that an inspection answer is right.
 * **Unmeasured:** whether a real model does any of this well. No scenario here ran a real model, so
   the validation level is L3, not L4.
 
-**The minimum next capability, from the evidence:** a ranged `project.read` (offset and length).
-It adds no authority, and the evidence is concrete: 15 of this repository's 185 Rust files exceed
-the 32 KiB read limit, including `chip-core/src/work.rs` (102 KB), so Chip cannot read the code it is
-made of. See gap G2. (The completion contract for non-mutating goals, the audit's first gap, is now
-closed: G1.)
+**The next capability, from the evidence:** none is justified yet. The audit's first two gaps (the
+completion contract, G1; the read size limit, G2) are closed, and every remaining gap is either a
+design question (G3, G4), someone else's boundary (G6, G7) or a policy (G8). The next step is to run
+these scenarios against a real model (G10), not to add a capability.
 
 ## 2. Capability model
 
@@ -154,13 +157,34 @@ Other things that look like capabilities but are not part of the product surface
 | --- | --- | --- | --- | --- | --- | --- |
 | `project.list` | `path` (optional) | none | project-relative path rules; no `.git`, `.env*`, symlinks | `not_found` | n/a | none; at most 200 entries |
 | `project.search` | `query` (literal, <=200 B), `path` (optional) | none | as above; examines <=500 files of <=256 KiB, returns <=50 matches / 16 KiB | `not_found`; skipped-file counts reported | n/a | none; **not a pattern** (`l.n` matches nothing) |
-| `project.read` | `path` | none | as above; UTF-8 only; <=32 KiB | `not_found`, `too_large`, `not_utf8` | n/a | **content is sent to the model provider**; only `.git` and `.env*` are withheld, so other secret-bearing files are readable |
+| `project.read` | `path`; optional `offset` (bytes, >= 0) and `length` (bytes, 1 to 32768), both integers | none | as above, identically for ranges; UTF-8 only; **never more than 32 KiB returned by one call**; ranges are validated before anything runs | `not_found`, `too_large` (whole-file read only), `not_utf8`, `offset_beyond_end`, `range_splits_character` | n/a | **content is sent to the model provider**; only `.git` and `.env*` are withheld, so other secret-bearing files are readable |
 | `project.write` | `path`, `content` (<=32 KiB, whole file) | creates or replaces one file; atomic (temp file then rename), read back and compared | as above; parent directory must exist; no `.git`, `.env*` | `parent_missing`, `permission_denied`, `io_error` | **No capability restores the old content**; recoverable only from Git, or by writing back what the model read | any non-reserved file in the root, including `Cargo.toml`, `build.rs`, tests and CI config (`.github/...` passes the path rules; read from the code) |
 | `project.git.status` | none | none | fixed `git` argv; read-only subcommands only | `not_a_repository`, `git_unavailable`, `too_large` | n/a | runs repository-configured filters like any `git status` |
 | `project.git.diff` | none | none | as above | as above; fails instead of truncating at 32 KiB | n/a | whole-tree diff only; untracked files absent and said so |
 | `project.git.diff_stat` | none | none | as above | as above | n/a | none |
 | `project.git.log` | `count` (1 to 50) | none | as above | as above | n/a | none |
 | `pax.test` | none | **whatever the project's tests and build scripts do**, with the tools' permissions | fixed `pax --dir <root> --json test`; PAX >= 0.3.0 verified once per work; 300 s limit | `failed`, `not_run`, `unsupported`, `ambiguous`, `error` results are observed, not retried | no | unbounded in principle: see section 9 |
+
+**The ranged read.** `project.read` is still the one read capability, with the same path validation
+(the model's path goes through the existing project-path check, then the authorized file is read; no
+other path to a file exists), the same `.git`, `.env*`, symlink and root restrictions, and the same
+UTF-8 rule. Two optional integer inputs bound it: `offset` (bytes, default 0) and `length` (bytes,
+1 to 32768, default 32768). With neither, it is the whole-file read it always was (a file over 32 KiB
+is `too_large`). The limit did not move: **one call never returns more than 32 KiB**, and a request for
+more is refused at validation, before any file is touched. The result's first line adds
+`offset`, `bytes` (returned), `file_bytes` (the file's size when read, from metadata, not from reading
+it) and `complete` (true only when the observation starts at byte 0 and holds all of the file); the
+`sha256` is the hash of the bytes returned, which for a range is the range. No hash of the whole file
+is claimed, because computing one would read the whole file.
+
+* `offset == file_bytes` is a successful empty observation; `offset > file_bytes` is the failure
+  `offset_beyond_end` (with the size). Neither is `not_found`.
+* A range whose start or end falls inside a multi-byte character is refused as
+  `range_splits_character`, reporting `leading_partial_bytes` and `trailing_partial_bytes` so the
+  caller can move the edge. The bytes are never trimmed, replaced or returned. A truncated character
+  at the file's own start or end, or any invalid byte, is `not_utf8`, as for a whole-file read.
+* Assembling a file from ranges is the caller's job, one context slot per range; the context budget
+  bounds how much of a large file one work can hold. Nothing here changes a file.
 
 Higher-authority capability classes, **none of which exists in the product**, each needing an
 explicit design before it could: arbitrary shell, network, secrets, destructive filesystem
@@ -187,8 +211,8 @@ No capability was found whose result is insufficient for the recovery loop that 
 
 | Job | Verdict | Evidence and limits |
 | --- | --- | --- |
-| **A. Understand a project** | Sufficient for small projects | `list`, `search` (literal), `read`, Git status/diff/log and `pax.test` answer structure, content, state and test reality (scenarios 1, 2). Limits: 32 KiB per file, 200 entries per listing, 500 files searched, no pattern search. The result is reported as a completed answer with `--kind inspect` (section 2a) |
-| **B. Modify a project** | Sufficient for a basic coding loop | search, read, write, diff, status and `pax.test` (scenario 2). Limits: whole-file replace only; files <=32 KiB; the directory must exist; no create-directory, delete or rename (G2, G3, G4) |
+| **A. Understand a project** | Sufficient for small projects | `list`, `search` (literal), `read`, Git status/diff/log and `pax.test` answer structure, content, state and test reality (scenarios 1, 2). Limits: 32 KiB per read observation (a larger file is read in ranges), 200 entries per listing, 500 files searched, no pattern search. The result is reported as a completed answer with `--kind inspect` (section 2a) |
+| **B. Modify a project** | Sufficient for a basic coding loop | search, read, write, diff, status and `pax.test` (scenario 2). Limits: whole-file replace only, so a file over 32 KiB can be read in ranges but not changed (G4); the directory must exist; no create-directory, delete or rename (G3) |
 | **C. Verify its own work** | Yes, within what PAX proves | `pax.test` passing after the last content-changing write, decided by Chip from PAX's `status`, not from a model claim (scenarios 2, 3, 5); verify-only goals complete without any write (`--kind verify`). **PAX proves** that the project's own test operation ran and what it reported. **It does not prove** that the tests are adequate, that the change is minimal or correct beyond them, that lint, format or type checks pass, or that the stated goal means what the tests check. Git status/diff show what changed, not that it is right |
 | **D. Recover from failure** | Yes, with the existing capabilities | observe the failing `pax.test` (verdict and diagnostics), write a fix, re-run, compare (scenario 3). No new capability was needed. Bounded by the work limits (default 12 turns / 8 executions) |
 | **E. Work with Git** | Read: yes. Mutation: not needed for this product | Inspect state, changes, history and the resulting diff (scenario 2). The work contract ends at "tests pass in the working tree"; a human reviews the diff. See section 10 |
@@ -209,7 +233,8 @@ No capability was found whose result is insufficient for the recovery loop that 
 | - | A pass that predates a change | Change work: write, test (passes), write again, claim: refused; re-tested after the last write: accepted. Verify work: pass, then a change, then a claim: refused. (Tests make the model the one that asks to finish, since Chip would otherwise complete at the first pass) |
 | - | The model cannot manufacture completion | In every kind, "complete" with no evidence is refused: zero executions, no retry, no change, a clean audit |
 | - | No kind widens the boundary | A request for `shell.exec` fails closed in every kind |
-| - | Limits are observed, not hidden | a 40 KiB file reads as `too_large`; non-UTF-8 as `not_utf8`; a new file in a missing directory as `parent_missing`; 40 KiB of content, or a path with a space, is refused before anything runs |
+| - | Large files | A whole-file read of a 40 KiB file is `too_large`; `offset`/`length` read it in bounded ranges (section 4). `a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observations` reads this repository's 102 KB work loop in parts, shows the model a marker that lies past the first 32 KiB, and completes an inspection that cites it |
+| - | Limits are observed, not hidden |  non-UTF-8 as `not_utf8`; a new file in a missing directory as `parent_missing`; 40 KiB of content, or a path with a space, is refused before anything runs |
 | - | Authority through tooling | A model that writes a test and runs `pax.test` makes the project's tooling execute its code, which here writes a file outside the project root. This is the documented limit of the model (README), recorded by `write_plus_test_is_code_execution_through_the_projects_own_tooling` so that a future sandbox changes the test |
 
 ## 8. Gaps, from the scenarios
@@ -220,9 +245,9 @@ own it, the authority it would carry, and the evidence. Priority is for the firs
 | # | Gap | Use case that fails | Why current capabilities cannot | Owner | Authority | Evidence | Priority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~G1~~ | ~~No way to complete a non-mutating goal~~ **Closed** by the goal kinds (section 2a) | "Where is X defined?", "does the build pass?", "is it already fixed?" | Was: completion required a content-changing write followed by `passed` | Chip (goal evaluation) | none | the inspect, verify and no-op tests in `capability_scenarios.rs` | Done. **Residual (G1b): an accepted inspect answer is grounded, not verified correct**; stronger answer verification is not planned until a real-model run shows it matters |
-| **G2** | **No ranged read, no partial edit; files over 32 KiB are unreadable and unwritable** | Work in any real codebase's larger files | `project.read` returns the whole file or `too_large`; `project.write` replaces the whole file | **Chip** (chip-project) | ranged read: none beyond `read`; a partial edit: the same as `write` | `capability_limits...` test; 15 of 185 Rust files in this repository exceed 32 KiB, largest 105 KB | **High: the minimum next capability is a ranged `project.read`** |
+| ~~G2~~ | ~~No ranged read; files over 32 KiB are unreadable~~ **Closed for reading** by the ranged `project.read` (section 4) | Inspect any real codebase's larger files | Was: `project.read` returned the whole file or `too_large` | Chip (chip-project) | none beyond `read` | `a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observations` (this repository's 102 KB `work.rs` read in ranges) and the `chip-project` range tests | Done. **Residual:** reading a big file costs one model-context slot per range (the context budget bounds it, nothing assembles ranges for the model), and the write half (changing a large file) is G4 |
 | **G3** | **Cannot create a directory, delete or rename a file** | Add a module in a new directory; remove dead code | `project.write` needs an existing parent; no other mutation exists | **Chip** (chip-project) | destructive for delete and rename: needs a design (for example, only inside a clean Git tree, so it is recoverable) | `parent_missing` observation; surface test | Medium |
-| **G4** | **Whole-file replace is the only mutation** | Change one line of a 30 KiB file | The model must re-emit the whole file, risking silent loss; mitigated by the write's read-back hash and `git diff`, not prevented | **Chip** (chip-project) | as `write` | design reading; scenario 2 shows the diff catches changes | Medium; couples with G2 |
+| **G4** | **Whole-file replace is the only mutation, and is limited to 32 KiB** | Change one line of a 30 KiB file; change any line of a larger file | The model must re-emit the whole file, risking silent loss; mitigated by the write's read-back hash and `git diff`, not prevented. **A file over 32 KiB can now be read but still cannot be changed** | **Chip** (chip-project) | as `write` | design reading; scenario 2 shows the diff catches changes; `oversized_content_and_malformed_inputs_are_refused` | Medium; a partial-edit design is its own PR |
 | **G5** | `project.git.diff` has no path scope, fails over 32 KiB, omits untracked files | A big working tree; new files | One whole-tree diff; but `status` lists the new file and `read` shows it | Chip (chip-project) | none | `git_status_shows_a_new_file_but_the_diff_does_not` | Low: composes around it |
 | **G6** | **Project tooling is not sandboxed**: `write` + `pax.test` is code execution | Any untrusted or remote use | The boundary is on files the model may touch, not on what the tests do | **Compute / the environment** (isolation), not a new Chip capability | the largest authority in the product | `write_plus_test_is_code_execution...` | **High before untrusted or hosted use**; acceptable for a local trusted developer, as the README states |
 | **G7** | Only the `test` operation is verifiable | Lint, format or type-check the change | PAX is invoked for `test` only | **PAX** (new operations); Chip would consume them as capabilities | as `pax.test` | no failing scenario: **the need is not yet evidenced** | Defer until a case shows it |
@@ -308,8 +333,8 @@ receipt.
 1. **Run the scenarios against a real model (G10).** It decides whether the rest matters. Measure
    with the performance harness's L2 tier; record valid and invalid decisions, recoveries and
    verified goals per model call.
-2. **Ranged `project.read` (G2).** Read-only, no new authority, and the evidence is in this repository.
-   Partial edit (G4) follows only if real-model runs show whole-file replacement losing content.
+2. **A partial-edit design (G4)**, only if real-model runs show whole-file replacement losing content or
+   large files needing changes. Not before the L2 runs.
 3. **A design for create-directory / delete / rename (G3)**, with the recoverability condition decided
    first.
 4. **Sandbox the project tooling (G6)**, in Compute or the environment, before any untrusted or

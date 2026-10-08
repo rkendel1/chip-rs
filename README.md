@@ -182,7 +182,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 |---|---|---|
 | `project.list` | `path` (optional; `.` or absent = the root) | lists the entries directly in a project directory (at most 200) as `dir`/`file` rows with project-relative paths |
 | `project.search` | `query`, `path` (optional) | literal, case-sensitive substring search: `path:line: text` rows; at most 500 files examined (each at most 256 KiB), 50 matches, 16 KiB of output; non-UTF-8 and oversized files are skipped and counted |
-| `project.read` | `path` | reads a UTF-8 file (at most 32 KiB) and records its real content |
+| `project.read` | `path`; optional `offset`, `length` (bytes) | reads a UTF-8 file and records its real content; a call returns at most 32 KiB, so a larger file is read in ranges (`offset`, `length` <= 32768); a range that splits a multi-byte character is refused, not altered |
 | `project.write` | `path`, `content` | atomically creates or replaces a UTF-8 file (at most 32 KiB), reads it back, records what the filesystem holds |
 | `project.git.status`, `project.git.diff`, `project.git.diff_stat`, `project.git.log` | none (`log`: a bounded count) | read-only Git observations; Chip fixes every argument; nothing mutating is expressible |
 | `pax.test` | none | runs `pax --dir <project> --json test` and records PAX's `pax.execution-result.v1` |

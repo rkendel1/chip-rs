@@ -2357,7 +2357,7 @@ mod tests {
         // which is now project.git.status (declared before pax.test).
         assert!(q.contains(r#"{"decision":"request_capability","capability":"project.git.status","inputs":{}} is invalid"#), "{q}");
         // project.read declares a required path; project.list only an optional one.
-        assert!(q.contains(r#"project.read takes inputs (path required): {"decision":"request_capability","capability":"project.read","inputs":{"path":<string|integer|boolean>}}"#), "{q}");
+        assert!(q.contains(r#"project.read takes inputs (path required, offset optional, length optional): {"decision":"request_capability","capability":"project.read","inputs":{"path":<string|integer|boolean>,"offset":<string|integer|boolean>,"length":<string|integer|boolean>}}"#), "{q}");
         assert!(
             q.contains(r#"project.write takes inputs (path required, content required)"#),
             "{q}"
