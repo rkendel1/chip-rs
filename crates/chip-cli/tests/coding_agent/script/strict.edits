@@ -1,0 +1,67 @@
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+            honor_retry_after: f.boolean("honor_retry_after")?.unwrap_or(standard.honor_retry_after),
+        };
+        f.leftover(&mut warnings);
+
+        let mut routes = Vec::new();
+@@@@ REPLACE
+            honor_retry_after: f.boolean("honor_retry_after")?.unwrap_or(standard.honor_retry_after),
+        };
+        // Retry settings decide how hard the client pushes on a failing server (ADR-009): a
+        // misspelt key must not silently leave the default in force.
+        if let Some(key) = f.values.keys().next() {
+            return Err(CourierError::config(format!("[retry] unknown key `{key}`")));
+        }
+
+        let mut routes = Vec::new();
+@@@@ END
+@@@@ EDIT src/routes/settings.rs
+@@@@ FIND
+            max_wait: self.max_wait.or(base.max_wait),
+            max_inflight: self.max_inflight.unwrap_or(base.max_inflight),
+            ..ExecSettings::default()
+        }
+    }
+@@@@ REPLACE
+            max_wait: self.max_wait.or(base.max_wait),
+            max_inflight: self.max_inflight.unwrap_or(base.max_inflight),
+            ..base.clone()
+        }
+    }
+@@@@ END
+@@@@ EDIT src/routes/settings.rs
+@@@@ FIND
+
+    #[test]
+    fn built_from_a_config_section() {
+        let section = RouteSection {
+@@@@ REPLACE
+
+    #[test]
+    fn fields_without_an_override_are_inherited_from_the_base() {
+        let mut b = base();
+        b.retry.max_attempts = 7;
+        let s = RouteOverrides::default().apply(&b);
+        assert_eq!(s.retry.max_attempts, 7);
+        assert_eq!(s, b);
+    }
+
+    #[test]
+    fn built_from_a_config_section() {
+        let section = RouteSection {
+@@@@ END
+@@@@ EDIT tests/retry_policy.rs
+@@@@ FIND
+    assert_eq!(c.retry, again.retry);
+}
+@@@@ REPLACE
+    assert_eq!(c.retry, again.retry);
+}
+
+#[test]
+fn unknown_retry_keys_are_rejected() {
+    let e = config::load("[retry]\nmax_attemps = 5\n", &[]).unwrap_err();
+    assert!(e.message.contains("unknown key `max_attemps`"));
+}
+@@@@ END

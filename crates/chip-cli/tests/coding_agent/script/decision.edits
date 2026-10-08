@@ -1,0 +1,51 @@
+@@@@ EDIT docs/configuration.md
+@@@@ FIND
+and the statuses 408, 429, 500, 502, 503 and 504. Every other failure ends the request at once.
+`max_delay` bounds the computed backoff only; a `Retry-After` is bounded by `max_wait` and the
+request `deadline`. Invalid values are rejected when the configuration loads.
+
+## [rate_limit]
+@@@@ REPLACE
+and the statuses 408, 429, 500, 502, 503 and 504. Every other failure ends the request at once.
+`max_delay` bounds the computed backoff only; a `Retry-After` is bounded by `max_wait` and the
+request `deadline`. Invalid values are rejected when the configuration loads. As in every section, an
+unknown key is a warning, not an error (ADR-004), so a misspelt key such as `max_attemps` leaves the
+default in force: run `courier config check` after editing to see such warnings.
+
+## [rate_limit]
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+            honor_retry_after: f.boolean("honor_retry_after")?.unwrap_or(standard.honor_retry_after),
+        };
+        // Retry settings decide how hard the client pushes on a failing server (ADR-009): a
+        // misspelt key must not silently leave the default in force.
+        if let Some(key) = f.values.keys().next() {
+            return Err(CourierError::config(format!("[retry] unknown key `{key}`")));
+        }
+
+        let mut routes = Vec::new();
+@@@@ REPLACE
+            honor_retry_after: f.boolean("honor_retry_after")?.unwrap_or(standard.honor_retry_after),
+        };
+        f.leftover(&mut warnings);
+
+        let mut routes = Vec::new();
+@@@@ END
+@@@@ EDIT tests/retry_policy.rs
+@@@@ FIND
+
+#[test]
+fn unknown_retry_keys_are_rejected() {
+    let e = config::load("[retry]\nmax_attemps = 5\n", &[]).unwrap_err();
+    assert!(e.message.contains("unknown key `max_attemps`"));
+}
+@@@@ REPLACE
+
+#[test]
+fn unknown_retry_keys_warn_like_every_other_section() {
+    let loaded = config::load("[retry]\nmax_attemps = 5\n", &[]).unwrap();
+    assert_eq!(loaded.warnings, vec!["[retry] unknown key `max_attemps` ignored"]);
+    assert_eq!(loaded.config.retry.max_attempts, 3, "the misspelt key changes nothing");
+}
+@@@@ END

@@ -42,6 +42,12 @@ completion contract, G1; the read size limit, G2) are closed, and every remainin
 design question (G3, G4), someone else's boundary (G6, G7) or a policy (G8). The next step is to run
 these scenarios against a real model (G10), not to add a capability.
 
+The same composition, exercised on a roughly 6,000-line project through failure, a repair budget,
+a stronger tier, a human decision and a resumed finish, is in
+[`coding-agent-evaluation.md`](coding-agent-evaluation.md). It finds limits this audit does not:
+the completion rule cannot express feature acceptance, the runtime cannot see test tampering, and an
+escalated run cannot be resumed.
+
 ## 2. Capability model
 
 A capability is not a crate. `project.read` is a capability; `chip-project` is the implementation

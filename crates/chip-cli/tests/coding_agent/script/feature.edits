@@ -1,0 +1,742 @@
+@@@@ EDIT docs/configuration.md
+@@@@ FIND
+| `user_agent` | `courier/0.7` | sent as `User-Agent` unless the caller set one |
+
+Retries: every request gets three attempts, waiting 100ms, then 200ms between them (doubling, never
+more than 5s). A server `Retry-After` longer than that wait is honored.
+
+## [auth]
+@@@@ REPLACE
+| `user_agent` | `courier/0.7` | sent as `User-Agent` unless the caller set one |
+
+Retries are configured in `[retry]`; the defaults give every request three attempts, waiting
+100ms, then 200ms between them. A server `Retry-After` longer than that wait is honored.
+
+## [auth]
+@@@@ END
+@@@@ EDIT docs/configuration.md
+@@@@ FIND
+The breaker counts requests, not attempts.
+
+## [rate_limit]
+
+@@@@ REPLACE
+The breaker counts requests, not attempts.
+
+## [retry]
+
+| key | default | meaning |
+| --- | --- | --- |
+| `max_attempts` | `3` | attempts allowed for one request, the first included (1 to 10) |
+| `base_delay` | `100ms` | wait after the first failed attempt |
+| `factor` | `2` | multiplier applied to the wait after each further failure (1 to 10) |
+| `max_delay` | `5s` | longest a computed backoff may grow to; must not be shorter than `base_delay` |
+| `honor_retry_after` | `true` | let a server `Retry-After` lengthen the wait |
+
+Only failures that can succeed on a second try are retried: timeouts, resets, refused connections
+and the statuses 408, 429, 500, 502, 503 and 504. Every other failure ends the request at once.
+`max_delay` bounds the computed backoff only; a `Retry-After` is bounded by `max_wait` and the
+request `deadline`. Invalid values are rejected when the configuration loads.
+
+## [rate_limit]
+
+@@@@ END
+@@@@ EDIT src/config/defaults.rs
+@@@@ FIND
+    raw.set("circuit", "threshold", "5");
+    raw.set("circuit", "cooldown", "30s");
+    raw.set("rate_limit", "enabled", "false");
+    raw.set("rate_limit", "rate", "100");
+@@@@ REPLACE
+    raw.set("circuit", "threshold", "5");
+    raw.set("circuit", "cooldown", "30s");
+    raw.set("retry", "max_attempts", "3");
+    raw.set("retry", "base_delay", "100ms");
+    raw.set("retry", "factor", "2");
+    raw.set("retry", "max_delay", "5s");
+    raw.set("retry", "honor_retry_after", "true");
+    raw.set("rate_limit", "enabled", "false");
+    raw.set("rate_limit", "rate", "100");
+@@@@ END
+@@@@ EDIT src/config/render.rs
+@@@@ FIND
+        config.rate_limit.enabled, config.rate_limit.rate, config.rate_limit.burst
+    ));
+    for r in &config.routes {
+        out.push_str(&format!("\n[route.{}]\nprefix = {}\n", r.name, r.prefix));
+@@@@ REPLACE
+        config.rate_limit.enabled, config.rate_limit.rate, config.rate_limit.burst
+    ));
+    let r = &config.retry;
+    out.push_str(&format!(
+        "\n[retry]\nmax_attempts = {}\nbase_delay = {}\nfactor = {}\nmax_delay = {}\nhonor_retry_after = {}\n",
+        r.max_attempts,
+        format_duration(r.base_delay),
+        r.factor,
+        format_duration(r.max_delay),
+        r.honor_retry_after
+    ));
+    for r in &config.routes {
+        out.push_str(&format!("\n[route.{}]\nprefix = {}\n", r.name, r.prefix));
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+use super::Loaded;
+use crate::error::CourierError;
+use crate::util::duration::parse_duration;
+use crate::util::text::{is_identifier, parse_bool};
+@@@@ REPLACE
+use super::Loaded;
+use crate::error::CourierError;
+use crate::exec::RetryPolicy;
+use crate::util::duration::parse_duration;
+use crate::util::text::{is_identifier, parse_bool};
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+        name: "rate_limit",
+        keys: &["enabled", "rate", "burst"],
+    },
+];
+@@@@ REPLACE
+        name: "rate_limit",
+        keys: &["enabled", "rate", "burst"],
+    },
+    SectionSpec {
+        name: "retry",
+        keys: &["max_attempts", "base_delay", "factor", "max_delay", "honor_retry_after"],
+    },
+];
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteSection {
+    pub name: String,
+@@@@ REPLACE
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetrySection {
+    pub max_attempts: u32,
+    pub base_delay: Duration,
+    pub factor: u32,
+    pub max_delay: Duration,
+    pub honor_retry_after: bool,
+}
+
+impl From<&RetrySection> for RetryPolicy {
+    fn from(r: &RetrySection) -> Self {
+        RetryPolicy {
+            max_attempts: r.max_attempts,
+            base_delay: r.base_delay,
+            factor: r.factor,
+            max_delay: r.max_delay,
+            honor_retry_after: r.honor_retry_after,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteSection {
+    pub name: String,
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+    pub circuit: CircuitSection,
+    pub rate_limit: RateLimitSection,
+    pub routes: Vec<RouteSection>,
+}
+@@@@ REPLACE
+    pub circuit: CircuitSection,
+    pub rate_limit: RateLimitSection,
+    pub retry: RetrySection,
+    pub routes: Vec<RouteSection>,
+}
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+        f.leftover(&mut warnings);
+
+        let mut routes = Vec::new();
+        for (name, map) in &raw.sections {
+@@@@ REPLACE
+        f.leftover(&mut warnings);
+
+        let standard = RetryPolicy::standard();
+        let mut f = Fields::new("retry", section("retry"));
+        let retry = RetrySection {
+            max_attempts: f.uint("max_attempts")?.map_or(standard.max_attempts, |n| n.min(u32::MAX as u64) as u32),
+            base_delay: f.duration("base_delay")?.unwrap_or(standard.base_delay),
+            factor: f.uint("factor")?.map_or(standard.factor, |n| n.min(u32::MAX as u64) as u32),
+            max_delay: f.duration("max_delay")?.unwrap_or(standard.max_delay),
+            honor_retry_after: f.boolean("honor_retry_after")?.unwrap_or(standard.honor_retry_after),
+        };
+        f.leftover(&mut warnings);
+
+        let mut routes = Vec::new();
+        for (name, map) in &raw.sections {
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+                circuit,
+                rate_limit,
+                routes,
+            },
+@@@@ REPLACE
+                circuit,
+                rate_limit,
+                retry,
+                routes,
+            },
+@@@@ END
+@@@@ EDIT src/config/schema.rs
+@@@@ FIND
+
+    #[test]
+    fn section_table_has_no_duplicates() {
+        let mut names: Vec<_> = SECTIONS.iter().map(|s| s.name).collect();
+@@@@ REPLACE
+
+    #[test]
+    fn retry_section_defaults_to_the_standard_policy() {
+        let l = load("").unwrap();
+        assert_eq!(RetryPolicy::from(&l.config.retry), RetryPolicy::standard());
+    }
+
+    #[test]
+    fn reads_the_retry_section() {
+        let l = load("[retry]\nmax_attempts = 6\nbase_delay = 50ms\nfactor = 3\nmax_delay = 2s\nhonor_retry_after = false\n").unwrap();
+        let r = &l.config.retry;
+        assert_eq!(r.max_attempts, 6);
+        assert_eq!(r.base_delay, Duration::from_millis(50));
+        assert_eq!(r.factor, 3);
+        assert_eq!(r.max_delay, Duration::from_secs(2));
+        assert!(!r.honor_retry_after);
+    }
+
+    #[test]
+    fn retry_values_must_parse() {
+        assert!(load("[retry]\nmax_attempts = lots\n").is_err());
+        assert!(load("[retry]\nbase_delay = 5\n").is_err());
+        assert!(load("[retry]\nhonor_retry_after = sometimes\n").is_err());
+    }
+
+    #[test]
+    fn section_table_has_no_duplicates() {
+        let mut names: Vec<_> = SECTIONS.iter().map(|s| s.name).collect();
+@@@@ END
+@@@@ EDIT src/config/validate.rs
+@@@@ FIND
+        return Err(CourierError::config("[rate_limit] rate and burst must be at least 1"));
+    }
+    let mut prefixes = BTreeSet::new();
+    for r in &config.routes {
+@@@@ REPLACE
+        return Err(CourierError::config("[rate_limit] rate and burst must be at least 1"));
+    }
+    crate::exec::RetryPolicy::from(&config.retry).validate()?;
+    let mut prefixes = BTreeSet::new();
+    for r in &config.routes {
+@@@@ END
+@@@@ EDIT src/config/validate.rs
+@@@@ FIND
+
+    #[test]
+    fn route_rules() {
+        assert!(err("[route.a]\nprefix = x\n").contains("start with"));
+@@@@ REPLACE
+
+    #[test]
+    fn retry_rules() {
+        assert!(err("[retry]\nmax_attempts = 0\n").contains("max_attempts"));
+        assert!(err("[retry]\nmax_attempts = 11\n").contains("max_attempts"));
+        assert!(err("[retry]\nbase_delay = 0ms\n").contains("base_delay"));
+        assert!(err("[retry]\nfactor = 0\n").contains("factor"));
+        assert!(err("[retry]\nbase_delay = 2s\nmax_delay = 1s\n").contains("max_delay"));
+        assert!(load("[retry]\nmax_attempts = 10\nfactor = 1\n", &[]).is_ok());
+    }
+
+    #[test]
+    fn route_rules() {
+        assert!(err("[route.a]\nprefix = x\n").contains("start with"));
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+
+use super::attempt::AttemptState;
+use super::backoff::Backoff;
+use super::classify::{classify, Disposition, Failure};
+use super::deadline::Deadline;
+@@@@ REPLACE
+
+use super::attempt::AttemptState;
+use super::classify::{classify, Disposition, Failure};
+use super::deadline::Deadline;
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+    clock: Arc<dyn Clock>,
+    retry: Retry,
+    backoff: Backoff,
+}
+
+@@@@ REPLACE
+    clock: Arc<dyn Clock>,
+    retry: Retry,
+}
+
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+            clock,
+            retry: Retry::standard(),
+            backoff: Backoff::standard(),
+        }
+    }
+@@@@ REPLACE
+            clock,
+            retry: Retry::standard(),
+        }
+    }
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+        let deadline = Deadline::new(started, settings.deadline);
+        let mut state = AttemptState::new();
+        loop {
+            state.begin();
+@@@@ REPLACE
+        let deadline = Deadline::new(started, settings.deadline);
+        let mut state = AttemptState::new();
+        let retry = settings.retry.retry();
+        let backoff = settings.retry.backoff();
+        loop {
+            state.begin();
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+            }
+            let hint = failure.retry_after();
+            if !self.retry.permits(state.made()) {
+                return Err(failure.into_error(ErrorKind::RetriesExhausted, state.made()));
+            }
+            let mut delay = self.backoff.delay(state.made());
+            if let Some(hint) = hint {
+                delay = delay.max(hint);
+            }
+@@@@ REPLACE
+            }
+            let hint = failure.retry_after();
+            if !retry.permits(state.made()) {
+                return Err(failure.into_error(ErrorKind::RetriesExhausted, state.made()));
+            }
+            let mut delay = backoff.delay(state.made());
+            if let Some(hint) = hint.filter(|_| settings.retry.honor_retry_after) {
+                delay = delay.max(hint);
+            }
+@@@@ END
+@@@@ EDIT src/exec/mod.rs
+@@@@ FIND
+pub mod deadline;
+pub mod executor;
+pub mod retry;
+pub mod settings;
+@@@@ REPLACE
+pub mod deadline;
+pub mod executor;
+pub mod policy;
+pub mod retry;
+pub mod settings;
+@@@@ END
+@@@@ EDIT src/exec/mod.rs
+@@@@ FIND
+pub use classify::{classify, Disposition, Failure};
+pub use executor::Executor;
+pub use retry::Retry;
+pub use settings::ExecSettings;
+@@@@ REPLACE
+pub use classify::{classify, Disposition, Failure};
+pub use executor::Executor;
+pub use policy::RetryPolicy;
+pub use retry::Retry;
+pub use settings::ExecSettings;
+@@@@ END
+@@@@ NEW src/exec/policy.rs
+//! A configurable retry policy: how many attempts a request gets and how it waits between them.
+
+use super::backoff::Backoff;
+use super::retry::Retry;
+use crate::error::CourierError;
+use std::time::Duration;
+
+/// The most attempts any policy may allow.
+pub const MAX_ATTEMPTS_LIMIT: u32 = 10;
+/// The largest backoff factor a policy may use.
+pub const MAX_FACTOR: u32 = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryPolicy {
+    /// Attempts allowed for one request, the first included.
+    pub max_attempts: u32,
+    /// Wait after the first failed attempt.
+    pub base_delay: Duration,
+    /// Multiplier applied to the wait after each further failure.
+    pub factor: u32,
+    /// Longest a computed backoff may grow to. A server `Retry-After` is not bounded by it.
+    pub max_delay: Duration,
+    /// Whether a server `Retry-After` can lengthen the wait.
+    pub honor_retry_after: bool,
+}
+
+impl RetryPolicy {
+    /// The behaviour every release before retries became tunable had: three attempts, waiting
+    /// 100ms and then 200ms, growing to at most 5s, following the server's `Retry-After`.
+    pub const fn standard() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(100),
+            factor: 2,
+            max_delay: Duration::from_secs(5),
+            honor_retry_after: true,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), CourierError> {
+        if self.max_attempts == 0 || self.max_attempts > MAX_ATTEMPTS_LIMIT {
+            return Err(CourierError::config(format!(
+                "[retry] max_attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}"
+            )));
+        }
+        if self.base_delay.is_zero() {
+            return Err(CourierError::config("[retry] base_delay must be greater than zero"));
+        }
+        if self.factor == 0 || self.factor > MAX_FACTOR {
+            return Err(CourierError::config(format!(
+                "[retry] factor must be between 1 and {MAX_FACTOR}"
+            )));
+        }
+        if self.max_delay < self.base_delay {
+            return Err(CourierError::config("[retry] max_delay must not be shorter than base_delay"));
+        }
+        Ok(())
+    }
+
+    pub fn retry(&self) -> Retry {
+        Retry::new(self.max_attempts)
+    }
+
+    pub fn backoff(&self) -> Backoff {
+        Backoff::exponential(self.base_delay, self.factor, self.max_delay)
+    }
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard_matches_the_original_constants() {
+        let p = RetryPolicy::standard();
+        assert_eq!(p.retry(), Retry::standard());
+        assert_eq!(p.backoff(), Backoff::standard());
+        assert!(p.honor_retry_after);
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn attempts_are_bounded() {
+        let mut p = RetryPolicy::standard();
+        p.max_attempts = 0;
+        assert!(p.validate().is_err());
+        p.max_attempts = MAX_ATTEMPTS_LIMIT;
+        assert!(p.validate().is_ok());
+        p.max_attempts = MAX_ATTEMPTS_LIMIT + 1;
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn delays_must_be_sane() {
+        let mut p = RetryPolicy::standard();
+        p.base_delay = Duration::ZERO;
+        assert!(p.validate().is_err());
+        p = RetryPolicy::standard();
+        p.max_delay = Duration::from_millis(50);
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn factor_is_bounded() {
+        let mut p = RetryPolicy::standard();
+        p.factor = 0;
+        assert!(p.validate().is_err());
+        p.factor = MAX_FACTOR + 1;
+        assert!(p.validate().is_err());
+        p.factor = 1;
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn builds_the_matching_retry_and_backoff() {
+        let p = RetryPolicy {
+            max_attempts: 5,
+            base_delay: Duration::from_secs(1),
+            factor: 3,
+            max_delay: Duration::from_secs(20),
+            honor_retry_after: false,
+        };
+        assert_eq!(p.retry().max_attempts(), 5);
+        assert_eq!(p.backoff().delay(3), Duration::from_secs(9));
+    }
+}
+@@@@ END
+@@@@ EDIT src/exec/retry.rs
+@@@@ FIND
+
+impl Retry {
+    /// The behaviour of every release before retries became tunable: three attempts.
+    pub const fn standard() -> Self {
+@@@@ REPLACE
+
+impl Retry {
+    pub const fn new(max_attempts: u32) -> Self {
+        Self { max_attempts }
+    }
+
+    /// The behaviour of every release before retries became tunable: three attempts.
+    pub const fn standard() -> Self {
+@@@@ END
+@@@@ EDIT src/exec/settings.rs
+@@@@ FIND
+//! The knobs one request is executed with. A route may override some of them.
+
+use crate::config::ClientSection;
+use std::time::Duration;
+
+@@@@ REPLACE
+//! The knobs one request is executed with. A route may override some of them.
+
+use super::policy::RetryPolicy;
+use crate::config::{ClientSection, Config};
+use std::time::Duration;
+
+@@@@ END
+@@@@ EDIT src/exec/settings.rs
+@@@@ FIND
+    pub max_wait: Option<Duration>,
+    pub max_inflight: usize,
+}
+
+@@@@ REPLACE
+    pub max_wait: Option<Duration>,
+    pub max_inflight: usize,
+    /// How failed attempts are retried.
+    pub retry: RetryPolicy,
+}
+
+@@@@ END
+@@@@ EDIT src/exec/settings.rs
+@@@@ FIND
+            max_wait: None,
+            max_inflight: 32,
+        }
+    }
+@@@@ REPLACE
+            max_wait: None,
+            max_inflight: 32,
+            retry: RetryPolicy::standard(),
+        }
+    }
+}
+
+impl ExecSettings {
+    /// The client-wide settings of a loaded configuration, retry policy included.
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            retry: RetryPolicy::from(&config.retry),
+            ..Self::from(&config.client)
+        }
+    }
+@@@@ END
+@@@@ EDIT src/exec/settings.rs
+@@@@ FIND
+            max_wait: c.max_wait,
+            max_inflight: c.max_inflight,
+        }
+    }
+@@@@ REPLACE
+            max_wait: c.max_wait,
+            max_inflight: c.max_inflight,
+            retry: RetryPolicy::standard(),
+        }
+    }
+@@@@ END
+@@@@ EDIT src/exec/settings.rs
+@@@@ FIND
+
+    #[test]
+    fn conversion_copies_every_field() {
+        let mut c = load_defaults().config.client;
+@@@@ REPLACE
+
+    #[test]
+    fn from_config_carries_the_retry_policy() {
+        let c = crate::config::load("[retry]\nmax_attempts = 6\n", &[]).unwrap().config;
+        assert_eq!(ExecSettings::from_config(&c).retry.max_attempts, 6);
+    }
+
+    #[test]
+    fn conversion_copies_every_field() {
+        let mut c = load_defaults().config.client;
+@@@@ END
+@@@@ EDIT src/routes/table.rs
+@@@@ FIND
+
+    pub fn from_config(config: &Config) -> Self {
+        let mut table = Self::new(ExecSettings::from(&config.client));
+        for r in &config.routes {
+            table.add(&r.name, &r.prefix, RouteOverrides::from(r));
+@@@@ REPLACE
+
+    pub fn from_config(config: &Config) -> Self {
+        let mut table = Self::new(ExecSettings::from_config(config));
+        for r in &config.routes {
+            table.add(&r.name, &r.prefix, RouteOverrides::from(r));
+@@@@ END
+@@@@ NEW tests/retry_policy.rs
+//! Configurable retry policies: `[retry]` reaches the executor through the public configuration
+//! path, defaults are unchanged, and invalid values are rejected.
+
+mod common;
+
+use common::{rig, rig_with_env};
+use courier::config;
+use courier::transport::mock::{ok, retry_after, status};
+use courier::ErrorKind;
+use std::time::Duration;
+
+#[test]
+fn the_default_policy_is_unchanged() {
+    let r = rig("", vec![status(503), status(503), status(503), ok()]);
+    let e = r.client.get("http://h/a").unwrap_err();
+    assert_eq!(e.kind, ErrorKind::RetriesExhausted);
+    assert_eq!(e.attempts, 3);
+    assert_eq!(r.clock.slept(), vec![Duration::from_millis(100), Duration::from_millis(200)]);
+}
+
+#[test]
+fn max_attempts_is_configurable() {
+    let r = rig("[retry]\nmax_attempts = 5\n", vec![status(503), status(503), status(503), status(503), ok()]);
+    assert!(r.client.get("http://h/a").is_ok());
+    assert_eq!(r.transport.calls(), 5);
+}
+
+#[test]
+fn a_single_attempt_means_no_retries() {
+    let r = rig("[retry]\nmax_attempts = 1\n", vec![status(503), ok()]);
+    let e = r.client.get("http://h/a").unwrap_err();
+    assert_eq!(e.kind, ErrorKind::RetriesExhausted);
+    assert_eq!(r.transport.calls(), 1);
+    assert!(r.clock.slept().is_empty());
+}
+
+#[test]
+fn retries_stay_bounded_however_the_server_behaves() {
+    let r = rig("[retry]\nmax_attempts = 4\n", vec![retry_after(429, 1); 20]);
+    let e = r.client.get("http://h/a").unwrap_err();
+    assert_eq!(e.attempts, 4);
+    assert_eq!(r.transport.calls(), 4);
+}
+
+#[test]
+fn the_backoff_curve_is_configurable() {
+    let r = rig(
+        "[retry]\nmax_attempts = 4\nbase_delay = 1s\nfactor = 3\nmax_delay = 20s\n",
+        vec![status(500), status(500), status(500), ok()],
+    );
+    assert!(r.client.get("http://h/a").is_ok());
+    assert_eq!(
+        r.clock.slept(),
+        vec![Duration::from_secs(1), Duration::from_secs(3), Duration::from_secs(9)]
+    );
+}
+
+#[test]
+fn max_delay_bounds_the_computed_backoff() {
+    let r = rig(
+        "[retry]\nmax_attempts = 5\nbase_delay = 1s\nfactor = 4\nmax_delay = 3s\n",
+        vec![status(500), status(500), status(500), status(500), ok()],
+    );
+    assert!(r.client.get("http://h/a").is_ok());
+    assert!(r.clock.slept().iter().all(|d| *d <= Duration::from_secs(3)));
+}
+
+#[test]
+fn max_delay_does_not_shorten_a_server_hint() {
+    let r = rig("[retry]\nmax_delay = 1s\n", vec![retry_after(503, 30), ok()]);
+    assert!(r.client.get("http://h/a").is_ok());
+    assert_eq!(r.clock.slept(), vec![Duration::from_secs(30)]);
+}
+
+#[test]
+fn the_server_hint_can_be_ignored() {
+    let r = rig("[retry]\nhonor_retry_after = false\n", vec![retry_after(503, 30), ok()]);
+    assert!(r.client.get("http://h/a").is_ok());
+    assert_eq!(r.clock.slept(), vec![Duration::from_millis(100)]);
+}
+
+#[test]
+fn terminal_failures_are_never_retried_whatever_the_policy() {
+    let r = rig("[retry]\nmax_attempts = 10\n", vec![status(404), ok()]);
+    let e = r.client.get("http://h/a").unwrap_err();
+    assert_eq!(e.kind, ErrorKind::Status);
+    assert_eq!(r.transport.calls(), 1);
+}
+
+#[test]
+fn the_environment_overrides_the_file() {
+    let r = rig_with_env(
+        "[retry]\nmax_attempts = 2\n",
+        &[("COURIER_RETRY_MAX_ATTEMPTS", "4")],
+        vec![status(503), status(503), status(503), ok()],
+    );
+    assert!(r.client.get("http://h/a").is_ok());
+}
+
+#[test]
+fn a_route_without_its_own_retry_settings_uses_the_client_policy() {
+    let cfg = "[retry]\nmax_attempts = 5\n[route.reports]\nprefix = /reports\ntimeout = 30s\n";
+    let r = rig(cfg, vec![status(503), status(503), status(503), status(503), ok()]);
+    assert!(r.client.get("http://h/reports/q1").is_ok());
+    assert_eq!(r.transport.calls(), 5);
+}
+
+#[test]
+fn invalid_values_are_rejected_when_the_configuration_loads() {
+    for bad in [
+        "[retry]\nmax_attempts = 0\n",
+        "[retry]\nmax_attempts = 11\n",
+        "[retry]\nbase_delay = 0ms\n",
+        "[retry]\nfactor = 0\n",
+        "[retry]\nbase_delay = 2s\nmax_delay = 1s\n",
+        "[retry]\nmax_attempts = many\n",
+        "[retry]\nbase_delay = 100\n",
+    ] {
+        assert!(config::load(bad, &[]).is_err(), "should be rejected: {bad:?}");
+    }
+}
+
+#[test]
+fn the_retry_section_round_trips_through_show() {
+    let text = "[retry]\nmax_attempts = 6\nbase_delay = 250ms\nfactor = 3\nmax_delay = 10s\nhonor_retry_after = false\n";
+    let c = config::load(text, &[]).unwrap().config;
+    let again = config::load(&config::render::render(&c), &[]).unwrap().config;
+    assert_eq!(c.retry, again.retry);
+}
+@@@@ END

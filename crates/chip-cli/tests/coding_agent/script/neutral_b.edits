@@ -1,0 +1,31 @@
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+        let deadline = Deadline::new(started, settings.deadline);
+        let mut state = AttemptState::new();
+        let retry = settings.retry.retry();
+        let backoff = settings.retry.backoff();
+        loop {
+            state.begin();
+@@@@ REPLACE
+        let deadline = Deadline::new(started, settings.deadline);
+        let mut state = AttemptState::new();
+        let policy = settings.retry.clone();
+        let retry = policy.retry();
+        let backoff = policy.backoff();
+        loop {
+            state.begin();
+@@@@ END
+@@@@ EDIT src/exec/executor.rs
+@@@@ FIND
+            }
+            let mut delay = backoff.delay(state.made());
+            if let Some(hint) = hint.filter(|_| settings.retry.honor_retry_after) {
+                delay = delay.max(hint);
+            }
+@@@@ REPLACE
+            }
+            let mut delay = backoff.delay(state.made());
+            if let Some(hint) = hint.filter(|_| policy.honor_retry_after) {
+                delay = delay.max(hint);
+            }
+@@@@ END
