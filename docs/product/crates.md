@@ -32,6 +32,11 @@ receipt, an observation, evidence, success or completion. Those come only from t
 runtime/environment/authoritative-observation path. (`AGENTS.md` states the research constitution
 behind this.)
 
+**Performance invariant.** Chip must add minimal, bounded overhead around intelligence and
+execution. No product-path operation should perform unnecessary model calls, filesystem scans,
+subprocesses, serialization, retries, or network requests. It is measured by the baseline in
+[`performance.md`](performance.md), which also records where the product does not yet meet it.
+
 Chip owns: accepting work; obtaining model judgment; constraining and validating proposals;
 selecting and invoking explicit capabilities; progression, limits, failure handling, recovery,
 blocking and escalation; evaluating observed outcomes against the goal; the in-memory runtime
@@ -410,6 +415,8 @@ planner, hidden memory or persistent agent memory; no AppPort, FeltDB or Attn in
 Compute client in `chip-core`, the Rust FX crates or `chip-remote-env`; no embedding of PAX; no
 durable work state; no remote or authenticated serving. Experiments listed above are not product
 features and do not become product by being built.
+
+`crates/chip-cli/benches/baseline.rs` is the performance baseline harness (a bench target, not shipped, not a test); see [`performance.md`](performance.md).
 
 ## 11. Workspace hygiene done in this audit
 

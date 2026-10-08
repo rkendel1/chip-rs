@@ -42,3 +42,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
 serde_json = "1"
+
+# The performance baseline (a measurement, not a test): `cargo bench -p chip-cli --bench baseline`.
+[[bench]]
+name = "baseline"
+harness = false

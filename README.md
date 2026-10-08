@@ -79,6 +79,10 @@ integration, experiment, proof), validation level (L0 to L5), and what is still 
 `chip work` / `chip serve` / `chip verify` path is the product; the graph, decision-model, Wasm and
 local-model crates are experiments. A test keeps that document in step with the workspace.
 
+Performance is a product concern too: Chip should add minimal, bounded overhead around the model and
+the computer. [`docs/product/performance.md`](docs/product/performance.md) records the measured baseline
+and how to reproduce it (`cargo bench -p chip-cli --bench baseline`).
+
 ## Workspace
 
 - `crates/fx-core`, `crates/fx-provider-http`: **Rust FX**, the provider-neutral model boundary and its HTTP provider

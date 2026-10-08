@@ -59,6 +59,9 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose
 
+      - name: Performance baseline harness (quick; asserts counts, reports timings)
+        run: cargo bench -p chip-cli --bench baseline -- --quick
+
       - name: Run Chip CLI acceptance
         run: cargo run -p chip-cli -- --test
 
