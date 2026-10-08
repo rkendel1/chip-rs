@@ -266,7 +266,7 @@ Speed is half the bar. These are already available from the work loop and are wh
 | Recovery rate | `recoveries` / `failed_observations` |
 | Escalation rate | `model_escalations` / `turns` |
 | Model calls per completed goal; tokens | `model_calls`, `total_tokens` |
-| **Useful work per model call** | `verified_outputs / model_calls` |
+| **Useful work per model call** | `work` reports one verified goal (`verified`) over `model_calls`, and none for a run that is not verified, whatever its goal's condition did (an inspection is never verified yet, so it reports 0). The core `WorkUtilityMeasurement::work_per_model_call` (`verified_outputs / model_calls`) still counts requirements met and is what the experiments use |
 
 For the scripted full cycle above it is 1 verified goal over 3 model calls = 0.33. That checks that
 the metric is computed; it says nothing about a model. The L2 tier prints these for a real provider:

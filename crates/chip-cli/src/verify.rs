@@ -18,9 +18,9 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, CapabilityAvailability, CapabilityId, CapabilityProvider, ExecutionObserver,
-    LocalWorkPolicy, ModelDecisionBoundary, ObservationKind, SafetyAudit, WorkDecision, WorkEvent,
-    WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement,
-    WorkView, audit_safety, measure_utility, verify_trajectory,
+    LocalWorkPolicy, ModelDecisionBoundary, ObservationKind, SafetyAudit, WorkDecision, WorkGoal,
+    WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView,
+    audit_safety, measure_utility, verify_trajectory,
 };
 use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxTestPassed, ResolvedPax,
@@ -141,10 +141,7 @@ pub async fn run_verification(
         .and_then(|o| o.output.as_deref())
         .and_then(|text| text.lines().next())
         .and_then(|line| parse_execution_result(line.as_bytes()).ok());
-    let goal_satisfied = report.events.iter().rev().find_map(|e| match e {
-        WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
-        _ => None,
-    });
+    let goal_satisfied = crate::software_work::goal_level(&report.events);
     let receipt = report
         .observations
         .last()
@@ -395,6 +392,7 @@ mod tests {
     //! observation) to prove that a completion claim is refused by Chip, not merely not requested.
     //! Only the model is scripted; PAX and Cargo are real. Skipped if PAX is not installed.
 
+    use chip_core::WorkEvent;
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
 

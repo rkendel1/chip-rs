@@ -1,8 +1,8 @@
 # The project-observation boundary
 
-Status: **design contract. Nothing in this document is implemented.** It defines where project
-structure belongs so that a later capability can be added without moving agency into PAX or
-repository structure into Chip. Where it describes what exists today, it was checked against the
+Status: **the boundary, and its first consumer.** `project.observe` (section 3) implements it for Rust
+project structure through `pax.observation.v1`. This document defines where project structure belongs so
+that agency does not move into PAX and repository structure does not move into Chip. Where it describes what exists today, it was checked against the
 code or by running the tools; those statements say which.
 
 > PAX observes project reality. Chip decides what to do with it. FX reasons about what observations
@@ -51,46 +51,49 @@ on the search path and pins a minimum release).
 
 ## 3. What exists today
 
-**What Chip uses.** Chip uses PAX for exactly one thing: the `pax.test` capability, which runs
-`pax --dir <project> --json test` and records PAX's `pax.execution-result.v1`. The structure
-capabilities Chip offers (`project.list`, `project.search`, `project.read`, `project.git.*`) are
-Chip's own (`chip-project`), not PAX. Chip uses no PAX project-structure observation.
+**Pinned release.** Chip is built, tested and benchmarked against PAX **0.4.1**, tag `v0.4.1`, commit
+`674f3b3143874d1a692aca103b33f89da31a82ac` (CI installs exactly that tag and checks that commit;
+`chip_pax::PINNED_PAX` records it). `project.observe` requires PAX >= 0.4.1: the version is the
+compatibility contract, and support is never detected by running an unsupported command. An older PAX
+fails with `PAX observation requires >= 0.4.1; found <version>`. `pax.test` keeps its own minimum (0.3.0).
 
-**What PAX observes today** (PAX v0.3.0; PAX's own `docs/PAX_AUDIT.md` and `docs/PAX_BOUNDARY.md` are
-the authority, and the code and tests win over prose). PAX is a file-reading inspector with a
-delegation layer:
+**What Chip uses PAX for.**
 
-* It detects ecosystems and package managers from manifests and lockfiles, and reports declared
-  dependencies and scripts. This is accurate for `package.json` and Cargo. PAX's own audit calls the
-  Python and Compose handling unreliable line scanning.
-* `pax graph` reports **declared dependency and workspace-member relationships** only. Checked by
-  running it on this repository: nodes are `component`, `dependency` and `workspace-member`; edges are
-  `runtime-dependency`, `development-dependency` and `workspace-member`; for Rust it is built from
-  `cargo metadata --no-deps --offline`. The same crate appears as both a `dependency` node and a
-  `workspace-member` node, which is a reminder that provenance matters even at this level.
-* `pax reality` and `pax drift` report **layered presence checks**, not verified reality. In PAX's own
-  words: no PAX output yet meets the bar to be called reality; `resolved` and `installed` mean "a
-  lockfile / a conventional directory exists"; lockfile contents and installed packages are not read;
-  `--live` observes nothing and the `runtime` layer is `unknown`; drift's lockfile check is a substring
-  match; nothing is timestamped.
-* It delegates `build`, `test`, `lint` and `typecheck` to the native tool, and interprets the result
-  for Cargo tests only.
-* It does **not** observe source code, symbols, files' contents beyond manifests, installed tool
-  versions, environment variables, or Git state.
+| Capability | PAX surface | Contract |
+| --- | --- | --- |
+| `pax.test` | `pax --dir <root> --json test` | `pax.execution-result.v1`, PAX >= 0.3.0 |
+| `project.observe` | `pax --dir <root> --json observe --scope <s> --max-files 50 --max-bytes 1048576 --max-facts 600` | `pax.observation.v1`, PAX >= 0.4.1 |
 
-So PAX today describes a project's *declared packaging structure*. It is not a code or repository
-structure graph. It does not establish which files implement a behavior, which symbol depends on
-which, which tests exercise which symbol, which files a change affects, which part of a repository
-matters to a goal, or what to look at first. Those are future capabilities, and none of them is
-claimed here.
+`project.observe` consumes **only** `pax.observation.v1`. It does not use `pax graph`, `pax info`,
+`pax reality` or `pax drift`, and reads no field the contract does not define. The structure
+capabilities Chip also offers (`project.list`, `project.search`, `project.read`, `project.git.*`) are
+Chip's own (`chip-project`) and are unchanged.
+
+**What PAX observes (0.4.1, `docs/PAX_OBSERVATION.md` in PAX is the authority).** Bounded structure
+facts, each with provenance (`declared`, `observed`, `resolved`; `verified` is never emitted): artifacts
+that exist, workspace members, declared dependencies (aggregated across members, **not** attributed to a
+package), and for Rust: crate, module, source file, declaration and test-attribute facts, with typed
+diagnostics for what it could not establish. It does **not** observe other languages, `impl` blocks
+and their methods, imports, calls, types, `cfg` evaluation, `#[path]` modules, or anything macro-generated.
+It says nothing about relevance, impact, safety or correctness.
+
+**What Chip adds, and does not delegate.** The scope grammar and project-root containment are checked
+by Chip **before** PAX is started (lexically, and through the filesystem, refusing every symlink);
+Chip fixes every bound; PAX's document is parsed strictly and the observation is rendered by Chip, not
+passed through; every artifact a fact names is re-walked and a fact behind a symlink is omitted (the
+observation becomes `partial` and says so). PAX's own containment is a second layer, not a substitute.
+
+**Earlier PAX.** In PAX 0.3.0, `pax graph` attached the workspace-wide union of declared dependencies to
+every workspace member, with evidence naming a manifest that did not contain the declaration (found by
+testing an adapter against `cargo metadata`). PAX 0.4.1 fixed that. Chip does not use `graph` for this
+capability regardless: the observation contract is the only surface consumed.
 
 **What `chip-graph` is.** An experiment (`EXPERIMENT`, `FROZEN`) in this repository, and no product
 component consumes it: `chip work` and `chip serve` do not use it. It does link into the `chip`
 binary (`chip init`, `chip graph`, `chip slice`, `chip impact`), which `crates.md` records as a known
-cost. It builds a deterministic Rust-only architecture graph (nodes: repository, crate, module,
-file, symbol, test suite, binary target, config surface; edges: contains, imports, defines,
-implements, tests, targets). Its `slice` and `impact` are narrower than their names suggest, and
-section 6 describes them as they are.
+cost. Its `slice` and `impact` are narrower than their names suggest, and section 6 describes them as
+they are. The PAX observation covers a useful subset of the structural facts it established, which is
+evidence that the experiment informed the right boundary; it does not make `chip-graph` a dependency.
 
 ## 4. The observation model (conceptual, not an API)
 
@@ -99,11 +102,11 @@ one graph:
 
 | Category | Example fact | Today in PAX |
 | --- | --- | --- |
-| Filesystem structure | `src/foo.rs` exists | only manifests, lockfiles and a few conventional directories |
-| Source structure | function `X` is defined in `src/foo.rs`; module `Y` is declared by `src/lib.rs` | no |
-| Dependency structure | package `A` declares dependency `B`; `C` belongs to workspace `W` | yes, declared edges only |
-| Import structure | module `X` imports module `Y` | no |
-| Test relationships | test `T` references function `X` | no |
+| Filesystem structure | `src/foo.rs` exists | manifests, lockfiles, conventional directories, source files reached by `mod` |
+| Source structure | function `X` is defined in `src/foo.rs`; module `Y` is declared by `src/lib.rs` | yes, Rust only (`pax observe`) |
+| Dependency structure | package `A` declares dependency `B`; `C` belongs to workspace `W` | membership yes; declared dependency names yes, aggregated across the workspace (not attributed to a package) |
+| Import structure | module `X` imports module `Y` | no (PAX does not observe `use`) |
+| Test relationships | test `T` references function `X` | no; PAX states only that a test attribute is present (`test.declared`) |
 | Tooling and configuration | the selected build tool and why; manifests; lockfiles | yes |
 
 A test relationship is structure, not proof: "test `T` references `X`" does not mean "`T` shows `X`
@@ -203,41 +206,28 @@ later: Chip requests a scoped observation -> PAX returns structured facts -> FX 
        reasoning is needed
 ```
 
-## 10. The question this leaves open, and the gate for building it
+## 10. The gate: this capability is kept only if it measures
 
-> What is the minimum deterministic project-observation contract Chip needs to advance work without
-> asking a model to rediscover repository structure?
+The hypothesis is that scoped deterministic observation reduces model calls, executions and context
+spent rediscovering repository structure, without changing what Chip lets the model make real. What
+would falsify it, what must not change, and what is measured are in
+[`observe-benchmark.md`](observe-benchmark.md), together with the results of the first matched
+baseline-versus-treatment run. Those results, not the existence of the facts, decide whether
+`project.observe` stays, narrows or goes.
 
-The initial contract should be a small number of composable observations, not a universal graph:
-project identity, file existence and location, source and module structure, symbol and declaration
-location, structural relationships, dependency relationships, test relationships, tooling and
-configuration.
+What must not change, and is pinned by tests: the capability authority boundary (the model supplies one
+validated `scope` and nothing else), the completion contract (`verified` still requires an independent
+predicate; an observation never grounds an inspect answer, never satisfies a goal, and is never useful
+work), `chip-core` free of PAX, and PAX deterministic and agency-free.
 
-Before an implementation PR, it must answer the questions the constitution already requires:
+## 11. What this does not do
 
-1. **Hypothesis:** scoped deterministic observation reduces model calls, executions and context spent
-   on rediscovery without changing what Chip lets the model make real.
-2. **What would falsify it:** no measurable reduction on matched real-model tasks, or any observation
-   that a model can alter or that exceeds its evidence.
-3. **Authority introduced:** none to the model. The observation is runtime-requested and
-   reality-derived like every other observation. Any new capability is declared, validated and
-   executed by Chip like the current ones.
-4. **Measurement:** the same tasks with and without the capability, same model, same runtime,
-   comparing model calls, executions, tokens and verified outcomes, kept separate from
-   safety counters (`AGENTS.md` sections 12 and 22).
-5. **What must not change:** the capability authority boundary, the completion contract (`verified`
-   still requires an independent predicate), `chip-core` free of PAX, and PAX deterministic.
-
-This document does not itself measure anything. The runs that motivate it are small and mixed:
-several failures came from the model or the provider, not from missing structure, so rediscovery
-cost is a hypothesis to test, not a finding.
-
-## 11. What this change does not do
-
-It adds no PAX capability, does not move `chip-graph` into PAX, builds no index, symbol database,
-semantic search or relevance scoring, adds no model call to PAX, implements no impact analysis,
-changes no part of Chip's work loop, capability API, FX or Compute, adds no persistence or cache,
-and fixes no wire schema or command name.
+It adds no relevance scoring, ranking, impact analysis, index, symbol database, semantic search,
+cache, persistence or watcher; no model call in PAX; no automatic substitution of `project.list`,
+`project.search` or `project.read` (they are unchanged and the model chooses); no change to Chip's
+work loop, completion or utility semantics, FX or Compute; and no `chip-graph` dependency. It does not
+implement the Decision Frontier or escalation: an observation may reduce uncertainty, it does not
+choose what happens next.
 
 ## 12. The invariant
 

@@ -103,6 +103,9 @@ fn write(path: &str, content: &str) -> String {
         &format!(r#"{{"path":{},"content":{}}}"#, q(path), q(content)),
     )
 }
+fn observe(scope: &str) -> String {
+    request("project.observe", &format!(r#"{{"scope":{}}}"#, q(scope)))
+}
 fn pax_test() -> String {
     request("pax.test", "")
 }
@@ -154,6 +157,32 @@ fn pax_available(dir: &Path) -> bool {
     .is_ok();
     if !ok {
         eprintln!("SKIPPED: PAX is not installed");
+    }
+    ok
+}
+
+/// `project.observe` needs the PAX release it was verified against; a test that needs it says
+/// SKIPPED when the installed PAX is older, exactly as one that needs PAX does when it is absent.
+fn observe_available(dir: &Path) -> bool {
+    let ok = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(PaxExecutor::new(dir).resolve())
+    })
+    .is_ok_and(|pax| {
+        chip_pax::MIN_OBSERVE_PAX_VERSION <= {
+            let parts: Vec<u64> = pax
+                .version
+                .split(['.', '-', '+'])
+                .take(3)
+                .filter_map(|p| p.parse().ok())
+                .collect();
+            (parts[0], parts[1], parts[2])
+        }
+    });
+    if !ok {
+        eprintln!(
+            "SKIPPED: PAX is older than {:?}",
+            chip_pax::MIN_OBSERVE_PAX_VERSION
+        );
     }
     ok
 }
@@ -266,6 +295,55 @@ fn describe(w: &SoftwareWork) -> String {
     )
 }
 
+/// The invariant for every goal kind: a completed run has met its kind's required condition at the
+/// last evaluation (a level, `remaining == 0`), whichever turn produced the last evaluation event.
+fn assert_completed_means_goal_met(w: &SoftwareWork) {
+    if matches!(w.report.outcome, WorkOutcome::Completed { .. }) {
+        assert_eq!(
+            w.goal_satisfied,
+            Some(true),
+            "completed but the goal was not met: {}",
+            describe(w)
+        );
+    }
+}
+
+/// Useful work is verified completion: one verified goal over the cost of the run, for a run that
+/// verified; and for every other run, none, however much the goal's condition held.
+fn assert_useful_work_is_one_verified_goal(w: &SoftwareWork) {
+    assert!(w.verified, "{}", describe(w));
+    assert_eq!(
+        w.useful_work_per_model_call(),
+        Some(1.0 / w.utility.model_calls as f64)
+    );
+    assert_eq!(
+        w.useful_work_per_execution(),
+        Some(1.0 / w.utility.executions as f64)
+    );
+}
+
+fn assert_no_useful_work(w: &SoftwareWork) {
+    assert!(!w.verified, "{}", describe(w));
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0), "{}", describe(w));
+    assert_eq!(w.useful_work_per_execution(), Some(0.0), "{}", describe(w));
+    let json: serde_json::Value = serde_json::from_str(&chip_cli::software_work::render_json(
+        w,
+        &EnvironmentDescription::default(),
+    ))
+    .unwrap();
+    assert_eq!(json["useful_work_per_model_call"], 0.0);
+    assert_eq!(json["useful_work_per_execution"], 0.0);
+}
+
+/// `GoalEvaluated::satisfied` of the last evaluation: an edge ("this observation produced it"),
+/// which is not the level `goal_satisfied` reports.
+fn last_goal_edge(w: &SoftwareWork) -> Option<bool> {
+    w.report.events.iter().rev().find_map(|e| match e {
+        WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
+        _ => None,
+    })
+}
+
 fn blocked_with(w: &SoftwareWork, text: &str) -> bool {
     matches!(&w.report.outcome, WorkOutcome::Blocked { reason } if reason.contains(text))
 }
@@ -362,6 +440,8 @@ async fn scenario_2_modify_diff_verify_complete() {
         describe(&w)
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
+    assert_completed_means_goal_met(&w);
+    assert_useful_work_is_one_verified_goal(&w);
     assert_eq!(
         m.calls(),
         5,
@@ -724,13 +804,151 @@ async fn inspect_completes_on_a_grounded_answer_without_a_change_or_a_test() {
         describe(&w)
     );
     assert_eq!(w.pax_executions(), 0, "no test was needed to answer");
-    assert!(w.verified, "grounded in what was observed");
-    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert!(w.grounded, "grounded in what was observed");
+    assert!(
+        !w.verified,
+        "grounded is not verified: nothing independent establishes the answer"
+    );
+    assert_eq!(w.goal_satisfied, Some(true), "the kind's condition was met");
+    assert_completed_means_goal_met(&w);
+    assert_eq!(
+        w.exit_status(),
+        chip_cli::verify::EXIT_NOT_VERIFIED,
+        "only `verified` authorizes exit 0"
+    );
     assert_eq!(before, snapshot(&dir), "nothing changed");
     assert!(
         m.request(3).contains("pub fn len"),
         "the model was shown the file it cites"
     );
+    w.audit.assert_clean();
+}
+
+/// E1 from the real-model run: a negative answer that cites files Chip really read. Chip does not
+/// interpret the answer, so it is grounded and never verified. Many observations follow the one that
+/// first met the condition, so the last `GoalEvaluated` edge is false while the level is true.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_negative_inspect_answer_citing_read_files_is_grounded_and_never_verified() {
+    let dir = project("inspect-negative", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (mut w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            list("."),
+            read("Cargo.toml"),
+            search("production"),
+            read("src/lib.rs"),
+            complete(
+                "There is no information about which version is deployed to production; \
+                 Cargo.toml and src/lib.rs contain nothing about it.",
+            ),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        last_goal_edge(&w),
+        Some(false),
+        "the later observations did not newly produce the condition"
+    );
+    assert_eq!(
+        w.goal_satisfied,
+        Some(true),
+        "but the condition held: goal_satisfied is a level"
+    );
+    assert_completed_means_goal_met(&w);
+    assert!(w.grounded, "it cites files Chip observed");
+    assert!(!w.verified, "no independent predicate established it");
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_no_useful_work(&w);
+    assert_eq!(before, snapshot(&dir));
+    w.audit.assert_clean();
+
+    // Grounded is not another way to succeed: a completed inspection that is not grounded is the
+    // runtime's own contradiction, not a not-verified answer.
+    w.grounded = false;
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_RUNTIME_FAILURE);
+}
+
+/// An inspection that observes plenty and never answers: the goal's condition (something was
+/// observed) holds, but nothing was verified, so no useful work was done.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_inspection_that_hits_a_limit_did_no_useful_work() {
+    let dir = project("inspect-limit", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        (0..LIMITS.max_executions + 1).map(|_| list(".")).collect(),
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::LimitReached { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        w.goal_satisfied,
+        Some(true),
+        "the observation condition held"
+    );
+    assert!(!w.grounded && !w.verified);
+    assert_no_useful_work(&w);
+    w.audit.assert_clean();
+}
+
+/// A' from the real-model run: a search row shows the signature, never the body that holds the
+/// fact. Citing the file is grounded; it does not make the answer verified.
+#[tokio::test(flavor = "multi_thread")]
+async fn citing_a_search_row_without_observing_the_supporting_bytes_is_not_verified() {
+    let dir = project("inspect-row", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    std::fs::write(
+        dir.join("src/facts.rs"),
+        "/// Expired sessions are purged after this many days.\npub fn purge_window() -> u32 {\n    let base = 30;\n    let grace = 5;\n    base + grace\n}\n",
+    )
+    .unwrap();
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            search("purge_window"),
+            complete("`purge_window` returns a number of days; it is defined in src/facts.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        w.report.observations.iter().all(|o| !o
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("grace")),
+        "the body that holds the fact was never observed"
+    );
+    assert!(matches!(w.report.outcome, WorkOutcome::Completed { .. }));
+    assert!(w.grounded, "the answer cites a file the search matched");
+    assert!(!w.verified);
+    assert_completed_means_goal_met(&w);
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_no_useful_work(&w);
+    // The seam: for an inspection `verified` is false whatever was observed, until an
+    // independently owned predicate exists.
+    assert!(!GoalKind::Inspect.verified(&w.report.observations, &w.report.outcome));
     w.audit.assert_clean();
 }
 
@@ -822,6 +1040,166 @@ async fn inspect_requires_observation_and_forbids_change() {
     assert!(!w.verified);
 }
 
+/// `project.observe` is a fact about structure. The completion contract is unchanged by it: an
+/// inspection that observed structure and nothing else is not grounded, because grounding is what
+/// `list`, `search` and `read` observed. With a read of the file it cites, it is grounded as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn project_observe_does_not_ground_an_answer_and_does_not_change_the_contract() {
+    let dir = project("observe-inspect", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    // Observation alone: it names the file and the declaration, and the answer cites them.
+    let (w, m) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            observe("crate:auditfx"),
+            complete("`len` is declared in src/lib.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        m.request(1).contains("pub fn len"),
+        "the model was shown the observed declaration: {}",
+        m.request(1)
+    );
+    assert!(
+        blocked_with(&w, "completion refused"),
+        "an observation alone does not complete an inspection: {}",
+        describe(&w)
+    );
+    assert!(!w.verified && !w.grounded);
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+    assert_eq!(before, snapshot(&dir), "observing changed nothing");
+    w.audit.assert_clean();
+
+    // With a read of the file it cites: grounded, never verified, exit 1: exactly as without observe.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            observe("crate:auditfx"),
+            read("src/lib.rs"),
+            complete("`len` is declared in src/lib.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert!(w.grounded && !w.verified, "grounded is not verified");
+    assert_eq!(w.goal_satisfied, Some(true));
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+    w.audit.assert_clean();
+}
+
+/// An observation is not a model's claim and a model's claim is not an observation.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_cannot_supply_an_observation_or_a_fact() {
+    let dir = project("observe-forge", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    // The model asks to observe and tries to bring its own facts, limits and state: refused before
+    // PAX is started, and nothing becomes an observation.
+    for inputs in [
+        r#"{"scope":"crate:auditfx","facts":"src/lib.rs declares len"}"#,
+        r#"{"scope":"crate:auditfx","max_files":100000}"#,
+        r#"{"scope":"crate:auditfx","state":"complete"}"#,
+        r#"{"scope":"crate:auditfx","observation":"complete"}"#,
+        r#"{"facts":"src/lib.rs declares len"}"#,
+    ] {
+        let (w, _) = run_kind(
+            &dir,
+            GoalKind::Inspect,
+            None,
+            vec![
+                request("project.observe", inputs),
+                complete("`len` is declared in src/lib.rs."),
+            ],
+        )
+        .await;
+        assert!(
+            blocked_with(&w, "invalid capability input"),
+            "{inputs}: {}",
+            describe(&w)
+        );
+        assert_eq!(started(&w), 0, "{inputs}: nothing ran");
+        assert!(
+            w.report.observations.is_empty(),
+            "{inputs}: nothing was observed"
+        );
+    }
+    // Claiming a structure that was never observed does not complete anything.
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![complete(
+            "src/lib.rs declares `len`, and src/other.rs declares `helper`.",
+        )],
+    )
+    .await;
+    assert!(blocked_with(&w, "completion refused"), "{}", describe(&w));
+    assert!(w.report.observations.is_empty());
+}
+
+/// Observing structure is work: it costs model calls and executions, and it is not useful work. A
+/// change that is verified is still the only thing that counts, and observation does not alter it.
+#[tokio::test(flavor = "multi_thread")]
+async fn observing_structure_is_cost_and_never_useful_work_by_itself() {
+    let dir = project("observe-change", FAILING_TEST);
+    if !pax_available(&dir) || !observe_available(&dir) {
+        return;
+    }
+    let (w, _) = run(
+        &dir,
+        vec![
+            observe("crate:auditfx"),
+            read("src/lib.rs"),
+            write("src/lib.rs", RIGHT),
+            pax_test(),
+        ],
+    )
+    .await;
+    assert!(
+        w.verified && w.goal_satisfied == Some(true),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert_eq!(
+        w.utility.executions_by_capability.get("project.observe"),
+        Some(&1)
+    );
+    // The observation is in the cost: one verified goal over four executions, not three.
+    assert_eq!(w.utility.executions, 4);
+    assert_eq!(w.useful_work_per_execution(), Some(0.25));
+    assert_completed_means_goal_met(&w);
+    w.audit.assert_clean();
+
+    // And an unverified run that observed plenty did no useful work.
+    let (w, _) = run(
+        &dir,
+        vec![
+            observe("crate:auditfx"),
+            observe("file:src/lib.rs"),
+            complete("done"),
+        ],
+    )
+    .await;
+    assert!(!w.verified);
+    assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+}
+
 /// Verify: the runtime completes the work itself when PAX passes an unchanged project. The model
 /// makes one call and never claims completion.
 #[tokio::test(flavor = "multi_thread")]
@@ -838,6 +1216,8 @@ async fn verify_completes_when_the_unchanged_project_passes() {
         describe(&w)
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
+    assert_completed_means_goal_met(&w);
+    assert_useful_work_is_one_verified_goal(&w);
     assert_eq!(pax_passed(&w), 1, "PAX really passed");
     assert_eq!((w.writes, w.changed_writes), (0, 0));
     assert_eq!(
@@ -1195,7 +1575,8 @@ async fn a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observ
         "{}",
         describe(&w)
     );
-    assert!(w.verified);
+    assert!(w.grounded && !w.verified, "grounded is not verified");
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
     assert_eq!(
         std::fs::read_to_string(dir.join("src/big.rs")).unwrap(),
         source,

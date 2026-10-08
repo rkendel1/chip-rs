@@ -142,7 +142,7 @@ model ──judgment──▶ Chip ──pax.test──▶ pax --dir <cwd> --jso
 
 * A model provider behind FX, configured as for the rest of `chip`: `CHIP_PROVIDER`,
   `CHIP_MODEL`, and `CHIP_ENDPOINT` / `CHIP_API_KEY` where the provider needs them.
-* PAX **0.3.0 or later** (`pax.execution-result.v1`), found as `$PAX_BIN` if set, otherwise as the
+* PAX **0.3.0 or later** for `pax.test` (`pax.execution-result.v1`) and **0.4.1 or later** for `project.observe` (`pax.observation.v1`; CI pins the release `v0.4.1`, commit `674f3b3143874d1a692aca103b33f89da31a82ac`), found as `$PAX_BIN` if set, otherwise as the
   first `pax` on `PATH`. The candidate must identify itself via `pax --version`; the POSIX `pax`
   archive utility is refused. Chip never searches for another candidate. Use `PAX_BIN=/path/to/pax`
   when `PATH` discovery is not enough.
@@ -188,6 +188,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 | `project.read` | `path`; optional `offset`, `length` (bytes) | reads a UTF-8 file and records its real content; a call returns at most 32 KiB, so a larger file is read in ranges (`offset`, `length` <= 32768); a range that splits a multi-byte character is refused, not altered |
 | `project.write` | `path`, `content` | atomically creates or replaces a UTF-8 file (at most 32 KiB), reads it back, records what the filesystem holds |
 | `project.git.status`, `project.git.diff`, `project.git.diff_stat`, `project.git.log` | none (`log`: a bounded count) | read-only Git observations; Chip fixes every argument; nothing mutating is expressible |
+| `project.observe` | `scope` (required): `file:`, `path:`, `crate:` or `module:` | bounded, deterministic project structure (source files, modules, declarations, tests, manifests) observed by PAX and rendered compactly by Chip; facts, never relevance; `complete`, `partial` and failure states are explicit, and a partial observation is never shown as complete |
 | `pax.test` | none | runs `pax --dir <project> --json test` and records PAX's `pax.execution-result.v1` |
 
 * **The model owns only a project-relative path, a literal query, and file content.** It cannot
@@ -215,7 +216,9 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
     pass its tests as it is?"). The runtime completes it itself.
   * `inspect`: read-only. The model proposes an answer with `complete`; Chip accepts it only if
     read-only observations occurred, no file was changed, and the answer cites a file Chip observed.
-    Accepted means *grounded in observation*, not proven correct.
+    Accepted means *grounded in observation*: the run completes with `goal_satisfied: true` and
+    `grounded: true`, but `verified` is false and the exit is 1. An inspection is never verified,
+    because Chip does not interpret the answer.
   See [`docs/product/capabilities.md`](docs/product/capabilities.md) section 2a.
 * **Revisiting a capability.** A note that one invocation failed or fell short names that invocation
   (`project.read (path="src/a.rs")`); another input to the same capability is a different invocation
@@ -231,10 +234,12 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   relaxed to "it still exists"), evidence reused where the spec prohibits it, and events after the
   terminal state. It reads recorded observations and events, never the loop's own counters.
 * **Metrics.** Lists, searches, reads, writes, tests, failed observations, recoveries, tokens and
-  latency, and useful work per model call and per execution. Useful work is a verified goal: model
-  claims, writes alone, a dispatched capability, stale evidence and failed test runs are not counted.
+  latency, and useful work per model call and per execution. Useful work is a *verified* goal (`verified`, not
+  merely `goal_satisfied`): model claims, writes alone, a dispatched capability, stale evidence,
+  failed test runs, and an inspection that is only grounded are not counted, so an inspection
+  contributes none until an independent predicate verifies it.
 * **Exit status** (Chip's, never a native exit code): `0` verified; `1` not verified (blocked, limit,
-  escalated); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
+  escalated, or an inspection that is answered and grounded but, as every inspection, not verified); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
   answer, no PAX; nothing ran); `4` runtime failure or a violated safety invariant.
 * Requirements as for `verify`: a model provider behind FX and PAX 0.3.0 or later (`PAX_BIN` to
   select it); Compute is not required. `chip work` only *locates* PAX at startup (a `pax` must be
@@ -289,7 +294,7 @@ decision.
 - **Scheduling vs lifecycle.** `status`/`scheduling` say where the work is in admission (`queued`,
   `admitted`, `finished`). `lifecycle` is the runtime's: `null` before the work starts, `executing`
   while the loop runs, then its terminal state (`completed`, `escalated`, `blocked`, `limit_reached`,
-  `failed`). `completed` is runtime completion; goal satisfaction is `result.verified`.
+  `failed`). `completed` is runtime completion (Chip accepted the end of the work); `result.verified` is the independent check, and `result.grounded` says an inspection's answer is supported by observations. Only `verified` means the outcome was established.
 - **Events** are available when the work ends (the loop returns its trajectory then); a queued or
   running work reports `"complete": false` and none. Order is guaranteed within a work only, never
   across works.

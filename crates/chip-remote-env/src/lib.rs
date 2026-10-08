@@ -32,7 +32,7 @@ use chip_core::{
     ExecutionError, ExecutionRequest, ExecutionResult, Executor, InputValue, ObservationInvariant,
     WorkEnvironment,
 };
-use chip_pax::PaxExecutor;
+use chip_pax::{PaxExecutor, PaxObserve};
 use chip_project::{
     ProjectExecutor, git_observation_invariant, git_scope_invariant, host_path_leak_invariant,
     navigation_mismatch_invariant, out_of_root_write_invariant, path_escape_invariant,
@@ -221,6 +221,7 @@ impl Executor for RemoteCapabilityBackend {
 pub fn project_capability_set(root: &Path, pax: PaxExecutor) -> CapabilitySet {
     CapabilitySet::new()
         .with(Arc::new(ProjectExecutor::new(root)))
+        .with(Arc::new(PaxObserve::new(pax.clone())))
         .with(Arc::new(pax))
 }
 

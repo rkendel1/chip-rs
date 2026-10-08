@@ -49,10 +49,10 @@ jobs:
       - name: Build the Wasm decision module
         run: cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
 
-      - name: Install PAX (pinned release v0.3.0, the minimum Chip requires)
+      - name: Install PAX (pinned release v0.4.1 at 674f3b3, the minimum project.observe requires)
         run: |
-          git clone --depth 1 --branch v0.3.0 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
-          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 3bf88b884f2abecf17e21175e5ce2dd6c52c7e8f
+          git clone --depth 1 --branch v0.4.1 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
+          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 674f3b3143874d1a692aca103b33f89da31a82ac
           cargo build --release --locked --manifest-path "$RUNNER_TEMP/pax/Cargo.toml"
           echo "$RUNNER_TEMP/pax/target/release" >> "$GITHUB_PATH"
 
@@ -102,10 +102,10 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install PAX (pinned release v0.3.0, the minimum Chip requires)
+      - name: Install PAX (pinned release v0.4.1 at 674f3b3, the minimum project.observe requires)
         run: |
-          git clone --depth 1 --branch v0.3.0 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
-          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 3bf88b884f2abecf17e21175e5ce2dd6c52c7e8f
+          git clone --depth 1 --branch v0.4.1 https://github.com/rkendel1/pax "$RUNNER_TEMP/pax"
+          test "$(git -C "$RUNNER_TEMP/pax" rev-parse HEAD)" = 674f3b3143874d1a692aca103b33f89da31a82ac
           cargo build --release --locked --manifest-path "$RUNNER_TEMP/pax/Cargo.toml"
           echo "$RUNNER_TEMP/pax/target/release" >> "$GITHUB_PATH"
 

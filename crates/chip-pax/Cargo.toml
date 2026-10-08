@@ -10,7 +10,7 @@ chip-core = { path = "../chip-core" }
 async-trait = "0.1"
 serde = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["process", "io-util", "time", "sync"] }
+tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }

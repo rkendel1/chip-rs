@@ -29,7 +29,7 @@ use chip_core::{
 };
 #[cfg(test)]
 use chip_pax::PaxExecutor;
-use chip_pax::{PAX_TEST_CAPABILITY, PaxTestPassed};
+use chip_pax::{PAX_TEST_CAPABILITY, PROJECT_OBSERVE_CAPABILITY, PaxTestPassed};
 use chip_project::{
     GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
     PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, write_summary,
@@ -80,7 +80,10 @@ pub enum GoalKind {
     Verify,
     /// Observe and answer. Completion: the model proposes an answer; Chip accepts it only if
     /// read-only observations occurred, no file was changed, and the answer cites a file Chip
-    /// observed. "Accepted" means grounded in observation, not proven correct.
+    /// observed. Accepted means *grounded* in observation: the run completes, `goal_satisfied` is
+    /// true and `grounded` is true, but `verified` is false and the exit is not 0. Chip does not
+    /// interpret the answer, so nothing independent establishes that it is true; `verified` for an
+    /// inspection waits for such a predicate (see [`GoalKind::verified`]).
     Inspect,
 }
 
@@ -137,21 +140,46 @@ impl GoalKind {
         }
     }
 
-    /// Whether the recorded work satisfies this kind of goal, re-evaluated from the observations
-    /// (and, for an inspection, the accepted answer) and from nothing else.
-    pub fn verified(self, observations: &[Observation], outcome: &WorkOutcome) -> bool {
+    /// Whether an independent predicate, re-evaluated from the recorded observations, establishes
+    /// the requested outcome. Only `verified` can authorize exit 0.
+    ///
+    /// An inspection has no such predicate: its answer is natural language and Chip does not
+    /// interpret it, so this is `false` for every inspection. This is the one place an
+    /// independently owned expectation would later make it `true`
+    /// (`completed && grounded && predicate(observations)`); until one exists, being grounded
+    /// is not being verified.
+    pub fn verified(self, observations: &[Observation], _outcome: &WorkOutcome) -> bool {
         match self {
             Self::Change => VerifiedChange.satisfied_by_trajectory(observations),
             Self::Verify => VerifiedState.satisfied_by_trajectory(observations),
-            Self::Inspect => match outcome {
-                WorkOutcome::Completed { summary } => {
-                    InspectionObserved.satisfied_by_trajectory(observations)
-                        && GroundedAnswer.accepts(summary, observations)
-                }
-                _ => false,
-            },
+            Self::Inspect => false,
         }
     }
+
+    /// Whether the accepted answer is supported by what Chip observed: read-only observations
+    /// occurred, no file was changed, and the answer cites a file Chip observed. Only an
+    /// inspection has an answer. This says where the answer came from, never that it is true, and
+    /// it never authorizes exit 0.
+    pub fn grounded(self, observations: &[Observation], outcome: &WorkOutcome) -> bool {
+        match (self, outcome) {
+            (Self::Inspect, WorkOutcome::Completed { summary }) => {
+                InspectionObserved.satisfied_by_trajectory(observations)
+                    && GroundedAnswer.accepts(summary, observations)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether the goal's required conditions held at the last evaluation: a level, not an edge.
+/// `GoalEvaluated::satisfied` says only that *that* observation produced a required output, so
+/// after the conditions first held it is false again for every later observation; the level is
+/// `remaining == 0`, the same reading the safety audit uses. `None` if nothing was evaluated.
+pub fn goal_level(events: &[WorkEvent]) -> Option<bool> {
+    events.iter().rev().find_map(|e| match e {
+        WorkEvent::GoalEvaluated { remaining, .. } => Some(*remaining == 0),
+        _ => None,
+    })
 }
 
 /// Whether any recorded observation is a content-changing project write.
@@ -405,6 +433,7 @@ fn declared() -> Vec<CapabilityId> {
         PROJECT_READ,
         PROJECT_WRITE,
         PAX_TEST_CAPABILITY,
+        PROJECT_OBSERVE_CAPABILITY,
     ]
     .iter()
     .chain(GIT_CAPABILITIES.iter())
@@ -436,8 +465,12 @@ pub struct SoftwareWork {
     pub utility: WorkUtilityMeasurement,
     /// The loop's last evaluation of the goal; `None` if it never evaluated one.
     pub goal_satisfied: Option<bool>,
-    /// The goal, re-evaluated from the recorded observations by the predicate itself.
+    /// An independent predicate, re-evaluated from the recorded observations, establishes the
+    /// requested outcome. The only thing that can authorize exit 0.
     pub verified: bool,
+    /// The accepted answer is supported by observations Chip has (an inspection only). Not that it
+    /// is true, and not a success predicate.
+    pub grounded: bool,
     /// Successful writes, and those that changed a file's content.
     pub writes: usize,
     pub changed_writes: usize,
@@ -497,6 +530,23 @@ impl SoftwareWork {
         }
     }
 
+    /// One verified goal per run, or none. Useful work is verified completion, not the goal's
+    /// condition holding: an inspection that is grounded but not verified, a run that hit a limit,
+    /// and a failed run are none. Like `useful_writes`, it keys off `verified` alone.
+    fn useful_work(&self) -> f64 {
+        if self.verified { 1.0 } else { 0.0 }
+    }
+
+    /// Verified useful work per model call; `None` when no model call was made.
+    pub fn useful_work_per_model_call(&self) -> Option<f64> {
+        (self.utility.model_calls > 0).then(|| self.useful_work() / self.utility.model_calls as f64)
+    }
+
+    /// Verified useful work per execution; `None` when nothing was executed.
+    pub fn useful_work_per_execution(&self) -> Option<f64> {
+        (self.utility.executions > 0).then(|| self.useful_work() / self.utility.executions as f64)
+    }
+
     pub fn invariants_hold(&self) -> bool {
         self.audit.is_clean() && self.trajectory_violations == 0
     }
@@ -506,7 +556,10 @@ impl SoftwareWork {
             return EXIT_RUNTIME_FAILURE;
         }
         match &self.report.outcome {
+            // Only `verified` authorizes exit 0. An answer that is grounded but not verified is a
+            // completed run whose answer Chip does not claim is true: not verified, not a failure.
             WorkOutcome::Completed { .. } if self.verified => EXIT_VERIFIED,
+            WorkOutcome::Completed { .. } if self.grounded => EXIT_NOT_VERIFIED,
             WorkOutcome::Completed { .. } | WorkOutcome::Failed { .. } => EXIT_RUNTIME_FAILURE,
             WorkOutcome::Blocked { .. }
             | WorkOutcome::LimitReached { .. }
@@ -609,11 +662,9 @@ pub async fn run_software_work_kind(
     let audit = audit_safety(&report, &spec, &declared());
     let trajectory_violations = verify_trajectory(&report.events, &spec.limits).len();
     let utility = measure_utility(&report, &spec);
-    let goal_satisfied = report.events.iter().rev().find_map(|e| match e {
-        WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
-        _ => None,
-    });
+    let goal_satisfied = goal_level(&report.events);
     let verified = kind.verified(&report.observations, &report.outcome);
+    let grounded = kind.grounded(&report.observations, &report.outcome);
     let written: Vec<(String, bool)> = report
         .observations
         .iter()
@@ -627,6 +678,7 @@ pub async fn run_software_work_kind(
         utility,
         goal_satisfied,
         verified,
+        grounded,
         writes: written.len(),
         changed_writes: written.iter().filter(|(_, changed)| *changed).count(),
         paths_written: written.into_iter().map(|(p, _)| p).collect(),
@@ -636,8 +688,11 @@ pub async fn run_software_work_kind(
     }
 }
 
-fn heading(outcome: &WorkOutcome) -> &'static str {
-    match outcome {
+fn heading(w: &SoftwareWork) -> &'static str {
+    match &w.report.outcome {
+        WorkOutcome::Completed { .. } if !w.verified && w.grounded => {
+            "Work answered, not verified."
+        }
         WorkOutcome::Completed { .. } => "Work completed.",
         WorkOutcome::Blocked { .. } => "Work blocked.",
         WorkOutcome::Failed { .. } => "Work failed.",
@@ -686,7 +741,7 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         out.push_str(&s);
         out.push('\n');
     };
-    line(heading(&w.report.outcome).to_string());
+    line(heading(w).to_string());
     line(format!("Goal: {}", w.goal));
     if let Some(id) = &w.identity {
         line(format!("Provider: {}", id.provider));
@@ -723,8 +778,9 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         match (w.verified, w.kind) {
             (true, GoalKind::Change) => "yes (pax.test passed after the last change)",
             (true, GoalKind::Verify) => "yes (pax.test passed and no file was changed)",
-            (true, GoalKind::Inspect) =>
-                "grounded (the answer cites a file that was observed; its correctness is not established)",
+            (true, GoalKind::Inspect) => "yes (an independent predicate established the answer)",
+            (false, GoalKind::Inspect) if w.grounded =>
+                "no (answered and grounded in observation: the answer cites a file that was observed; nothing independent establishes that it is true)",
             (false, _) => "no",
         }
     ));
@@ -854,6 +910,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "outcome_reason": outcome_reason(&w.report.outcome),
         "goal_satisfied": w.goal_satisfied,
         "verified": w.verified,
+        "grounded": w.grounded,
         "executions_by_capability": u.executions_by_capability,
         "lists": w.lists(),
         "searches": w.searches(),
@@ -869,8 +926,8 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "capability_requests": w.capability_requests(),
         "invalid_decisions": u.invalid_decisions,
         "invalid_inputs": w.invalid_inputs(),
-        "useful_work_per_model_call": u.work_per_model_call(),
-        "useful_work_per_execution": u.work_per_execution(),
+        "useful_work_per_model_call": w.useful_work_per_model_call(),
+        "useful_work_per_execution": w.useful_work_per_execution(),
         "pax": {
             "version": env.verifier_version,
             "last_status": last.as_ref().map(|r| r.status.as_str()),
@@ -1296,6 +1353,33 @@ mod tests {
     use fx_core::{FxError, ModelRequest, ModelResponse, Usage};
 
     use super::*;
+
+    /// The audit judges every execution against `declared()`. An execution of a capability the
+    /// environment offers but the audit does not know is reported as an unrequested execution, so the
+    /// two must be the same set: adding a capability to one and not the other fails here.
+    #[tokio::test]
+    async fn the_audits_declared_set_is_exactly_what_the_environment_offers() {
+        let dir = std::env::temp_dir().join(format!("chip-declared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&dir),
+            &dir,
+            PaxExecutor::new(&dir),
+            EnvironmentDescription::default(),
+        );
+        let mut offered: Vec<String> = env
+            .capabilities()
+            .capabilities()
+            .await
+            .unwrap()
+            .iter()
+            .map(|d| d.id.to_string())
+            .collect();
+        let mut audited: Vec<String> = declared().iter().map(|c| c.to_string()).collect();
+        offered.sort();
+        audited.sort();
+        assert_eq!(offered, audited);
+    }
 
     struct Script {
         replies: Mutex<VecDeque<String>>,
@@ -2199,6 +2283,8 @@ mod tests {
         assert_eq!(w.utility.verified_outputs, 0);
         assert_eq!(w.utility.work_per_model_call(), Some(0.0));
         assert_eq!(w.utility.work_per_execution(), Some(0.0));
+        assert_eq!(w.useful_work_per_model_call(), Some(0.0));
+        assert_eq!(w.useful_work_per_execution(), Some(0.0));
     }
 
     #[tokio::test(flavor = "multi_thread")]
