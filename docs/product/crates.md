@@ -281,8 +281,11 @@ shipped `chip` binary only because `chip-cli` also hosts their commands (section
   `LocalReasoner` is responsible for. Fixture for the above.
 * **`chip-graph`** (EXPERIMENT, L1): a deterministic architecture graph of a Rust repository
   (`chip init`, `chip graph`, `chip slice`, `chip impact`). Well covered by golden tests, but no
-  product component consumes it, and "which part of the project is relevant" is project observation
-  that belongs with PAX or the environment rather than in the agency loop. Kept because it fed the
+  product component consumes it. Project *structure* is observation that belongs with PAX or the
+  environment rather than in the agency loop; "which part of the project is relevant" is not
+  observation at all (in this crate it is declared by an external catalog, elsewhere it is
+  interpretation), see
+  [`project-observation-boundary.md`](project-observation-boundary.md). Kept because it fed the
   decision-state design; extending it needs a justification under `AGENTS.md` section 14.
 
 ### 5.1 `chip-cli` commands
