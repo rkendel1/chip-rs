@@ -80,7 +80,10 @@ integration, experiment, proof), validation level (L0 to L5), and what is still 
 local-model crates are experiments. A test keeps that document in step with the workspace.
 
 What `chip work` can and cannot do today, capability by capability, with the gaps and who should own
-them, is in [`docs/product/capabilities.md`](docs/product/capabilities.md).
+them, is in [`docs/product/capabilities.md`](docs/product/capabilities.md). Where project
+structure belongs (PAX observes; Chip decides; FX reasons) is a design contract in
+[`docs/product/project-observation-boundary.md`](docs/product/project-observation-boundary.md); it
+is not implemented.
 
 Performance is a product concern too: Chip should add minimal, bounded overhead around the model and
 the computer. [`docs/product/performance.md`](docs/product/performance.md) records the measured baseline
