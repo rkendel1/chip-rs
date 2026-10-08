@@ -312,7 +312,7 @@ impl Workload {
             Event::Escalation {
                 id: "e-final".into(),
                 reason: "two plausible explanations and no evidence that distinguishes them".into(),
-                prior_attempts: vec![format!("a{}", ((n.max(100) - 1) / 100) * 100 - 1)],
+                prior_attempts: vec![format!("a{}", ((n.max(100) - 1) / 100).max(1) * 100 - 1)],
                 known_failures: vec!["changing the executor did not change the failure".into()],
                 successes: vec![],
                 outstanding: vec!["replace or merge?".into()],

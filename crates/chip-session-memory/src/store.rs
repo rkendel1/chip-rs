@@ -224,6 +224,12 @@ impl<B: Backend> SessionMemory<B> {
         &self.dir
     }
 
+    /// The engine's own integrity verdict (`"ok"`, a description of damage, or a statement that
+    /// the engine has no checker).
+    pub fn integrity(&mut self) -> Result<String> {
+        self.backend.as_mut().ok_or(E::Closed)?.integrity()
+    }
+
     /// The storage engine, for tests that need to damage or inspect persisted data directly.
     #[doc(hidden)]
     pub fn backend(&self) -> Result<&B> {

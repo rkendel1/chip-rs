@@ -42,6 +42,13 @@ const RECORDS: TableDefinition<(&str, &str), &str> = TableDefinition::new("recor
 
 pub const CACHE_BYTES: usize = 16 * 1024 * 1024;
 
+/// redb's own default page cache (1 GiB), for the benchmark arm that measures a naive adoption.
+pub const REDB_DEFAULT_CACHE_BYTES: usize = 1024 * 1024 * 1024;
+
+/// Cache size `open` uses. The adapter's bounded 16 MiB unless a benchmark arm overrides it.
+pub static CACHE_BYTES_OVERRIDE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(CACHE_BYTES);
+
 pub struct Redb {
     db: Database,
     path: PathBuf,
@@ -101,7 +108,10 @@ impl Backend for Redb {
     const FILE: &'static str = "session.redb";
 
     fn open(dir: &Path, _session: &str) -> Result<Self> {
-        Self::open_with_cache(dir, CACHE_BYTES)
+        Self::open_with_cache(
+            dir,
+            CACHE_BYTES_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed),
+        )
     }
 
     fn get(&self, collection: &str, id: &str) -> Result<Option<Value>> {

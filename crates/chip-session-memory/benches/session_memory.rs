@@ -30,16 +30,47 @@ use chip_core::{
     CapabilityId, ExecutionId, ExecutionStatus, Observation, ObservationKind, ObservationOrigin,
     omissions,
 };
+use chip_session_memory::backend::{self, Backend, Felt, Redb, Sqlite};
+use chip_session_memory::packet::packet_and_hash;
 use chip_session_memory::workload::{Event, Workload};
 use chip_session_memory::{Outcome, SessionMemory};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-const ARMS: [&str; 4] = [
+/// Every arm. The first four are the original session-memory experiment; the rest compare durable
+/// stores under identical retention (`*_store_all`) and under fsync-every-write (`*_synced`).
+const ALL_ARMS: [&str; 11] = [
     "chip_baseline",
     "memory_compact",
     "felt_store_all",
     "felt_summaries_only",
+    "sqlite_store_all",
+    "redb_store_all",
+    "redb_default_cache",
+    "felt_synced",
+    "sqlite_synced",
+    "redb_synced",
+    "redb_default_cache_synced",
+];
+/// Arms run when `--arms` is not given.
+const DEFAULT_ARMS: [&str; 6] = [
+    "chip_baseline",
+    "memory_compact",
+    "felt_store_all",
+    "sqlite_store_all",
+    "redb_store_all",
+    "redb_default_cache",
+];
+const DURABLE_ARMS: [&str; 9] = [
+    "felt_store_all",
+    "felt_summaries_only",
+    "sqlite_store_all",
+    "redb_store_all",
+    "redb_default_cache",
+    "felt_synced",
+    "sqlite_synced",
+    "redb_synced",
+    "redb_default_cache_synced",
 ];
 const FELTDB_REV: &str = "9f2354e89743bf1bdc8f1fc825d8259fd80920fe";
 
@@ -87,6 +118,8 @@ fn mem() -> Value {
     json!({
         "rss_kib": status_kib("VmRSS:"),
         "hwm_kib": status_kib("VmHWM:"),
+        "rss_anon_kib": status_kib("RssAnon:"),
+        "rss_file_kib": status_kib("RssFile:"),
         "heap_in_use_bytes": m.uordblks + m.hblkhd,
         "heap_free_in_arena_bytes": m.fordblks,
         "heap_reserved_bytes": m.arena + m.hblkhd,
@@ -113,7 +146,7 @@ impl Latencies {
         self.0.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let n = self.0.len();
         let at = |q: f64| self.0[((n as f64 - 1.0) * q) as usize];
-        json!({"count": n, "p50_us": at(0.5), "p99_us": at(0.99), "mean_us": self.0.iter().sum::<f64>() / n as f64, "max_us": self.0[n - 1]})
+        json!({"count": n, "p50_us": at(0.5), "p95_us": at(0.95), "p99_us": at(0.99), "mean_us": self.0.iter().sum::<f64>() / n as f64, "max_us": self.0[n - 1]})
     }
 }
 
@@ -524,81 +557,42 @@ fn arm_memory_compact(w: &Workload) -> Value {
     out
 }
 
-fn felt_packet(
-    w: &Workload,
-    m: &SessionMemory,
-    rec: &chip_session_memory::RecoveredSession,
-) -> Value {
-    let unresolved: Vec<_> = rec
-        .unresolved_failures
-        .iter()
-        .map(|t| {
-            let d = t.diagnostic.clone().unwrap_or_default();
-            let s = m
-                .payload(&d)
-                .ok()
-                .flatten()
-                .as_deref()
-                .map(sha)
-                .unwrap_or_default();
-            (t.command.clone(), t.failed_tests.clone(), d, s)
+/// `Cached` from /proc/meminfo, in KiB: the system-wide page cache. Indicative only (other
+/// processes move it), reported as a delta around the arm.
+fn page_cache_kib() -> u64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("Cached:").map(str::to_string))
         })
-        .collect();
-    let failed: Vec<_> = rec
-        .failed_approaches
-        .iter()
-        .map(|a| (a.id.clone(), a.action.clone()))
-        .collect();
-    let verified: Vec<_> = rec
-        .verified_repairs
-        .iter()
-        .map(|r| (r.id.clone(), r.verified_by.clone().unwrap_or_default()))
-        .collect();
-    let open: Vec<_> = rec.open_hypotheses.iter().map(|h| h.id.clone()).collect();
-    let esc: Vec<_> = rec
-        .escalations
-        .iter()
-        .map(|e| (e.id.clone(), e.reason.clone(), e.outstanding.clone()))
-        .collect();
-    let status = if rec.session.status == chip_session_memory::SessionStatus::Escalated {
-        "escalated"
-    } else {
-        "active"
-    };
-    let plan = rec.plan.as_ref().map(|p| p.steps.clone());
-    let pending = rec.session.pending.as_ref().map(|p| p.description.clone());
-    let checkpoint = rec.checkpoint.as_ref().map(|c| c.id.clone());
-    // Plan revisions are counted by the store; the expectation counts plan events.
-    packet(
-        &w.objective(),
-        status,
-        plan.as_ref(),
-        rec.plan.as_ref().map_or(0, |p| p.revision),
-        &failed,
-        &verified,
-        &unresolved,
-        &open,
-        &esc,
-        checkpoint.as_ref(),
-        pending.as_ref(),
-        rec.observations,
-    )
+        .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
+        .unwrap_or(0)
 }
 
-fn arm_felt(w: &Workload, dir: &Path, keep_payloads: bool) -> Value {
-    let name = if keep_payloads {
-        "felt_store_all"
-    } else {
-        "felt_summaries_only"
-    };
-    let mut out = json!({"arm": name});
+/// Applies the per-arm engine configuration. Returns (keep_payloads).
+fn configure(arm: &str) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    backend::SYNC_EVERY_WRITE.store(arm.ends_with("_synced"), Relaxed);
+    if arm.starts_with("redb_default_cache") {
+        backend::redb_store::CACHE_BYTES_OVERRIDE
+            .store(backend::redb_store::REDB_DEFAULT_CACHE_BYTES, Relaxed);
+    }
+    arm != "felt_summaries_only"
+}
+
+fn arm_store<B: Backend>(arm: &str, w: &Workload, dir: &Path) -> Value {
+    let keep_payloads = configure(arm);
+    let mut out = json!({"arm": arm, "engine": B::NAME});
     out["threads_start"] = json!(threads());
     out["memory_start"] = mem();
+    let cache_start = page_cache_kib();
     let _ = std::fs::remove_dir_all(dir);
     let root = dir.to_path_buf();
-    let mut m = SessionMemory::create(&root, "bench", &w.objective()).expect("create");
+    let mut m = SessionMemory::<B>::create_with(&root, "bench", &w.objective()).expect("create");
     let mut facts = Facts::default();
     let mut write = Latencies::new();
+    let mut ckpt = Latencies::new();
     let started = Instant::now();
     for e in w.events() {
         let op = Instant::now();
@@ -606,12 +600,18 @@ fn arm_felt(w: &Workload, dir: &Path, keep_payloads: bool) -> Value {
         // felt_summaries_only keeps only test diagnostics (what recovery may need) and drops the
         // payloads of reads, lists, searches and the like at ingest.
         let keep = keep_payloads || matches!(&e, Event::Observation { kind, .. } if kind == "test");
+        let is_ckpt = matches!(e, Event::Checkpoint { .. });
         m.apply(e, keep).expect("apply");
-        write.record(op);
+        if is_ckpt {
+            ckpt.record(op);
+        } else {
+            write.record(op);
+        }
     }
     out["timing_ms"] = json!({"ingest_total": ms(started)});
-    out["latency_us"] = json!({"write": write.summary()});
+    out["latency_us"] = json!({"write": write.summary(), "checkpoint": ckpt.summary()});
     out["memory_after_ingest"] = mem();
+    out["page_cache_delta_kib_after_ingest"] = json!(page_cache_kib() as i64 - cache_start as i64);
     let before = m.stats().expect("stats");
 
     // Reads and queries.
@@ -632,21 +632,11 @@ fn arm_felt(w: &Workload, dir: &Path, keep_payloads: bool) -> Value {
     let _ = m.observations().unwrap();
     out["timing_ms"]["full_scan_query"] = json!(ms(t));
     out["timing_ms"]["filtered_query_test_results"] = json!(filtered);
-    // Serialization and deserialization of the records, in isolation.
-    let t = Instant::now();
-    let blobs: Vec<Vec<u8>> = all.iter().map(|o| serde_json::to_vec(o).unwrap()).collect();
-    let ser = ms(t);
-    let t = Instant::now();
-    let back: Vec<chip_session_memory::ObservationRecord> = blobs
-        .iter()
-        .map(|b| serde_json::from_slice(b).unwrap())
-        .collect();
-    out["serialization_ms"] = json!({"records": all.len(), "serialize": ser, "deserialize": ms(t), "bytes": blobs.iter().map(Vec::len).sum::<usize>()});
-    drop((blobs, back, all));
+    drop(all);
 
     let t = Instant::now();
     m.checkpoint("c-final").expect("checkpoint");
-    out["timing_ms"]["checkpoint"] = json!(ms(t));
+    out["timing_ms"]["checkpoint_final"] = json!(ms(t));
 
     let hwm_before = status_kib("VmHWM:");
     out["memory_before_compaction"] = mem();
@@ -668,34 +658,96 @@ fn arm_felt(w: &Workload, dir: &Path, keep_payloads: bool) -> Value {
     });
     out["store"] = json!({
         "live_rows_before": before.live_rows, "live_rows_after": after.live_rows,
-        "journal_bytes_before": before.journal_bytes, "journal_bytes_after": after.journal_bytes,
+        "disk_bytes_before_compaction": before.journal_bytes, "disk_bytes_after_compaction": after.journal_bytes,
         "revisions_collected": report.reclaim.revisions_collected, "operations_pruned": report.reclaim.operations_pruned,
-        "reclaim_journal_before": report.reclaim.journal_before, "reclaim_journal_after": report.reclaim.journal_after,
+        "reclaim_disk_before": report.reclaim.journal_before, "reclaim_disk_after": report.reclaim.journal_after,
+        "disk_amplification_before": before.journal_bytes as f64 / (before.payload_bytes + before.record_bytes).max(1) as f64,
     });
 
-    // Destroy the instance, then rebuild the session from the persisted journal.
+    // Destroy the instance, then rebuild the session from what is on disk.
     m.close();
     drop(m);
     out["memory_after_close"] = mem();
     trim();
     out["memory_after_close_and_trim"] = mem();
     let t = Instant::now();
-    let (m2, rec) = SessionMemory::recover(&root, "bench").expect("recover");
+    let (mut m2, rec) = SessionMemory::<B>::recover_with(&root, "bench").expect("recover");
     let recovery_ms = ms(t);
     out["memory_after_recovery"] = mem();
-    let pk = felt_packet(w, &m2, &rec);
-    let pk_text = pk.to_string();
-    let expected = expected_packet(w, &facts, |_| String::new());
-    // The expectation computes the pinned payload digest from the same payload the adapter holds.
-    let _ = expected;
-    out["recovery"] = json!({"supported": true, "from": "disk", "elapsed_ms": recovery_ms, "packet_sha256": sha(&pk_text), "packet_bytes": pk_text.len(), "packet": pk, "payloads_held_after_recovery": rec.payloads_held, "pending_compaction": rec.pending_compaction});
-    out["recovery_packet_expected_sha256_inputs"] = json!({"facts_unresolved": facts.unresolved().len(), "facts_open_hypotheses": facts.hypotheses.iter().filter(|h| h.1).count()});
+    let (pk_text, pk_sha) = packet_and_hash(&m2, &rec);
+    let now = m2.stats().expect("stats");
+    let (mut lost, mut duplicated) = (0u64, 0u64);
+    for c in chip_session_memory::coll::ALL {
+        let (a, b) = (
+            after.records.get(c).copied().unwrap_or(0),
+            now.records.get(c).copied().unwrap_or(0),
+        );
+        lost += a.saturating_sub(b);
+        duplicated += b.saturating_sub(a);
+    }
+    let integrity = m2.integrity().unwrap_or_else(|e| e.to_string());
+    out["recovery"] = json!({"supported": true, "from": "disk", "elapsed_ms": recovery_ms, "packet_sha256": pk_sha, "packet_bytes": pk_text.len(), "payloads_held_after_recovery": rec.payloads_held, "pending_compaction": rec.pending_compaction, "records_lost": lost, "records_duplicated": duplicated, "engine_integrity": integrity});
     m2.destroy().expect("destroy");
     out["memory_after_destroy"] = mem();
     trim();
     out["memory_after_destroy_and_trim"] = mem();
     out["threads_end"] = json!(threads());
     out
+}
+
+/// Kill-recovery phase 1: ingest everything, checkpoint, then die without any cleanup.
+fn kill_phase1<B: Backend>(arm: &str, w: &Workload, dir: &Path) {
+    configure(arm);
+    let _ = std::fs::remove_dir_all(dir);
+    let mut m = SessionMemory::<B>::create_with(dir, "bench", &w.objective()).expect("create");
+    for e in w.events() {
+        m.apply(e, true).expect("apply");
+    }
+    m.checkpoint("c-final").expect("checkpoint");
+    // SAFETY: SIGKILL to ourselves: no destructor, flush or close runs.
+    unsafe { kill(getpid(), 9) };
+}
+
+/// Kill-recovery phase 2, in a fresh process: open what the dead process left and measure.
+fn kill_phase2<B: Backend>(arm: &str, dir: &Path) -> Value {
+    configure(arm);
+    let mut out = json!({"arm": arm, "memory_start": mem()});
+    let t = Instant::now();
+    let (mut m, rec) = SessionMemory::<B>::recover_with(dir, "bench").expect("recover after kill");
+    out["elapsed_ms"] = json!(ms(t));
+    out["memory_after_recovery"] = mem();
+    let (_, sha) = packet_and_hash(&m, &rec);
+    let t = Instant::now();
+    let integrity = m.integrity().unwrap_or_else(|e| e.to_string());
+    out["integrity_check_ms"] = json!(ms(t));
+    out["packet_sha256"] = json!(sha);
+    out["engine_integrity"] = json!(integrity);
+    out["observations"] = json!(rec.observations);
+    out["checkpoint"] = json!(rec.checkpoint.map(|c| c.id));
+    out["disk_bytes"] = json!(m.stats().unwrap().journal_bytes);
+    out
+}
+
+fn dispatch<T>(
+    arm: &str,
+    felt: impl FnOnce() -> T,
+    sqlite: impl FnOnce() -> T,
+    redb: impl FnOnce() -> T,
+) -> T {
+    if arm.starts_with("felt") {
+        felt()
+    } else if arm.starts_with("sqlite") {
+        sqlite()
+    } else if arm.starts_with("redb") {
+        redb()
+    } else {
+        panic!("unknown durable arm {arm}")
+    }
+}
+
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+    fn getpid() -> i32;
 }
 
 // ------------------------------------------------------------------------------ driver
@@ -705,14 +757,34 @@ fn child(arm: &str, n: usize, seed: u64, dir: &Path) {
     let result = match arm {
         "chip_baseline" => arm_chip_baseline(&w),
         "memory_compact" => arm_memory_compact(&w),
-        "felt_store_all" => arm_felt(&w, dir, true),
-        "felt_summaries_only" => arm_felt(&w, dir, false),
+        durable if DURABLE_ARMS.contains(&durable) => dispatch(
+            durable,
+            || arm_store::<Felt>(durable, &w, dir),
+            || arm_store::<Sqlite>(durable, &w, dir),
+            || arm_store::<Redb>(durable, &w, dir),
+        ),
         other => panic!("unknown arm {other}"),
     };
-    let mut result = result;
-    if std::env::var_os("SESSION_MEMORY_BENCH_DEBUG").is_some() {
-        result["debug_packet"] = result["recovery"]["packet"].clone();
-    }
+    println!("RESULT {result}");
+}
+
+fn child_kill1(arm: &str, n: usize, seed: u64, dir: &Path) {
+    let w = Workload::new(n, seed);
+    dispatch(
+        arm,
+        || kill_phase1::<Felt>(arm, &w, dir),
+        || kill_phase1::<Sqlite>(arm, &w, dir),
+        || kill_phase1::<Redb>(arm, &w, dir),
+    );
+}
+
+fn child_kill2(arm: &str, dir: &Path) {
+    let result = dispatch(
+        arm,
+        || kill_phase2::<Felt>(arm, dir),
+        || kill_phase2::<Sqlite>(arm, dir),
+        || kill_phase2::<Redb>(arm, dir),
+    );
     println!("RESULT {result}");
 }
 
@@ -779,7 +851,7 @@ fn environment() -> Value {
         "mem_total": mem_total, "rustc": sh("rustc", &["-vV"]).lines().next().unwrap_or_default().to_string(),
         "glibc": sh("ldd", &["--version"]).lines().next().unwrap_or_default().to_string(),
         "profile": if cfg!(debug_assertions) { "debug" } else { "release (cargo bench)" },
-        "feltdb_rev": FELTDB_REV, "filesystem_for_journal": sh("df", &["-T", "--output=fstype", &std::env::temp_dir().to_string_lossy()]).lines().last().unwrap_or_default().to_string(),
+        "feltdb_rev": FELTDB_REV, "sqlite": "rusqlite 0.40.2 with bundled SQLite 3.53.2", "redb": "4.3.0", "build": "cargo bench (release profile)", "filesystem_for_journal": sh("df", &["-T", "--output=fstype", &std::env::temp_dir().to_string_lossy()]).lines().last().unwrap_or_default().to_string(),
     })
 }
 
@@ -792,12 +864,32 @@ fn main() {
             .cloned()
     };
     let quick = args.iter().any(|a| a == "--quick");
+    // Profiles. Stress is the original 10,000-observation workload. Normal is sized to Chip's
+    // bounded work runs: the CLI and service defaults are 12 turns and 8 executions, the ceiling
+    // is 50 of each, so one run at the ceiling observes on the order of 100 results (a turn's
+    // observation plus each execution's), drawn from the same payload mix.
+    let profile = get("--profile");
+    let profile_n = match profile.as_deref() {
+        Some("normal") => Some(100),
+        Some("stress") => Some(10_000),
+        Some(other) => panic!("unknown profile {other}: normal or stress"),
+        None => None,
+    };
     let n: usize = get("--observations")
         .and_then(|v| v.parse().ok())
+        .or(profile_n)
         .unwrap_or(if quick { 2000 } else { 10_000 });
     let seed: u64 = get("--seed")
         .and_then(|v| v.parse().ok())
         .unwrap_or(20260401);
+    if let Some(arm) = get("--kill1") {
+        child_kill1(&arm, n, seed, &PathBuf::from(get("--dir").expect("--dir")));
+        return;
+    }
+    if let Some(arm) = get("--kill2") {
+        child_kill2(&arm, &PathBuf::from(get("--dir").expect("--dir")));
+        return;
+    }
     if let Some(arm) = get("--child") {
         let dir = PathBuf::from(get("--dir").expect("--dir"));
         child(&arm, n, seed, &dir);
@@ -806,23 +898,43 @@ fn main() {
     let trials: usize = get("--trials")
         .and_then(|v| v.parse().ok())
         .unwrap_or(if quick { 3 } else { 5 });
-    let out_path = PathBuf::from(get("--out").unwrap_or_else(|| {
-        std::env::var("SESSION_MEMORY_BENCH_JSON").unwrap_or_else(|_| {
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../target/session-memory-bench.json"
-            )
-            .into()
-        })
-    }));
+    let arms_arg = get("--arms");
+    let arms: Vec<&'static str> = match &arms_arg {
+        Some(list) => list
+            .split(',')
+            .map(|a| {
+                *ALL_ARMS
+                    .iter()
+                    .find(|k| **k == a)
+                    .unwrap_or_else(|| panic!("unknown arm {a}"))
+            })
+            .collect(),
+        None => DEFAULT_ARMS.to_vec(),
+    };
+    let kill_recovery = args.iter().any(|a| a == "--kill-recovery");
+    let default_json = match &profile {
+        Some(p) => format!(
+            "{}/../../target/session-store-bench-{p}.json",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+        None => concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/session-memory-bench.json"
+        )
+        .into(),
+    };
+    let out_path = PathBuf::from(
+        get("--out")
+            .unwrap_or_else(|| std::env::var("SESSION_MEMORY_BENCH_JSON").unwrap_or(default_json)),
+    );
     let exe = std::env::current_exe().unwrap();
     let work =
         std::env::temp_dir().join(format!("chip-session-memory-bench-{}", std::process::id()));
     std::fs::create_dir_all(&work).unwrap();
 
-    let mut raw: BTreeMap<&str, Vec<Value>> = ARMS.iter().map(|a| (*a, Vec::new())).collect();
+    let mut raw: BTreeMap<&str, Vec<Value>> = arms.iter().map(|a| (*a, Vec::new())).collect();
     for trial in 0..trials {
-        for arm in ARMS {
+        for &arm in &arms {
             let dir = work.join(format!("{arm}-{trial}"));
             let started = Instant::now();
             let output = Command::new(&exe)
@@ -855,14 +967,44 @@ fn main() {
                 "  {arm:<20} trial {trial}: {:.1}s",
                 started.elapsed().as_secs_f64()
             );
-            raw.get_mut(arm).unwrap().push(v);
             let _ = std::fs::remove_dir_all(&dir);
+            if kill_recovery && DURABLE_ARMS.contains(&arm) {
+                // A fresh process ingests and is SIGKILLed; another fresh process recovers.
+                let kdir = work.join(format!("{arm}-kill-{trial}"));
+                let first = Command::new(&exe)
+                    .args(["--kill1", arm, "--observations", &n.to_string(), "--seed"])
+                    .args([&seed.to_string(), "--dir", &kdir.to_string_lossy()])
+                    .output()
+                    .expect("kill child runs");
+                assert!(
+                    !first.status.success(),
+                    "{arm}: the first process was meant to die"
+                );
+                let second = Command::new(&exe)
+                    .args(["--kill2", arm, "--dir", &kdir.to_string_lossy()])
+                    .output()
+                    .expect("recovery child runs");
+                if !second.status.success() {
+                    panic!(
+                        "{arm} trial {trial}: recovery after SIGKILL failed:\n{}",
+                        String::from_utf8_lossy(&second.stderr)
+                    );
+                }
+                let text = String::from_utf8_lossy(&second.stdout);
+                let line = text
+                    .lines()
+                    .find_map(|l| l.strip_prefix("RESULT "))
+                    .expect("RESULT");
+                v["recovery_after_kill"] = serde_json::from_str(line).unwrap();
+                let _ = std::fs::remove_dir_all(&kdir);
+            }
+            raw.get_mut(arm).unwrap().push(v);
         }
     }
     let _ = std::fs::remove_dir_all(&work);
 
     // Summaries and the cross-arm recovery check.
-    let mut arms = serde_json::Map::new();
+    let mut arm_docs = serde_json::Map::new();
     for (arm, trials_v) in &raw {
         let mut series: BTreeMap<String, Vec<f64>> = BTreeMap::new();
         for t in trials_v {
@@ -874,12 +1016,12 @@ fn main() {
         }
         let summary: serde_json::Map<String, Value> =
             series.iter().map(|(k, v)| (k.clone(), stats(v))).collect();
-        arms.insert(
+        arm_docs.insert(
             (*arm).into(),
             json!({"trials": trials_v, "summary": summary}),
         );
     }
-    let digests: Vec<Vec<String>> = ARMS
+    let digests: Vec<Vec<String>> = arms
         .iter()
         .map(|a| {
             raw[a]
@@ -894,14 +1036,22 @@ fn main() {
         })
         .collect();
     let equivalent = (0..trials).all(|t| digests.iter().all(|d| d[t] == digests[0][t]));
+    let kill_equivalent = (0..trials).all(|t| {
+        arms.iter().all(|a| {
+            raw[a][t]["recovery_after_kill"]["packet_sha256"].is_null()
+                || raw[a][t]["recovery_after_kill"]["packet_sha256"]
+                    == raw[a][t]["recovery"]["packet_sha256"]
+        })
+    });
     let doc = json!({
-        "schema": "chip.session-memory-bench.v1",
+        "schema": "chip.session-memory-bench.v2", "profile": profile,
         "units": {"rss_kib": "KiB", "hwm_kib": "KiB (peak RSS, monotonic)", "*_bytes": "bytes", "*_ms": "milliseconds", "*_us": "microseconds", "counts": "records"},
-        "configuration": {"observations": n, "trials": trials, "seed": seed, "arms": ARMS, "payload_size_distribution": "60% 1 KiB, 30% 8 KiB, 9% 32 KiB, 1% 128 KiB", "duplicate_rate": "about 30% repeat an earlier payload exactly", "feltdb_durability": "FeltDB default (Flushed): written to the OS before each call returns, fsync only at checkpoint"},
+        "configuration": {"observations": n, "trials": trials, "seed": seed, "arms": arms, "kill_recovery": kill_recovery, "payload_size_distribution": "60% 1 KiB, 30% 8 KiB, 9% 32 KiB, 1% 128 KiB", "duplicate_rate": "about 30% repeat an earlier payload exactly", "feltdb_durability": "FeltDB default (Flushed): written to the OS before each call returns, fsync only at checkpoint"},
         "method": "Each arm and trial in a fresh child process, trials interleaved across arms. Memory points are VmRSS/VmHWM from /proc/self/status and glibc mallinfo2 for the main arena (the workload runs on the main thread). 'and_trim' points follow an explicit malloc_trim(0). The recovery packet is a canonical JSON of the facts a recovery or escalation needs, hashed; the check is that every arm produced the same packet in every trial. Latencies are per workload event (write) and per operation (read).",
         "environment": environment(),
         "recovery_packets_equivalent_across_arms": equivalent,
-        "arms": arms,
+        "recovery_after_kill_matches_clean_recovery": kill_equivalent,
+        "arms": arm_docs,
     });
     if let Some(dir) = out_path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -960,13 +1110,13 @@ fn main() {
     ];
     println!("\nsession-memory benchmark: {n} observations, {trials} trials (medians)\n");
     print!("{:<38}", "");
-    for a in ARMS {
+    for a in &arms {
         print!("{a:>22}");
     }
     println!();
     for (label, key, div) in rows {
         print!("{label:<38}");
-        for a in ARMS {
+        for a in &arms {
             match med(a, key) {
                 Some(v) => print!("{:>22.1}", v / div),
                 None => print!("{:>22}", "n/a"),
@@ -975,5 +1125,6 @@ fn main() {
         println!();
     }
     println!("\nrecovery packets identical across arms and trials: {equivalent}");
+    println!("recovery after SIGKILL matches clean recovery: {kill_equivalent}");
     println!("wrote {}", out_path.display());
 }

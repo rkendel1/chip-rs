@@ -461,6 +461,56 @@ macro_rules! contract {
                 assert_eq!(std::fs::read(&path).unwrap(), bytes, "a refused open modifies nothing");
             }
 
+            /// Not a pass/fail comparison: a single flipped byte at five places in the store file,
+            /// classified as refused (the engine or the adapter noticed), changed (recovered but
+            /// the data differs from what was written, i.e. silent corruption) or unaffected.
+            /// The only hard assertion is that nothing panics. The counts go into the report.
+            #[test]
+            fn a_single_flipped_byte_is_classified_not_assumed() {
+                let (mut refused, mut changed, mut unaffected) = (0, 0, 0);
+                for pct in [10usize, 30, 50, 70, 90] {
+                    let root = tempfile::tempdir().unwrap();
+                    let mut m = rich_in::<B>(root.path(), "s");
+                    m.checkpoint("c1").unwrap();
+                    let rec = m.reconstruct().unwrap();
+                    let (_, want) = packet_and_hash(&m, &rec);
+                    let payloads: Vec<(String, Option<String>)> = m
+                        .observations()
+                        .unwrap()
+                        .into_iter()
+                        .map(|o| (o.id.clone(), m.payload(&o.id).unwrap()))
+                        .collect();
+                    m.close();
+                    drop(m);
+                    let path = dir_of(root.path(), "s").join(B::FILE);
+                    let mut bytes = std::fs::read(&path).unwrap();
+                    // If the engine left a WAL, the data may live there; flip in the main file
+                    // after a clean close, which is where a checkpointed engine keeps it.
+                    let at = bytes.len() * pct / 100;
+                    bytes[at] ^= 0x20;
+                    std::fs::write(&path, &bytes).unwrap();
+                    let outcome = match M::recover_with(root.path(), "s") {
+                        Err(_) => "refused",
+                        Ok((m, rec)) => {
+                            let same_packet = packet_and_hash(&m, &rec).1 == want;
+                            let same_payloads = payloads
+                                .iter()
+                                .all(|(id, p)| m.payload(id).ok().as_ref() == Some(p));
+                            if same_packet && same_payloads { "unaffected" } else { "changed" }
+                        }
+                    };
+                    match outcome {
+                        "refused" => refused += 1,
+                        "changed" => changed += 1,
+                        _ => unaffected += 1,
+                    }
+                }
+                println!(
+                    "BITFLIP backend={} refused={refused} changed={changed} unaffected={unaffected}",
+                    $label
+                );
+            }
+
             #[test]
             fn a_missing_session_is_refused() {
                 let root = tempfile::tempdir().unwrap();
