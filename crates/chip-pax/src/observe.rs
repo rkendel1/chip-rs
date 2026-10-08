@@ -1287,7 +1287,7 @@ impl CapabilityProvider for PaxObserve {
         let mut d = CapabilityDescriptor::new(
             CapabilityId::new(PROJECT_OBSERVE_CAPABILITY)?,
             "Observe project structure",
-            "Bounded project structure from PAX: source files, modules, declarations, tests, manifests. Facts only; not relevance. Needs a narrow scope.",
+            "Project structure via PAX. scope: crate:<pkg> | module:<pkg>/lib::crate[::<mod>] | file:<path>.rs | path:<dir>. Facts only, not relevance. Use narrow scopes.",
         )
         // Source changes between requests, so the structure is observed again every time.
         .without_evidence_reuse();
@@ -2153,6 +2153,33 @@ mod tests {
             .map(|i| (i.name.as_str(), i.required))
             .collect();
         assert_eq!(inputs, [("scope", true)]);
+    }
+
+    /// The model sees only the capability's description (an input's own description is not rendered
+    /// into the prompt), so the description must carry the scope grammar or the capability cannot be used.
+    #[tokio::test]
+    async fn the_description_a_model_sees_names_every_scope_form() {
+        let d = PaxObserve::new(PaxExecutor::new("/work"))
+            .capabilities()
+            .await
+            .unwrap();
+        let shown = &d[0].description;
+        for form in ["crate:", "module:", "file:", "path:"] {
+            assert!(
+                shown.contains(form),
+                "{form} is not in what the model is told: {shown}"
+            );
+        }
+        assert!(shown.chars().count() <= 160);
+        // And what it names parses: each example form it teaches is a form Chip accepts.
+        for example in [
+            "crate:fx",
+            "module:fx/lib::crate::util",
+            "file:src/lib.rs",
+            "path:src",
+        ] {
+            assert!(Scope::parse(example).is_ok(), "{example}");
+        }
     }
 
     #[test]
