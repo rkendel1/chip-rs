@@ -15,15 +15,13 @@
 //! to the same session, so every mutating method takes `&mut self` and a session is single-writer.
 //! Independent sessions are independent stores and may be used from different threads.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use feltdb::{FeltDb, FlowError};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
+use crate::backend::{Backend, Felt};
 use crate::error::{Result, SessionMemoryError as E};
 use crate::schema::*;
 
@@ -64,8 +62,9 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-pub struct SessionMemory {
-    pub(crate) db: Option<Arc<FeltDb>>,
+/// A session's working memory over storage candidate `B` (FeltDB unless stated).
+pub struct SessionMemory<B: Backend = Felt> {
+    pub(crate) backend: Option<B>,
     pub(crate) dir: PathBuf,
     pub(crate) session: String,
 }
@@ -111,17 +110,18 @@ pub struct Stats {
     pub journal_bytes: u64,
 }
 
-fn map_flow(stage: fn(String) -> E) -> impl Fn(FlowError) -> E {
-    move |e| stage(e.to_string())
-}
-
-impl SessionMemory {
-    // ------------------------------------------------------------------ lifecycle
-
-    /// Creates a new session store under `root/<session>/`. Refuses an existing session. If
-    /// anything fails after the directory was created, the directory is removed.
+impl SessionMemory<Felt> {
+    /// Creates a FeltDB-backed session; see [`create_with`](SessionMemory::create_with).
     pub fn create(root: &Path, session: &str, objective: &str) -> Result<Self> {
-        Self::create_inner(root, session, objective, false)
+        Self::create_with(root, session, objective)
+    }
+
+    /// Reopens a FeltDB-backed session from its journal and reconstructs it.
+    pub fn recover(
+        root: &Path,
+        session: &str,
+    ) -> Result<(Self, crate::recovery::RecoveredSession)> {
+        Self::recover_with(root, session)
     }
 
     /// Like [`create`](Self::create), but fails after the store is open and written, to exercise
@@ -129,6 +129,20 @@ impl SessionMemory {
     #[doc(hidden)]
     pub fn create_failing_after_open(root: &Path, session: &str, objective: &str) -> Result<Self> {
         Self::create_inner(root, session, objective, true)
+    }
+
+    pub fn journal_path(&self) -> PathBuf {
+        self.dir.join(Felt::FILE)
+    }
+}
+
+impl<B: Backend> SessionMemory<B> {
+    // ------------------------------------------------------------------ lifecycle
+
+    /// Creates a new session store under `root/<session>/`. Refuses an existing session. If
+    /// anything fails after the directory was created, the directory is removed.
+    pub fn create_with(root: &Path, session: &str, objective: &str) -> Result<Self> {
+        Self::create_inner(root, session, objective, false)
     }
 
     fn create_inner(
@@ -154,9 +168,12 @@ impl SessionMemory {
                 last_checkpoint: None,
                 compactions: 0,
             };
-            m.db()?
-                .insert_if_absent(&key(coll::SESSION, session, "meta"), &record)
-                .map_err(map_flow(E::Init))?;
+            // Creation is a barrier like a checkpoint: a session whose own record could be lost
+            // by a crash would not be recoverable at all.
+            let value = serde_json::to_value(&record).map_err(|e| E::Init(e.to_string()))?;
+            m.backend()?
+                .synced(&mut || m.backend()?.put(coll::SESSION, "meta", &value))
+                .map_err(|e| E::Init(e.to_string()))?;
             if fail_after_open {
                 return Err(E::Init(
                     "injected failure after the store was opened".into(),
@@ -175,9 +192,9 @@ impl SessionMemory {
     }
 
     pub(crate) fn open_in(dir: &Path, session: &str) -> Result<Self> {
-        let db = FeltDb::open(dir.join("session.felt")).map_err(map_flow(E::Init))?;
+        let backend = B::open(dir, session)?;
         Ok(Self {
-            db: Some(Arc::new(db)),
+            backend: Some(backend),
             dir: dir.to_path_buf(),
             session: session.into(),
         })
@@ -185,11 +202,11 @@ impl SessionMemory {
 
     /// Closes the store. Idempotent: returns whether this call did the closing.
     pub fn close(&mut self) -> bool {
-        self.db.take().is_some()
+        self.backend.take().is_some()
     }
 
     pub fn is_closed(&self) -> bool {
-        self.db.is_none()
+        self.backend.is_none()
     }
 
     /// Closes the store and deletes its files.
@@ -207,26 +224,17 @@ impl SessionMemory {
         &self.dir
     }
 
-    pub fn journal_path(&self) -> PathBuf {
-        self.dir.join("session.felt")
-    }
-
-    pub(crate) fn db(&self) -> Result<&Arc<FeltDb>> {
-        self.db.as_ref().ok_or(E::Closed)
+    /// The storage engine, for tests that need to damage or inspect persisted data directly.
+    #[doc(hidden)]
+    pub fn backend(&self) -> Result<&B> {
+        self.backend.as_ref().ok_or(E::Closed)
     }
 
     // ------------------------------------------------------------------ generic access
 
     pub(crate) fn put<T: Serialize>(&self, collection: &str, id: &str, value: &T) -> Result<()> {
-        let k = key(collection, &self.session, id);
-        let db = self.db()?;
-        let exists = db.get_value(&k).map_err(map_flow(E::Persist))?.is_some();
-        let r = if exists {
-            db.update(&k, value)
-        } else {
-            db.insert(&k, value)
-        };
-        r.map_err(map_flow(E::Persist))
+        let v = serde_json::to_value(value).map_err(|e| E::Persist(e.to_string()))?;
+        self.backend()?.put(collection, id, &v)
     }
 
     pub(crate) fn read<T: DeserializeOwned>(
@@ -234,14 +242,13 @@ impl SessionMemory {
         collection: &str,
         id: &str,
     ) -> Result<Option<T>> {
-        let k = key(collection, &self.session, id);
-        let Some(value) = self.db()?.get_value(&k).map_err(map_flow(E::Query))? else {
+        let Some(value) = self.backend()?.get(collection, id)? else {
             return Ok(None);
         };
         self.check_session(&value)?;
         serde_json::from_value(value)
             .map(Some)
-            .map_err(|e| E::Query(format!("{k}: {e}")))
+            .map_err(|e| E::Query(format!("{collection}:{id}: {e}")))
     }
 
     pub(crate) fn check_session(&self, value: &serde_json::Value) -> Result<()> {
@@ -256,42 +263,20 @@ impl SessionMemory {
     }
 
     pub(crate) fn exists(&self, collection: &str, id: &str) -> Result<bool> {
-        Ok(self
-            .db()?
-            .get_value(&key(collection, &self.session, id))
-            .map_err(map_flow(E::Query))?
-            .is_some())
+        Ok(self.backend()?.get(collection, id)?.is_some())
     }
 
-    /// Every record of a collection, in key order, paged. Foreign records are an error.
+    /// Every record of a collection, in id order. Foreign records are an error.
     pub(crate) fn list<T: DeserializeOwned>(&self, collection: &str) -> Result<Vec<T>> {
-        let db = self.db()?;
-        let prefix = format!("{collection}:{}:", self.session);
         let mut out = Vec::new();
-        let mut after: Option<String> = None;
-        loop {
-            let page = db
-                .list_collection_page(collection, after.as_deref(), 1000)
-                .map_err(map_flow(E::Query))?;
-            let Some(last) = page.last() else { break };
-            after = Some(last.key.clone());
-            for row in &page {
-                if !row.key.starts_with(&prefix) {
-                    return Err(E::ForeignRecord {
-                        expected: self.session.clone(),
-                        found: row.key.clone(),
-                    });
-                }
-                self.check_session(&row.value)?;
-                out.push(
-                    serde_json::from_value(row.value.clone())
-                        .map_err(|e| E::Query(format!("{}: {e}", row.key)))?,
-                );
-            }
-            if page.len() < 1000 {
-                break;
-            }
-        }
+        self.backend()?.scan(collection, &mut |id, value| {
+            self.check_session(value)?;
+            out.push(
+                serde_json::from_value(value.clone())
+                    .map_err(|e| E::Query(format!("{collection}:{id}: {e}")))?,
+            );
+            Ok(())
+        })?;
         Ok(out)
     }
 
@@ -386,9 +371,7 @@ impl SessionMemory {
                 self.put(coll::OBS, id, &o)?;
             }
         }
-        self.db()?
-            .delete(&key(collection, &self.session, id))
-            .map_err(map_flow(E::Persist))
+        self.backend()?.delete(collection, id)
     }
 
     // ------------------------------------------------------------------ attempts and observations
@@ -477,34 +460,21 @@ impl SessionMemory {
     /// Every stored payload's id and length, paged so that only a page of payloads is ever
     /// materialized at once.
     pub(crate) fn payload_index(&self) -> Result<Vec<(String, u64)>> {
-        let db = self.db()?;
         let mut out = Vec::new();
-        let mut after: Option<String> = None;
-        loop {
-            let page = db
-                .list_collection_page(coll::PAYLOAD, after.as_deref(), 256)
-                .map_err(map_flow(E::Query))?;
-            let Some(last) = page.last() else { break };
-            after = Some(last.key.clone());
-            for row in &page {
-                self.check_session(&row.value)?;
-                let id = row
-                    .value
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let len = row
-                    .value
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .map_or(0, str::len) as u64;
-                out.push((id, len));
-            }
-            if page.len() < 256 {
-                break;
-            }
-        }
+        self.backend()?.scan(coll::PAYLOAD, &mut |_, value| {
+            self.check_session(value)?;
+            let id = value
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let len = value
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map_or(0, str::len) as u64;
+            out.push((id, len));
+            Ok(())
+        })?;
         Ok(out)
     }
 
@@ -648,51 +618,36 @@ impl SessionMemory {
     // ------------------------------------------------------------------ statistics
 
     pub fn stats(&self) -> Result<Stats> {
-        let db = self.db()?;
-        let mut s = Stats::default();
-        for (name, n) in db.list_cardinalities().map_err(map_flow(E::Query))? {
-            s.live_rows.insert(name, n);
-        }
-        let prefix_ok = |c: &str| coll::ALL.contains(&c);
+        let backend = self.backend()?;
+        let mut s = Stats {
+            live_rows: backend.cardinalities()?,
+            ..Default::default()
+        };
         for c in coll::ALL {
             let mut count = 0u64;
-            let mut after: Option<String> = None;
-            loop {
-                let page = db
-                    .list_collection_page(c, after.as_deref(), 1000)
-                    .map_err(map_flow(E::Query))?;
-                let Some(last) = page.last() else { break };
-                after = Some(last.key.clone());
-                for row in &page {
-                    count += 1;
-                    debug_assert!(prefix_ok(&row.capability));
-                    if c == coll::PAYLOAD {
-                        s.payload_records += 1;
-                        s.payload_bytes += row
-                            .value
-                            .get("text")
-                            .and_then(|t| t.as_str())
-                            .map_or(0, str::len) as u64;
-                    } else {
-                        s.record_bytes += row.value.to_string().len() as u64;
-                    }
+            backend.scan(c, &mut |_, value| {
+                count += 1;
+                if c == coll::PAYLOAD {
+                    s.payload_records += 1;
+                    s.payload_bytes += value
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .map_or(0, str::len) as u64;
+                } else {
+                    s.record_bytes += value.to_string().len() as u64;
                 }
-                if page.len() < 1000 {
-                    break;
-                }
-            }
+                Ok(())
+            })?;
             if count > 0 {
                 s.records.insert(c.to_string(), count);
             }
         }
-        s.journal_bytes = std::fs::metadata(self.journal_path())
-            .map(|m| m.len())
-            .unwrap_or(0);
+        s.journal_bytes = backend.disk_bytes();
         Ok(s)
     }
 }
 
-impl SessionMemory {
+impl<B: Backend> SessionMemory<B> {
     /// Applies one workload event. `store_payload` says whether observation payloads are kept in
     /// the store (and so may later be purged) or dropped after their digest is taken.
     pub fn apply(&mut self, event: crate::workload::Event, store_payload: bool) -> Result<()> {

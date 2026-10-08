@@ -33,8 +33,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use feltdb::{AtomicMutation, FlowError, StateStore};
-
+use crate::backend::{Backend, Mutation};
 use crate::error::{CompactionPhase as P, Result, SessionMemoryError as E};
 use crate::schema::*;
 use crate::store::SessionMemory;
@@ -81,7 +80,7 @@ pub struct CompactionReport {
     pub elapsed: Duration,
 }
 
-impl SessionMemory {
+impl<B: Backend> SessionMemory<B> {
     fn pinned_observation_ids(&self) -> Result<BTreeSet<String>> {
         let mut pinned = BTreeSet::new();
         for t in self.test_results()? {
@@ -268,23 +267,16 @@ impl SessionMemory {
 
         // 4. Purge, in atomic batches. A batch deletes the payloads and marks their records.
         if !orphans.is_empty() {
-            let mutations: Vec<AtomicMutation> = orphans
+            let mutations: Vec<Mutation> = orphans
                 .iter()
-                .map(|id| AtomicMutation {
-                    capability: coll::PAYLOAD.into(),
-                    key: key(coll::PAYLOAD, self.session(), id),
-                    value: None,
+                .map(|id| Mutation::Delete {
+                    collection: coll::PAYLOAD,
+                    id: id.clone(),
                 })
                 .collect();
-            self.db()?
-                .apply_atomic_transaction(
-                    &format!("{}-c{number}-orphans", self.session()),
-                    None,
-                    &[],
-                    &mutations,
-                    None,
-                )
-                .map_err(|e: FlowError| E::Compaction {
+            self.backend()?
+                .batch(&format!("c{number}-orphans"), &mutations)
+                .map_err(|e| E::Compaction {
                     phase: P::Purge,
                     message: e.to_string(),
                 })?;
@@ -305,24 +297,22 @@ impl SessionMemory {
                 report.payload_bytes_purged += o.payload_len;
                 report.payloads_purged += 1;
                 o.payload_held = false;
-                mutations.push(AtomicMutation {
-                    capability: coll::PAYLOAD.into(),
-                    key: key(coll::PAYLOAD, self.session(), id),
-                    value: None,
+                mutations.push(Mutation::Delete {
+                    collection: coll::PAYLOAD,
+                    id: id.clone(),
                 });
-                mutations.push(AtomicMutation {
-                    capability: coll::OBS.into(),
-                    key: key(coll::OBS, self.session(), id),
-                    value: Some(serde_json::to_value(&o).map_err(|e| E::Compaction {
+                mutations.push(Mutation::Put {
+                    collection: coll::OBS,
+                    id: id.clone(),
+                    value: serde_json::to_value(&o).map_err(|e| E::Compaction {
                         phase: P::Purge,
                         message: e.to_string(),
-                    })?),
+                    })?,
                 });
             }
-            let tx = format!("{}-c{number}-{}", self.session(), chunk[0]);
-            self.db()?
-                .apply_atomic_transaction(&tx, None, &[], &mutations, None)
-                .map_err(|e: FlowError| E::Compaction {
+            self.backend()?
+                .batch(&format!("c{number}-{}", chunk[0]), &mutations)
+                .map_err(|e| E::Compaction {
                     phase: P::Purge,
                     message: e.to_string(),
                 })?;
@@ -406,43 +396,9 @@ impl SessionMemory {
         Ok(all.pop())
     }
 
-    /// Asks FeltDB to release what logical deletion left behind, by the public means it offers:
-    ///
-    /// 1. `StateStore::collect_unreachable` removes revision rows, which otherwise keep every
-    ///    deleted payload readable. This session holds no refs, so *all* revision history is
-    ///    collected, live records' included. Session memory has no use for revision history; a
-    ///    caller who did would have to hold refs.
-    /// 2. `acknowledge_peer_versions` for one nominal local peer, then `compact_operation_log`,
-    ///    prune the in-memory operation log and rewrite the journal as a snapshot. FeltDB prunes
-    ///    only what a configured peer has acknowledged and does nothing at all with no peers, so
-    ///    this repurposes its replication API; no replication happens.
-    ///
-    /// Neither returns memory to the operating system by itself.
+    /// Asks the engine to give back what logical deletion left behind, by the means it offers
+    /// (see each backend's `reclaim`). Does not return heap memory to the operating system.
     pub fn reclaim(&mut self) -> Result<ReclaimReport> {
-        let db = self.db()?.clone();
-        let journal = self.journal_path();
-        let size = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-        let mut report = ReclaimReport {
-            journal_before: size(&journal),
-            ..Default::default()
-        };
-        let store = StateStore::with_feltdb(db.clone()).map_err(|e| E::Persist(e))?;
-        report.revisions_collected = store
-            .collect_unreachable()
-            .map_err(|e| E::Persist(format!("revision collection: {e}")))?
-            .collected_revisions
-            .len();
-        let me = db.instance_id().map_err(|e| E::Persist(e.to_string()))?;
-        let seq = db.sequence().map_err(|e| E::Persist(e.to_string()))?;
-        let peer = "chip-session-memory".to_string();
-        db.add_sync_peer(peer.clone())
-            .map_err(|e| E::Persist(e.to_string()))?;
-        db.acknowledge_peer_versions(peer.clone(), std::collections::HashMap::from([(me, seq)]))
-            .map_err(|e| E::Persist(e.to_string()))?;
-        report.operations_pruned = db
-            .compact_operation_log(&[peer])
-            .map_err(|e| E::Persist(format!("log compaction: {e}")))?;
-        report.journal_after = size(&journal);
-        Ok(report)
+        self.backend.as_mut().ok_or(E::Closed)?.reclaim()
     }
 }

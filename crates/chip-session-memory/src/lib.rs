@@ -9,13 +9,16 @@
 //! execution identity stored here is an opaque string the caller supplied, and nothing here mints
 //! or derives one.
 
+pub mod backend;
 pub mod compaction;
 pub mod error;
+pub mod packet;
 pub mod recovery;
 pub mod schema;
 pub mod store;
 pub mod workload;
 
+pub use backend::{Backend, Felt, Mutation, Redb, Sqlite};
 pub use compaction::{CompactionReport, ReclaimReport};
 pub use error::{CompactionPhase, Result, SessionMemoryError};
 pub use recovery::RecoveredSession;

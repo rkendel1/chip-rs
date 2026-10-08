@@ -8,8 +8,7 @@
 
 use std::path::Path;
 
-use feltdb::DurabilityMode;
-
+use crate::backend::Backend;
 use crate::error::{Result, SessionMemoryError as E};
 use crate::schema::*;
 use crate::store::SessionMemory;
@@ -38,11 +37,11 @@ pub struct RecoveredSession {
     pub payloads_held: u64,
 }
 
-impl SessionMemory {
-    /// Writes a checkpoint behind a `Synced` barrier and records it on the session.
+impl<B: Backend> SessionMemory<B> {
+    /// Writes a checkpoint behind the engine's strongest durability barrier and records it on the
+    /// session.
     pub fn checkpoint(&mut self, id: &str) -> Result<CheckpointRecord> {
         valid_id(id)?;
-        let db = self.db().map_err(|_| E::Closed)?.clone();
         let mut refs = Vec::new();
         let mut add = |kind: &str, id: String| {
             refs.push(Reference {
@@ -74,33 +73,33 @@ impl SessionMemory {
         for o in self.observations()?.into_iter().filter(|o| o.pinned) {
             add(coll::OBS, o.id);
         }
+        let (sequence, state_digest) = self.backend()?.position()?;
         let record = CheckpointRecord {
             schema: SCHEMA_VERSION,
             session: self.session().into(),
             id: id.into(),
-            sequence: db.sequence().map_err(|e| E::Checkpoint(e.to_string()))?,
-            state_digest: db
-                .state_digest()
-                .map_err(|e| E::Checkpoint(e.to_string()))?,
+            sequence,
+            state_digest,
             refs,
         };
-        let previous = db.durability_mode();
-        db.set_durability_mode(DurabilityMode::Synced);
-        let written = self.put(coll::CKPT, id, &record).and_then(|_| {
-            let mut s = self.session_record()?;
-            s.last_checkpoint = Some(id.into());
-            self.put(coll::SESSION, "meta", &s)
-        });
-        db.set_durability_mode(previous);
-        written.map_err(|e| E::Checkpoint(e.to_string()))?;
+        let this = &*self;
+        this.backend()?
+            .synced(&mut || {
+                this.put(coll::CKPT, id, &record).and_then(|_| {
+                    let mut s = this.session_record()?;
+                    s.last_checkpoint = Some(id.into());
+                    this.put(coll::SESSION, "meta", &s)
+                })
+            })
+            .map_err(|e| E::Checkpoint(e.to_string()))?;
         Ok(record)
     }
 
-    /// Reopens a session from its journal and reconstructs it.
-    pub fn recover(root: &Path, session: &str) -> Result<(Self, RecoveredSession)> {
+    /// Reopens a session from its persisted files and reconstructs it.
+    pub fn recover_with(root: &Path, session: &str) -> Result<(Self, RecoveredSession)> {
         valid_id(session)?;
         let dir = root.join(session);
-        if !dir.join("session.felt").exists() {
+        if !dir.join(B::FILE).exists() {
             return Err(E::Recovery(format!(
                 "no persisted session {session} under {}",
                 root.display()

@@ -14,6 +14,10 @@ feltdb = { git = "https://github.com/rkendel1/flow_db", rev = "9f2354e89743bf1bd
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Comparison candidates (see docs/product/session-store-comparison.md). Experiment-only: no product
+# crate depends on this crate, so none of these reaches Chip's runtime.
+rusqlite = { version = "0.37", features = ["bundled"] }
+redb = "3"
 
 [dev-dependencies]
 tempfile = "3"

@@ -38,7 +38,12 @@ pub fn r(kind: &str, id: &str) -> Reference {
 /// pending decision, and a checkpoint. The last test of command `integration` is an unresolved
 /// failure whose diagnostic is the only payload recovery still needs.
 pub fn rich(root: &Path, id: &str) -> SessionMemory {
-    let mut m = SessionMemory::create(
+    rich_in::<Felt>(root, id)
+}
+
+/// The same session over any storage candidate.
+pub fn rich_in<B: Backend>(root: &Path, id: &str) -> SessionMemory<B> {
+    let mut m = SessionMemory::<B>::create_with(
         root,
         id,
         "make the integration tests pass without weakening any test",
