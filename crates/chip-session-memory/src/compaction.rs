@@ -153,16 +153,16 @@ impl SessionMemory {
             held.values().copied().filter(|o| o.pinned).collect();
 
         let claimed: BTreeSet<&str> = held.keys().copied().collect();
-        let all_payloads: Vec<PayloadRecord> = self.list(coll::PAYLOAD).map_err(fail(P::Select))?;
+        let all_payloads = self.payload_index().map_err(fail(P::Select))?;
         let orphans: Vec<String> = all_payloads
             .iter()
-            .filter(|p| !claimed.contains(p.id.as_str()))
-            .map(|p| p.id.clone())
+            .filter(|(id, _)| !claimed.contains(id.as_str()))
+            .map(|(id, _)| id.clone())
             .collect();
         let orphan_bytes: u64 = all_payloads
             .iter()
-            .filter(|p| !claimed.contains(p.id.as_str()))
-            .map(|p| p.text.len() as u64)
+            .filter(|(id, _)| !claimed.contains(id.as_str()))
+            .map(|(_, len)| *len)
             .sum();
 
         let mut report = CompactionReport {

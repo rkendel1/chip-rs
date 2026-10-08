@@ -31,6 +31,8 @@ pub enum Event {
         provenance: String,
         summary: String,
         payload: String,
+        /// The earlier observation whose request this one repeats, if any.
+        repeats: Option<String>,
     },
     Supersede {
         old: String,
@@ -181,6 +183,7 @@ impl Workload {
             provenance: format!("exec:{:x}-{i}", self.seed),
             summary: format!("{kind} #{i}: {} bytes", payload.len()),
             payload,
+            repeats: dup.map(id),
         });
         if let Some(j) = dup {
             out.push(Event::Supersede {
@@ -282,6 +285,7 @@ impl Workload {
                 provenance: format!("exec:{:x}-final", self.seed),
                 summary: "integration run failed: route_inherits".into(),
                 payload,
+                repeats: None,
             },
             Event::TestResult {
                 id: "t-final".into(),

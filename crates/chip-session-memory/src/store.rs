@@ -474,6 +474,40 @@ impl SessionMemory {
             .map(|p| p.text))
     }
 
+    /// Every stored payload's id and length, paged so that only a page of payloads is ever
+    /// materialized at once.
+    pub(crate) fn payload_index(&self) -> Result<Vec<(String, u64)>> {
+        let db = self.db()?;
+        let mut out = Vec::new();
+        let mut after: Option<String> = None;
+        loop {
+            let page = db
+                .list_collection_page(coll::PAYLOAD, after.as_deref(), 256)
+                .map_err(map_flow(E::Query))?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.key.clone());
+            for row in &page {
+                self.check_session(&row.value)?;
+                let id = row
+                    .value
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let len = row
+                    .value
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .map_or(0, str::len) as u64;
+                out.push((id, len));
+            }
+            if page.len() < 256 {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     pub fn observations(&self) -> Result<Vec<ObservationRecord>> {
         self.list(coll::OBS)
     }
@@ -672,6 +706,7 @@ impl SessionMemory {
                 provenance,
                 summary,
                 payload,
+                ..
             } => self.record_observation(
                 NewObservation {
                     id,

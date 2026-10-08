@@ -17,3 +17,10 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+# The benchmark's baseline arm uses Chip's real observation types and context-deduplication
+# function. A dev-dependency only: it is not part of this crate's normal dependency graph.
+chip-core = { path = "../chip-core" }
+
+[[bench]]
+name = "session_memory"
+harness = false

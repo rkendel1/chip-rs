@@ -450,6 +450,7 @@ dependencies = [
 name = "chip-session-memory"
 version = "0.0.1"
 dependencies = [
+ "chip-core",
  "feltdb",
  "serde",
  "serde_json",
