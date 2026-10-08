@@ -734,6 +734,7 @@ async fn parts(report: &mut Report, opts: &Opts) {
             ruled_out: &[],
             evidence: &[],
             question: "Decide the next step.",
+            frontier: &chip_core::DecisionFrontier::default(),
         };
         let mut d = Vec::with_capacity(n.min(500));
         for _ in 0..n.min(500) {

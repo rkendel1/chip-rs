@@ -293,6 +293,9 @@ pub struct EscalationContext {
     /// Observations left out of this request because a later, identical observation is in it. Each
     /// entry is a fact Chip established; nothing here is a summary of what an observation said.
     pub omitted: Vec<String>,
+    /// The Decision Frontier as the model is shown it, one line each; empty unless the policy shows it.
+    /// Read-only context: nothing in it, or in a reply to it, changes the frontier.
+    pub frontier: Vec<String>,
     pub question: String,
 }
 
@@ -337,6 +340,13 @@ impl EscalationContext {
             out.push_str("Omitted (identical to a later observation):\n");
             for item in &self.omitted {
                 out.push_str(&format!("  - {item}\n"));
+            }
+        }
+        if !self.frontier.is_empty() {
+            out.push_str("Decision frontier:\n");
+            for line in &self.frontier {
+                out.push_str(line);
+                out.push('\n');
             }
         }
         out.push_str(&format!("Question: {}", self.question));
@@ -390,6 +400,9 @@ pub struct WorkTrajectory<'a> {
     pub evidence: &'a [String],
     /// The boundary's question, which states the reply contract.
     pub question: &'a str,
+    /// What the work has left unresolved, as the runtime holds it. A policy may show it; it cannot
+    /// change it.
+    pub frontier: &'a DecisionFrontier,
 }
 
 /// Chooses what one model escalation is told. Chip's opinion about relevance lives here, not in
@@ -448,6 +461,7 @@ impl EscalationContextPolicy for FullEscalationContext {
                 .collect(),
             ruled_out: trajectory.ruled_out.to_vec(),
             omitted: Vec::new(),
+            frontier: Vec::new(),
             question: trajectory.question.to_string(),
         }
     }
@@ -539,6 +553,33 @@ pub fn omissions(
                 .map(|j| (i, j))
         })
         .collect()
+}
+
+/// [`DeduplicatedEscalationContext`] plus the Decision Frontier, shown read-only. The one difference
+/// is the `Decision frontier:` section; everything else, byte for byte, is what the deduplicated policy
+/// sends. It exists to test whether showing the model what is unresolved improves its decisions
+/// (`docs/product/frontier-model-evaluation.md`); it is not the default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FrontierEscalationContext;
+
+impl FrontierEscalationContext {
+    pub const ID: &'static str = "frontier-v1";
+}
+
+impl EscalationContextPolicy for FrontierEscalationContext {
+    fn id(&self) -> &'static str {
+        Self::ID
+    }
+
+    fn build(&self, state: &WorkState<'_>, trajectory: &WorkTrajectory<'_>) -> EscalationContext {
+        let mut context = DeduplicatedEscalationContext.build(state, trajectory);
+        context.frontier = crate::frontier::context_lines(
+            trajectory.frontier,
+            trajectory.observations,
+            trajectory.origins,
+        );
+        context
+    }
 }
 
 /// Like [`FullEscalationContext`], except that an observation a capability's contract allows to be
@@ -1696,6 +1737,7 @@ impl<'a> Run<'a> {
     }
 
     fn context(&self, turn: usize, evidence: &[String], question: &str) -> EscalationContext {
+        let frontier = self.frontier.snapshot();
         self.context_policy.build(
             &WorkState {
                 goal: self.spec.goal.as_str(),
@@ -1711,6 +1753,7 @@ impl<'a> Run<'a> {
                 ruled_out: &self.ruled_out,
                 evidence,
                 question,
+                frontier: &frontier,
             },
         )
     }

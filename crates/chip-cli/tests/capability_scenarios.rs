@@ -1630,6 +1630,295 @@ async fn s10_inspect_is_grounded_without_being_verified_and_its_frontier_follows
     assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
 }
 
+// ---- the frontier as model context: same decisions, same authority, one section more ---------------------
+//
+// A scripted model gives the same decisions in both arms, so these show what the arm can and cannot
+// change: nothing about what the runtime does, accounts, verifies or audits; only what the model is told.
+// (Whether a *real* model decides differently is measured by `scripts/bench-frontier.py`.)
+
+async fn run_arm(
+    dir: &Path,
+    kind: GoalKind,
+    policy: Option<&dyn LocalWorkPolicy>,
+    replies: Vec<String>,
+    frontier: bool,
+) -> (SoftwareWork, Arc<Script>) {
+    let env = environment(dir, false);
+    let model = Script::new(replies);
+    let context: &dyn chip_core::EscalationContextPolicy = if frontier {
+        &chip_core::FrontierEscalationContext
+    } else {
+        &chip_core::DeduplicatedEscalationContext
+    };
+    let work = chip_cli::software_work::run_software_work_kind_with_context(
+        kind,
+        WorkId::new("scenario"),
+        model.clone(),
+        "scripted".into(),
+        &env,
+        match kind {
+            GoalKind::Change => GOAL,
+            GoalKind::Verify => "Determine whether the project currently passes its tests.",
+            GoalKind::Inspect => "Find where `len` is defined and report it.",
+        },
+        LIMITS,
+        policy.unwrap_or_else(|| kind.policy()),
+        None,
+        context,
+    )
+    .await;
+    (work, model)
+}
+
+fn minus_frontier(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for l in text.lines() {
+        if l == "Decision frontier:" {
+            inside = true;
+            continue;
+        }
+        if inside && l.starts_with("Question:") {
+            inside = false;
+        }
+        if !inside {
+            out.push(l);
+        }
+    }
+    out.join("\n")
+}
+
+/// What the model was sent, without the part PAX labels diagnostics-only (its stderr: the project's
+/// directory name, thread ids and timings differ between any two runs and are never evaluated).
+fn stable(text: &str) -> String {
+    text.lines()
+        .map(|l| match l.find("--- stderr (diagnostics only") {
+            Some(at) => &l[..at],
+            None => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+struct Case {
+    name: &'static str,
+    kind: GoalKind,
+    no_local: bool,
+    replies: Vec<String>,
+}
+
+fn cases() -> Vec<Case> {
+    let change = |name, replies| Case {
+        name,
+        kind: GoalKind::Change,
+        no_local: false,
+        replies,
+    };
+    vec![
+        change(
+            "1 many observations, then verified",
+            vec![
+                list("."),
+                read("src/lib.rs"),
+                read("tests/t.rs"),
+                write("src/lib.rs", RIGHT),
+                pax_test(),
+            ],
+        ),
+        change(
+            "2 intermediate steps, goal unmet",
+            vec![
+                search("canonical"),
+                read("src/lib.rs"),
+                read("tests/t.rs"),
+                block("stop"),
+            ],
+        ),
+        change(
+            "3 change then verification",
+            vec![write("src/lib.rs", RIGHT), pax_test()],
+        ),
+        change(
+            "4 verification failure",
+            vec![
+                read("src/lib.rs"),
+                write("src/lib.rs", WRONG),
+                pax_test(),
+                block("stop"),
+            ],
+        ),
+        change(
+            "5 execution failure, then recovery",
+            vec![
+                read("src/main.rs"),
+                read("tests/t.rs"),
+                write("src/lib.rs", RIGHT),
+                pax_test(),
+            ],
+        ),
+        change(
+            "6 recovery after failed verification",
+            vec![
+                read("src/lib.rs"),
+                write("src/lib.rs", WRONG),
+                pax_test(),
+                write("src/lib.rs", RIGHT),
+                pax_test(),
+            ],
+        ),
+        change(
+            "7 capability unavailable",
+            vec![request("shell.run", r#"{"command":"ls"}"#)],
+        ),
+        Case {
+            name: "8 invalidated by a later change",
+            kind: GoalKind::Change,
+            no_local: true,
+            replies: vec![
+                read("src/lib.rs"),
+                write("src/lib.rs", RIGHT),
+                pax_test(),
+                write("src/lib.rs", WRONG),
+                pax_test(),
+                block("stop"),
+            ],
+        },
+        change(
+            "9 identical repeat",
+            vec![read("src/lib.rs"), read("src/lib.rs"), block("stop")],
+        ),
+        Case {
+            name: "10 inspect, grounded not verified",
+            kind: GoalKind::Inspect,
+            no_local: false,
+            replies: vec![
+                list("."),
+                read("src/lib.rs"),
+                complete("`len` is declared in src/lib.rs."),
+            ],
+        },
+    ]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_frontier_in_the_model_context_changes_what_it_is_told_and_nothing_the_runtime_does() {
+    let probe = project("arm-probe", FAILING_TEST);
+    if !pax_available(&probe) {
+        return;
+    }
+    let (mut added_bytes, mut calls_total) = (0usize, 0usize);
+    for case in cases() {
+        let policy: Option<&dyn LocalWorkPolicy> = if case.no_local {
+            Some(&NoLocalPolicy)
+        } else {
+            None
+        };
+        let ctl_dir = project(&format!("arm-ctl-{}", &case.name[..2].trim()), FAILING_TEST);
+        let trt_dir = project(&format!("arm-trt-{}", &case.name[..2].trim()), FAILING_TEST);
+        let (c, cm) = run_arm(&ctl_dir, case.kind, policy, case.replies.clone(), false).await;
+        let (t, tm) = run_arm(&trt_dir, case.kind, policy, case.replies.clone(), true).await;
+
+        // The runtime did the same thing and accounts it the same way.
+        let tag = |w: &SoftwareWork| std::mem::discriminant(&w.report.outcome);
+        assert_eq!(tag(&c), tag(&t), "{}: the terminal state", case.name);
+        assert_eq!(
+            (c.verified, c.grounded, c.goal_satisfied, c.exit_status()),
+            (t.verified, t.grounded, t.goal_satisfied, t.exit_status()),
+            "{}: goal, verification, grounding, exit",
+            case.name
+        );
+        let key = |w: &SoftwareWork| -> [usize; 13] {
+            let u = &w.utility;
+            [
+                u.model_calls,
+                u.executions,
+                u.wrong_valid_decisions,
+                u.supporting_decisions,
+                u.failed_observations,
+                u.recoveries,
+                u.recovery_executions,
+                u.frontier_opened,
+                u.frontier_resolved,
+                u.frontier_invalidated,
+                u.frontier_remaining,
+                u.frontier_progress_events,
+                u.verified_outputs,
+            ]
+        };
+        assert_eq!(key(&c), key(&t), "{}: accounting", case.name);
+        assert_eq!(
+            c.useful_work_per_model_call(),
+            t.useful_work_per_model_call(),
+            "{}",
+            case.name
+        );
+        assert_eq!(
+            snapshot(&ctl_dir),
+            snapshot(&trt_dir),
+            "{}: the project",
+            case.name
+        );
+        c.audit.assert_clean();
+        t.audit.assert_clean();
+
+        // The only difference is what the model was told: the frontier section, and only it.
+        assert_eq!(cm.calls(), tm.calls(), "{}", case.name);
+        for n in 0..cm.calls() {
+            let (a, b) = (
+                stable(&cm.request(n)),
+                stable(&minus_frontier(&tm.request(n))),
+            );
+            if a != b {
+                let at = a
+                    .bytes()
+                    .zip(b.bytes())
+                    .position(|(x, y)| x != y)
+                    .unwrap_or(a.len().min(b.len()));
+                let from = at.saturating_sub(80);
+                panic!(
+                    "{}: call {n} differs at byte {at}:\n  control:   {:?}\n  treatment: {:?}",
+                    case.name,
+                    &a[from..(at + 120).min(a.len())],
+                    &b[from..(at + 120).min(b.len())]
+                );
+            }
+            assert!(
+                tm.request(n).contains("Decision frontier:"),
+                "{}: call {n}",
+                case.name
+            );
+            assert!(
+                !cm.request(n).contains("Decision frontier"),
+                "{}: call {n}",
+                case.name
+            );
+        }
+        let (cb, tb): (Vec<usize>, Vec<usize>) = (
+            c.context.calls.iter().map(|k| k.request_bytes).collect(),
+            t.context.calls.iter().map(|k| k.request_bytes).collect(),
+        );
+        let added: usize = tb.iter().zip(&cb).map(|(t, c)| t - c).sum();
+        added_bytes += added;
+        calls_total += cb.len();
+        eprintln!(
+            "ARM-ROW | {} | calls={} | control_bytes={} treatment_bytes={} added={} ({:.1}%) | verified={} wrong={} recovery_execs={}",
+            case.name,
+            cb.len(),
+            cb.iter().sum::<usize>(),
+            tb.iter().sum::<usize>(),
+            added,
+            100.0 * added as f64 / cb.iter().sum::<usize>().max(1) as f64,
+            t.verified,
+            t.utility.wrong_valid_decisions,
+            t.utility.recovery_executions,
+        );
+    }
+    eprintln!(
+        "ARM-TOTAL | model calls {calls_total} | added request bytes {added_bytes} | per call {}",
+        added_bytes / calls_total.max(1)
+    );
+}
+
 /// Verify: the runtime completes the work itself when PAX passes an unchanged project. The model
 /// makes one call and never claims completion.
 #[tokio::test(flavor = "multi_thread")]

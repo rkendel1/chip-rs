@@ -519,6 +519,7 @@ async fn the_request_sent_through_fx_is_exactly_the_measured_escalation_context(
         prior_decisions: vec![],
         ruled_out: vec![],
         omitted: vec![],
+        frontier: vec![],
         question: ModelDecisionBoundary.question(&caps),
     };
     assert_eq!(sent.messages[0].content, expected.render());

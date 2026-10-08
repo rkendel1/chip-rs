@@ -353,9 +353,104 @@ impl FrontierTracker {
         changes
     }
 
+    /// A copy of the frontier as it stands, for a policy to read. The tracker keeps the original.
+    pub(crate) fn snapshot(&self) -> DecisionFrontier {
+        DecisionFrontier {
+            items: self.tracked.iter().map(|t| t.item.clone()).collect(),
+        }
+    }
+
     pub(crate) fn into_frontier(self) -> DecisionFrontier {
         DecisionFrontier {
             items: self.tracked.into_iter().map(|t| t.item).collect(),
         }
     }
+}
+
+/// How many of each list a model-facing rendering shows. What does not fit is counted, never dropped
+/// silently, so the rendering never claims more or less than the frontier holds.
+const SHOW_OPEN: usize = 8;
+const SHOW_ANSWERED: usize = 6;
+const SHOW_SUPERSEDED: usize = 4;
+
+/// The frontier as one escalation shows it to the model: read-only, compact, deterministic.
+///
+/// It says which questions are open, which were answered and by which capability, and which answers no
+/// longer hold. It never says an item is answered unless the runtime resolved it from recorded evidence,
+/// and it carries no execution identifier beyond a failure question's own text. Empty when the work has
+/// no frontier, so ordinary work renders exactly as it did before.
+pub(crate) fn context_lines(
+    frontier: &DecisionFrontier,
+    observations: &[Observation],
+    origins: &[crate::ObservationOrigin],
+) -> Vec<String> {
+    if frontier.items().is_empty() {
+        return Vec::new();
+    }
+    // The capability whose execution moved an item: the one name in the evidence that means something
+    // to the model.
+    let via = |resolution: &Option<FrontierResolution>| -> String {
+        resolution
+            .as_ref()
+            .and_then(|r| {
+                observations
+                    .iter()
+                    .position(|o| o.execution_id == r.evidence)
+                    .and_then(|i| origins.get(i))
+            })
+            .map(|o| o.capability.to_string())
+            .unwrap_or_else(|| "recorded evidence".to_string())
+    };
+    let of = |status: FrontierStatus| -> Vec<&FrontierItem> {
+        frontier
+            .items()
+            .iter()
+            .filter(|i| i.status == status)
+            .collect()
+    };
+    let (open, answered, superseded) = (
+        of(FrontierStatus::Open),
+        of(FrontierStatus::Resolved),
+        of(FrontierStatus::Invalidated),
+    );
+    let mut lines =
+        vec!["  (kept by Chip from recorded evidence; you cannot change it)".to_string()];
+    let mut section = |title: &str,
+                       items: &[&FrontierItem],
+                       show: usize,
+                       latest: bool,
+                       note: &dyn Fn(&FrontierItem) -> String| {
+        if items.is_empty() {
+            return;
+        }
+        lines.push(format!("  {title}:"));
+        let skipped = items.len().saturating_sub(show);
+        let shown: &[&FrontierItem] = if latest {
+            &items[skipped..]
+        } else {
+            &items[..items.len().min(show)]
+        };
+        if latest && skipped > 0 {
+            lines.push(format!("  - ({skipped} earlier not shown)"));
+        }
+        for item in shown {
+            lines.push(format!("  - {}: {}{}", item.id, item.question, note(item)));
+        }
+        if !latest && skipped > 0 {
+            lines.push(format!("  - ({skipped} more open)"));
+        }
+    };
+    section("OPEN", &open, SHOW_OPEN, false, &|_| String::new());
+    section("ANSWERED", &answered, SHOW_ANSWERED, true, &|i| {
+        format!(" (by {})", via(&i.resolution))
+    });
+    section(
+        "NO LONGER HOLDS",
+        &superseded,
+        SHOW_SUPERSEDED,
+        true,
+        &|i| format!(" (superseded after {})", via(&i.resolution)),
+    );
+    lines.push("  An open question is not answered; do not assume it is.".to_string());
+    lines
 }

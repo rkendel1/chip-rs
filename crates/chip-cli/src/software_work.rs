@@ -21,10 +21,11 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, AnswerPredicate, CapabilityId, ContextReport, DeduplicatedEscalationContext,
-    EnvironmentDescription, Environments, ExecutionObserver, FrontierItemSpec, FrontierKind,
-    LocalWorkPolicy, ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant,
-    ObservationPredicate, SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId,
-    WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
+    EnvironmentDescription, Environments, EscalationContextPolicy, ExecutionObserver,
+    FrontierEscalationContext, FrontierItemSpec, FrontierKind, LocalWorkPolicy,
+    ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant, ObservationPredicate,
+    SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits,
+    WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
     context_report, measure_utility, verify_trajectory,
 };
 #[cfg(test)]
@@ -471,6 +472,19 @@ pub fn spec(
     spec_for(GoalKind::Change, id, goal, invariants, limits)
 }
 
+/// The environment variable that shows a work's model the Decision Frontier.
+pub const FRONTIER_CONTEXT_ENV: &str = "CHIP_FRONTIER_CONTEXT";
+
+/// Whether the model is shown the frontier: off unless the variable is exactly `true`. Anything other
+/// than `true` or `false` is a configuration error, never a guess.
+pub fn frontier_context_from_env(get: impl Fn(&str) -> Option<String>) -> Result<bool, String> {
+    match get(FRONTIER_CONTEXT_ENV).as_deref().map(str::trim) {
+        None | Some("") | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => Err(format!("{FRONTIER_CONTEXT_ENV} must be `true` or `false`")),
+    }
+}
+
 /// Work of the given kind over one project.
 pub fn spec_for(
     kind: GoalKind,
@@ -721,6 +735,37 @@ pub async fn run_software_work_kind(
     policy: &dyn LocalWorkPolicy,
     context_budget_bytes: Option<usize>,
 ) -> SoftwareWork {
+    run_software_work_kind_with_context(
+        kind,
+        id,
+        model,
+        model_name,
+        environment,
+        goal,
+        limits,
+        policy,
+        context_budget_bytes,
+        &DeduplicatedEscalationContext,
+    )
+    .await
+}
+
+/// [`run_software_work_kind`] with the context policy chosen: what each model escalation is told. The
+/// default is [`DeduplicatedEscalationContext`]; [`FrontierEscalationContext`] adds the Decision Frontier
+/// as read-only context and nothing else.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_software_work_kind_with_context(
+    kind: GoalKind,
+    id: WorkId,
+    model: Arc<dyn ModelProvider>,
+    model_name: String,
+    environment: &dyn WorkEnvironment,
+    goal: &str,
+    limits: WorkLimits,
+    policy: &dyn LocalWorkPolicy,
+    context_budget_bytes: Option<usize>,
+    context_policy: &dyn EscalationContextPolicy,
+) -> SoftwareWork {
     let set = environment.capabilities();
     let agent = Agent::with_model(model, model_name)
         .with_capabilities(set.clone())
@@ -732,12 +777,7 @@ pub async fn run_software_work_kind(
         spec = spec.with_context_budget_bytes(bytes);
     }
     let report = agent
-        .run_work_with_context_policy(
-            &spec,
-            policy,
-            &ModelDecisionBoundary,
-            &DeduplicatedEscalationContext,
-        )
+        .run_work_with_context_policy(&spec, policy, &ModelDecisionBoundary, context_policy)
         .await;
     let context = context_report(&report, &spec);
     let audit = audit_safety(&report, &spec, &declared());
@@ -1180,6 +1220,9 @@ pub struct WorkRuntime {
     model_name: String,
     pub identity: Identity,
     context_budget: Option<usize>,
+    /// Show the model the Decision Frontier as read-only context. Off unless asked for: it is an
+    /// experiment (`docs/product/frontier-model-evaluation.md`), not the default model input.
+    frontier_context: bool,
 }
 
 impl WorkRuntime {
@@ -1188,6 +1231,8 @@ impl WorkRuntime {
         selection: &crate::provider_selection::Selection,
         context_budget: Option<usize>,
     ) -> Result<Self, String> {
+        let frontier_context = frontier_context_from_env(|n| std::env::var(n).ok())
+            .map_err(|why| format!("{why}; nothing was run"))?;
         let config = crate::provider_selection::resolve(selection, |name| std::env::var(name).ok())
             .map_err(|e| format!("no model is selected ({e}); nothing was run"))?;
         // Every reply must be one JSON object: ask the endpoint for that in the request. The reply
@@ -1206,7 +1251,15 @@ impl WorkRuntime {
             model_name,
             identity,
             context_budget,
+            frontier_context,
         })
+    }
+
+    /// Shows (or stops showing) the model the Decision Frontier. For evaluations and tests; production
+    /// selection is the `CHIP_FRONTIER_CONTEXT` variable.
+    pub fn with_frontier_context(mut self, shown: bool) -> Self {
+        self.frontier_context = shown;
+        self
     }
 
     /// A runtime over an already-chosen model. Tests only.
@@ -1221,6 +1274,7 @@ impl WorkRuntime {
                 endpoint: "none".into(),
             },
             context_budget: None,
+            frontier_context: false,
         }
     }
 
@@ -1247,7 +1301,7 @@ impl WorkRuntime {
             inner: Shared(inner),
             replies: replies.clone(),
         });
-        let mut result = run_software_work_kind(
+        let mut result = run_software_work_kind_with_context(
             kind,
             id,
             model,
@@ -1257,6 +1311,11 @@ impl WorkRuntime {
             limits,
             kind.policy(),
             self.context_budget,
+            if self.frontier_context {
+                &FrontierEscalationContext
+            } else {
+                &DeduplicatedEscalationContext
+            },
         )
         .await;
         result.identity = Some(self.identity.clone());
