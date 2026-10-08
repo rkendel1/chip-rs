@@ -18,6 +18,8 @@ sha2 = "0.10"
 # crate depends on this crate, so none of these reaches Chip's runtime.
 rusqlite = { version = "0.40", features = ["bundled"] }
 redb = "4"
+# Journal candidate: framing, CRCs, torn-tail handling and checkpoint files. Raw-bytes API only.
+durability = { version = "0.7", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

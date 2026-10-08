@@ -18,7 +18,7 @@ pub mod schema;
 pub mod store;
 pub mod workload;
 
-pub use backend::{Backend, Felt, Mutation, Redb, Sqlite};
+pub use backend::{Backend, Felt, Journal, Mutation, Redb, Sqlite};
 pub use compaction::{CompactionReport, ReclaimReport};
 pub use error::{CompactionPhase, Result, SessionMemoryError};
 pub use recovery::RecoveredSession;

@@ -32,10 +32,12 @@ pub(crate) fn sync_every_write() -> bool {
 }
 
 pub mod felt;
+pub mod journal;
 pub mod redb_store;
 pub mod sqlite;
 
 pub use felt::Felt;
+pub use journal::Journal;
 pub use redb_store::Redb;
 pub use sqlite::Sqlite;
 
