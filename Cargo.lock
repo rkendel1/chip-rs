@@ -413,7 +413,6 @@ dependencies = [
  "chip-pax",
  "chip-project",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

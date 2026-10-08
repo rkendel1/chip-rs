@@ -70,6 +70,15 @@ scripts/smoke-test.sh dist/chip-*.tar.gz        # extract it, chip --version, ch
 scripts/audit-dependencies.sh                   # Rust Chip -> Rust FX; no environment provider
 ```
 
+## Product boundary and crate inventory
+
+Not every crate in this workspace is product. [`docs/product/crates.md`](docs/product/crates.md) is the
+canonical inventory: what Rust Chip is and does not own, how it divides responsibility with Rust FX,
+Compute, PAX, AppPort, FeltDB and Attn, and for every crate its classification (product,
+integration, experiment, proof), validation level (L0 to L5), and what is still unproven. The
+`chip work` / `chip serve` / `chip verify` path is the product; the graph, decision-model, Wasm and
+local-model crates are experiments. A test keeps that document in step with the workspace.
+
 ## Workspace
 
 - `crates/fx-core`, `crates/fx-provider-http`: **Rust FX**, the provider-neutral model boundary and its HTTP provider
@@ -166,6 +175,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
 | `project.search` | `query`, `path` (optional) | literal, case-sensitive substring search: `path:line: text` rows; at most 500 files examined (each at most 256 KiB), 50 matches, 16 KiB of output; non-UTF-8 and oversized files are skipped and counted |
 | `project.read` | `path` | reads a UTF-8 file (at most 32 KiB) and records its real content |
 | `project.write` | `path`, `content` | atomically creates or replaces a UTF-8 file (at most 32 KiB), reads it back, records what the filesystem holds |
+| `project.git.status`, `project.git.diff`, `project.git.diff_stat`, `project.git.log` | none (`log`: a bounded count) | read-only Git observations; Chip fixes every argument; nothing mutating is expressible |
 | `pax.test` | none | runs `pax --dir <project> --json test` and records PAX's `pax.execution-result.v1` |
 
 * **The model owns only a project-relative path, a literal query, and file content.** It cannot
