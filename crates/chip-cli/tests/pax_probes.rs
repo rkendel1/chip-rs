@@ -341,12 +341,15 @@ async fn an_inspect_goal_completes_on_a_grounded_answer_and_the_default_kind_doe
         &["--kind", "inspect", "--json"],
     )
     .await;
-    assert_eq!(code, Some(0), "{text}");
+    assert_eq!(code, Some(1), "grounded is not verified: {text}");
     assert_eq!(requests.load(Ordering::SeqCst), 2);
     let json: serde_json::Value =
         serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{e}: {text}"));
     assert_eq!(json["goal_kind"], "inspect");
     assert_eq!(json["terminal_state"], "completed");
+    assert_eq!(json["goal_satisfied"], true);
+    assert_eq!(json["grounded"], true);
+    assert_eq!(json["verified"], false);
     assert!(json["answer"].as_str().unwrap().contains("src/lib.rs"));
     assert_eq!(
         (pax.count("version"), pax.count("run")),

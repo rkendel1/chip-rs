@@ -80,7 +80,10 @@ pub enum GoalKind {
     Verify,
     /// Observe and answer. Completion: the model proposes an answer; Chip accepts it only if
     /// read-only observations occurred, no file was changed, and the answer cites a file Chip
-    /// observed. "Accepted" means grounded in observation, not proven correct.
+    /// observed. Accepted means *grounded* in observation: the run completes, `goal_satisfied` is
+    /// true and `grounded` is true, but `verified` is false and the exit is not 0. Chip does not
+    /// interpret the answer, so nothing independent establishes that it is true; `verified` for an
+    /// inspection waits for such a predicate (see [`GoalKind::verified`]).
     Inspect,
 }
 
@@ -137,21 +140,46 @@ impl GoalKind {
         }
     }
 
-    /// Whether the recorded work satisfies this kind of goal, re-evaluated from the observations
-    /// (and, for an inspection, the accepted answer) and from nothing else.
-    pub fn verified(self, observations: &[Observation], outcome: &WorkOutcome) -> bool {
+    /// Whether an independent predicate, re-evaluated from the recorded observations, establishes
+    /// the requested outcome. Only `verified` can authorize exit 0.
+    ///
+    /// An inspection has no such predicate: its answer is natural language and Chip does not
+    /// interpret it, so this is `false` for every inspection. This is the one place an
+    /// independently owned expectation would later make it `true`
+    /// (`completed && grounded && predicate(observations)`); until one exists, being grounded
+    /// is not being verified.
+    pub fn verified(self, observations: &[Observation], _outcome: &WorkOutcome) -> bool {
         match self {
             Self::Change => VerifiedChange.satisfied_by_trajectory(observations),
             Self::Verify => VerifiedState.satisfied_by_trajectory(observations),
-            Self::Inspect => match outcome {
-                WorkOutcome::Completed { summary } => {
-                    InspectionObserved.satisfied_by_trajectory(observations)
-                        && GroundedAnswer.accepts(summary, observations)
-                }
-                _ => false,
-            },
+            Self::Inspect => false,
         }
     }
+
+    /// Whether the accepted answer is supported by what Chip observed: read-only observations
+    /// occurred, no file was changed, and the answer cites a file Chip observed. Only an
+    /// inspection has an answer. This says where the answer came from, never that it is true, and
+    /// it never authorizes exit 0.
+    pub fn grounded(self, observations: &[Observation], outcome: &WorkOutcome) -> bool {
+        match (self, outcome) {
+            (Self::Inspect, WorkOutcome::Completed { summary }) => {
+                InspectionObserved.satisfied_by_trajectory(observations)
+                    && GroundedAnswer.accepts(summary, observations)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether the goal's required conditions held at the last evaluation: a level, not an edge.
+/// `GoalEvaluated::satisfied` says only that *that* observation produced a required output, so
+/// after the conditions first held it is false again for every later observation; the level is
+/// `remaining == 0`, the same reading the safety audit uses. `None` if nothing was evaluated.
+pub fn goal_level(events: &[WorkEvent]) -> Option<bool> {
+    events.iter().rev().find_map(|e| match e {
+        WorkEvent::GoalEvaluated { remaining, .. } => Some(*remaining == 0),
+        _ => None,
+    })
 }
 
 /// Whether any recorded observation is a content-changing project write.
@@ -436,8 +464,12 @@ pub struct SoftwareWork {
     pub utility: WorkUtilityMeasurement,
     /// The loop's last evaluation of the goal; `None` if it never evaluated one.
     pub goal_satisfied: Option<bool>,
-    /// The goal, re-evaluated from the recorded observations by the predicate itself.
+    /// An independent predicate, re-evaluated from the recorded observations, establishes the
+    /// requested outcome. The only thing that can authorize exit 0.
     pub verified: bool,
+    /// The accepted answer is supported by observations Chip has (an inspection only). Not that it
+    /// is true, and not a success predicate.
+    pub grounded: bool,
     /// Successful writes, and those that changed a file's content.
     pub writes: usize,
     pub changed_writes: usize,
@@ -506,7 +538,10 @@ impl SoftwareWork {
             return EXIT_RUNTIME_FAILURE;
         }
         match &self.report.outcome {
+            // Only `verified` authorizes exit 0. An answer that is grounded but not verified is a
+            // completed run whose answer Chip does not claim is true: not verified, not a failure.
             WorkOutcome::Completed { .. } if self.verified => EXIT_VERIFIED,
+            WorkOutcome::Completed { .. } if self.grounded => EXIT_NOT_VERIFIED,
             WorkOutcome::Completed { .. } | WorkOutcome::Failed { .. } => EXIT_RUNTIME_FAILURE,
             WorkOutcome::Blocked { .. }
             | WorkOutcome::LimitReached { .. }
@@ -609,11 +644,9 @@ pub async fn run_software_work_kind(
     let audit = audit_safety(&report, &spec, &declared());
     let trajectory_violations = verify_trajectory(&report.events, &spec.limits).len();
     let utility = measure_utility(&report, &spec);
-    let goal_satisfied = report.events.iter().rev().find_map(|e| match e {
-        WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
-        _ => None,
-    });
+    let goal_satisfied = goal_level(&report.events);
     let verified = kind.verified(&report.observations, &report.outcome);
+    let grounded = kind.grounded(&report.observations, &report.outcome);
     let written: Vec<(String, bool)> = report
         .observations
         .iter()
@@ -627,6 +660,7 @@ pub async fn run_software_work_kind(
         utility,
         goal_satisfied,
         verified,
+        grounded,
         writes: written.len(),
         changed_writes: written.iter().filter(|(_, changed)| *changed).count(),
         paths_written: written.into_iter().map(|(p, _)| p).collect(),
@@ -636,8 +670,11 @@ pub async fn run_software_work_kind(
     }
 }
 
-fn heading(outcome: &WorkOutcome) -> &'static str {
-    match outcome {
+fn heading(w: &SoftwareWork) -> &'static str {
+    match &w.report.outcome {
+        WorkOutcome::Completed { .. } if !w.verified && w.grounded => {
+            "Work answered, not verified."
+        }
         WorkOutcome::Completed { .. } => "Work completed.",
         WorkOutcome::Blocked { .. } => "Work blocked.",
         WorkOutcome::Failed { .. } => "Work failed.",
@@ -686,7 +723,7 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         out.push_str(&s);
         out.push('\n');
     };
-    line(heading(&w.report.outcome).to_string());
+    line(heading(w).to_string());
     line(format!("Goal: {}", w.goal));
     if let Some(id) = &w.identity {
         line(format!("Provider: {}", id.provider));
@@ -723,8 +760,9 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         match (w.verified, w.kind) {
             (true, GoalKind::Change) => "yes (pax.test passed after the last change)",
             (true, GoalKind::Verify) => "yes (pax.test passed and no file was changed)",
-            (true, GoalKind::Inspect) =>
-                "grounded (the answer cites a file that was observed; its correctness is not established)",
+            (true, GoalKind::Inspect) => "yes (an independent predicate established the answer)",
+            (false, GoalKind::Inspect) if w.grounded =>
+                "no (answered and grounded in observation: the answer cites a file that was observed; nothing independent establishes that it is true)",
             (false, _) => "no",
         }
     ));
@@ -854,6 +892,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "outcome_reason": outcome_reason(&w.report.outcome),
         "goal_satisfied": w.goal_satisfied,
         "verified": w.verified,
+        "grounded": w.grounded,
         "executions_by_capability": u.executions_by_capability,
         "lists": w.lists(),
         "searches": w.searches(),

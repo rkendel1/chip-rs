@@ -212,7 +212,9 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
     pass its tests as it is?"). The runtime completes it itself.
   * `inspect`: read-only. The model proposes an answer with `complete`; Chip accepts it only if
     read-only observations occurred, no file was changed, and the answer cites a file Chip observed.
-    Accepted means *grounded in observation*, not proven correct.
+    Accepted means *grounded in observation*: the run completes with `goal_satisfied: true` and
+    `grounded: true`, but `verified` is false and the exit is 1. An inspection is never verified,
+    because Chip does not interpret the answer.
   See [`docs/product/capabilities.md`](docs/product/capabilities.md) section 2a.
 * **Revisiting a capability.** A note that one invocation failed or fell short names that invocation
   (`project.read (path="src/a.rs")`); another input to the same capability is a different invocation
@@ -231,7 +233,7 @@ model was tried.`) and stops. `--json` reports `provider`, `model` and the endpo
   latency, and useful work per model call and per execution. Useful work is a verified goal: model
   claims, writes alone, a dispatched capability, stale evidence and failed test runs are not counted.
 * **Exit status** (Chip's, never a native exit code): `0` verified; `1` not verified (blocked, limit,
-  escalated); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
+  escalated, or an inspection that is answered and grounded but, as every inspection, not verified); `2` usage; `3` infrastructure unavailable (no model selected, the selected model did not
   answer, no PAX; nothing ran); `4` runtime failure or a violated safety invariant.
 * Requirements as for `verify`: a model provider behind FX and PAX 0.3.0 or later (`PAX_BIN` to
   select it); Compute is not required. `chip work` only *locates* PAX at startup (a `pax` must be
@@ -286,7 +288,7 @@ decision.
 - **Scheduling vs lifecycle.** `status`/`scheduling` say where the work is in admission (`queued`,
   `admitted`, `finished`). `lifecycle` is the runtime's: `null` before the work starts, `executing`
   while the loop runs, then its terminal state (`completed`, `escalated`, `blocked`, `limit_reached`,
-  `failed`). `completed` is runtime completion; goal satisfaction is `result.verified`.
+  `failed`). `completed` is runtime completion (Chip accepted the end of the work); `result.verified` is the independent check, and `result.grounded` says an inspection's answer is supported by observations. Only `verified` means the outcome was established.
 - **Events** are available when the work ends (the loop returns its trajectory then); a queued or
   running work reports `"complete": false` and none. Order is guaranteed within a work only, never
   across works.

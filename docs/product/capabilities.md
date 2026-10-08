@@ -25,8 +25,9 @@ coding agent, no.
     changed no file. This is also the honest no-op: a goal that already holds is verified, not
     "fixed" through a fake write (scenario 5).
   * **inspect**: "where is X defined?" Completes when the model's answer cites a file Chip observed
-    and no file was changed (scenario 1). **"Completed" here means grounded in observation, not
-    proven correct**: Chip cannot verify an arbitrary natural-language answer.
+    and no file was changed (scenario 1). The result is **answered and grounded, never verified**:
+    exit 1, `verified: false`. Chip does not interpret an arbitrary natural-language answer, so
+    nothing independent establishes that it is true (section 2a).
 * **Reading is not limited by file size**: `project.read` takes an optional byte `offset` and
   `length` (at most 32 KiB per observation), so a file of any size is inspectable through bounded
   observations (G2, closed).
@@ -88,7 +89,18 @@ from the goal's words. The kind selects what Chip evaluates; it adds no capabili
 | --- | --- | --- | --- |
 | **change** | a content-changing write was observed, and PAX then established `passed` with no later change | the runtime, the moment that holds (no completion call by the model) | PAX passed after the last change |
 | **verify** | PAX established `passed`, and this work changed no file | the runtime, the moment that holds | PAX passed on the unchanged project |
-| **inspect** | at least one successful read-only observation (list, search, read, Git), no content-changing write, **and** the answer the model proposed cites at least one file Chip observed (a read's path, a search match, a listed file) | the model proposes the answer with `complete`; Chip accepts or refuses it | the answer is grounded in what was observed. Not that it is true |
+| **inspect** | at least one successful read-only observation (list, search, read, Git), no content-changing write, **and** the answer the model proposed cites at least one file Chip observed (a read's path, a search match, a listed file) | the model proposes the answer with `complete`; Chip accepts or refuses it | **nothing: an inspection is never `verified`.** The answer is `grounded` (supported by what was observed), not established as true. Exit 1 |
+
+**Four words, kept apart.** `completed` means Chip accepted the model's proposed end of work under
+the kind's completion contract; it does not mean Chip proved the outcome. `goal_satisfied` means the
+kind's required condition held at the last evaluation (a level: nothing remained; not whether the
+last observation produced it). `grounded` means the accepted answer is supported by observations
+Chip has (an inspection only). `verified` means an independent predicate established the requested
+outcome, and **only `verified` authorizes exit 0**. For change and verify, completed implies
+`goal_satisfied` and `verified`. For an inspection, completed implies `goal_satisfied` and
+`grounded`, and `verified` is false: `GoalKind::verified(Inspect)` is the seam where an
+independently owned predicate would later establish it. Exit: completed and verified 0; completed
+and grounded only 1; completed and neither 4 (a contradiction in the runtime itself).
 
 What does not change, for every kind:
 
@@ -106,7 +118,9 @@ What does not change, for every kind:
 * The rules the model is told are per kind and Chip-owned, so it knows how its work will be judged.
 
 Limits stated plainly: citation is not correctness; an inspect answer can cite a real file and be
-wrong. Only a file whose path is cited counts, so an answer about a directory or a symbol must still
+wrong, can cite a file whose relevant bytes were never observed (a search row shows one line), and
+can say "there is no information" while citing files it read. Chip does not interpret the answer, so
+all of these are `grounded`, none is `verified`, and only a model's own `block` ends as Blocked. Only a file whose path is cited counts, so an answer about a directory or a symbol must still
 name a file. The default `change` kind still refuses a completion that changed nothing, which is
 correct for change work.
 
@@ -224,7 +238,7 @@ No capability was found whose result is insufficient for the recovery loop that 
 
 | # | Scenario | Result |
 | --- | --- | --- |
-| 1 | Inspect: list, search, read, then report | As **inspect** work: the three observations are real; the answer cites `src/lib.rs`, Chip accepts it, the work **Completes** (grounded), nothing on disk changed, no test was run. An answer that cites nothing, an unobserved file, or part of a longer path is refused, as is a claim with no observation or after a change. As default **change** work the same claim is still refused (a change goal needs a change) |
+| 1 | Inspect: list, search, read, then report | As **inspect** work: the three observations are real; the answer cites `src/lib.rs`, Chip accepts it, the work **Completes** as answered and grounded (`verified: false`, exit 1), nothing on disk changed, no test was run. An answer that cites nothing, an unobserved file, or part of a longer path is refused, as is a claim with no observation or after a change. As default **change** work the same claim is still refused (a change goal needs a change) |
 | 2 | Modify: search, read, write, diff, verify | **Completed**, verified. The model sees the real diff (`+pub fn canonical`). The runtime completes the work itself the moment PAX reports `passed` after the change; the model makes no completion call |
 | 3 | Repair: write a wrong fix, test fails, read the evidence, write the right fix, test passes | **Completed**, verified, one recovery. The model's second-turn input contains PAX's `failed` status, the failing test's name and the assertion text, and Chip's own "ruled out: pax.test: its execution failed" |
 | 4 | Block: ask for `shell.exec`, `project.delete`, `git.commit`, `http.get` | Each is rejected as an unknown capability; the work ends `Failed`; **only the earlier read-only step ran**, no further model call, nothing substituted, nothing on disk changed |
@@ -244,7 +258,7 @@ own it, the authority it would carry, and the evidence. Priority is for the firs
 
 | # | Gap | Use case that fails | Why current capabilities cannot | Owner | Authority | Evidence | Priority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ~~G1~~ | ~~No way to complete a non-mutating goal~~ **Closed** by the goal kinds (section 2a) | "Where is X defined?", "does the build pass?", "is it already fixed?" | Was: completion required a content-changing write followed by `passed` | Chip (goal evaluation) | none | the inspect, verify and no-op tests in `capability_scenarios.rs` | Done. **Residual (G1b): an accepted inspect answer is grounded, not verified correct**; stronger answer verification is not planned until a real-model run shows it matters |
+| ~~G1~~ | ~~No way to complete a non-mutating goal~~ **Closed** by the goal kinds (section 2a) | "Where is X defined?", "does the build pass?", "is it already fixed?" | Was: completion required a content-changing write followed by `passed` | Chip (goal evaluation) | none | the inspect, verify and no-op tests in `capability_scenarios.rs` | Done. **Residual (G1b): an accepted inspect answer is grounded, never verified**: it exits 1 and `verified` is false. A real-model run showed a grounded answer can be a non-answer, so verification needs an independently owned predicate; none exists yet |
 | ~~G2~~ | ~~No ranged read; files over 32 KiB are unreadable~~ **Closed for reading** by the ranged `project.read` (section 4) | Inspect any real codebase's larger files | Was: `project.read` returned the whole file or `too_large` | Chip (chip-project) | none beyond `read` | `a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observations` (this repository's 102 KB `work.rs` read in ranges) and the `chip-project` range tests | Done. **Residual:** reading a big file costs one model-context slot per range (the context budget bounds it, nothing assembles ranges for the model), and the write half (changing a large file) is G4 |
 | **G3** | **Cannot create a directory, delete or rename a file** | Add a module in a new directory; remove dead code | `project.write` needs an existing parent; no other mutation exists | **Chip** (chip-project) | destructive for delete and rename: needs a design (for example, only inside a clean Git tree, so it is recoverable) | `parent_missing` observation; surface test | Medium |
 | **G4** | **Whole-file replace is the only mutation, and is limited to 32 KiB** | Change one line of a 30 KiB file; change any line of a larger file | The model must re-emit the whole file, risking silent loss; mitigated by the write's read-back hash and `git diff`, not prevented. **A file over 32 KiB can now be read but still cannot be changed** | **Chip** (chip-project) | as `write` | design reading; scenario 2 shows the diff catches changes; `oversized_content_and_malformed_inputs_are_refused` | Medium; a partial-edit design is its own PR |

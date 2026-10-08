@@ -266,6 +266,28 @@ fn describe(w: &SoftwareWork) -> String {
     )
 }
 
+/// The invariant for every goal kind: a completed run has met its kind's required condition at the
+/// last evaluation (a level, `remaining == 0`), whichever turn produced the last evaluation event.
+fn assert_completed_means_goal_met(w: &SoftwareWork) {
+    if matches!(w.report.outcome, WorkOutcome::Completed { .. }) {
+        assert_eq!(
+            w.goal_satisfied,
+            Some(true),
+            "completed but the goal was not met: {}",
+            describe(w)
+        );
+    }
+}
+
+/// `GoalEvaluated::satisfied` of the last evaluation: an edge ("this observation produced it"),
+/// which is not the level `goal_satisfied` reports.
+fn last_goal_edge(w: &SoftwareWork) -> Option<bool> {
+    w.report.events.iter().rev().find_map(|e| match e {
+        WorkEvent::GoalEvaluated { satisfied, .. } => Some(*satisfied),
+        _ => None,
+    })
+}
+
 fn blocked_with(w: &SoftwareWork, text: &str) -> bool {
     matches!(&w.report.outcome, WorkOutcome::Blocked { reason } if reason.contains(text))
 }
@@ -362,6 +384,7 @@ async fn scenario_2_modify_diff_verify_complete() {
         describe(&w)
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
+    assert_completed_means_goal_met(&w);
     assert_eq!(
         m.calls(),
         5,
@@ -724,13 +747,119 @@ async fn inspect_completes_on_a_grounded_answer_without_a_change_or_a_test() {
         describe(&w)
     );
     assert_eq!(w.pax_executions(), 0, "no test was needed to answer");
-    assert!(w.verified, "grounded in what was observed");
-    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_VERIFIED);
+    assert!(w.grounded, "grounded in what was observed");
+    assert!(
+        !w.verified,
+        "grounded is not verified: nothing independent establishes the answer"
+    );
+    assert_eq!(w.goal_satisfied, Some(true), "the kind's condition was met");
+    assert_completed_means_goal_met(&w);
+    assert_eq!(
+        w.exit_status(),
+        chip_cli::verify::EXIT_NOT_VERIFIED,
+        "only `verified` authorizes exit 0"
+    );
     assert_eq!(before, snapshot(&dir), "nothing changed");
     assert!(
         m.request(3).contains("pub fn len"),
         "the model was shown the file it cites"
     );
+    w.audit.assert_clean();
+}
+
+/// E1 from the real-model run: a negative answer that cites files Chip really read. Chip does not
+/// interpret the answer, so it is grounded and never verified. Many observations follow the one that
+/// first met the condition, so the last `GoalEvaluated` edge is false while the level is true.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_negative_inspect_answer_citing_read_files_is_grounded_and_never_verified() {
+    let dir = project("inspect-negative", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    let before = snapshot(&dir);
+    let (mut w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            list("."),
+            read("Cargo.toml"),
+            search("production"),
+            read("src/lib.rs"),
+            complete(
+                "There is no information about which version is deployed to production; \
+                 Cargo.toml and src/lib.rs contain nothing about it.",
+            ),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(w.report.outcome, WorkOutcome::Completed { .. }),
+        "{}",
+        describe(&w)
+    );
+    assert_eq!(
+        last_goal_edge(&w),
+        Some(false),
+        "the later observations did not newly produce the condition"
+    );
+    assert_eq!(
+        w.goal_satisfied,
+        Some(true),
+        "but the condition held: goal_satisfied is a level"
+    );
+    assert_completed_means_goal_met(&w);
+    assert!(w.grounded, "it cites files Chip observed");
+    assert!(!w.verified, "no independent predicate established it");
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    assert_eq!(before, snapshot(&dir));
+    w.audit.assert_clean();
+
+    // Grounded is not another way to succeed: a completed inspection that is not grounded is the
+    // runtime's own contradiction, not a not-verified answer.
+    w.grounded = false;
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_RUNTIME_FAILURE);
+}
+
+/// A' from the real-model run: a search row shows the signature, never the body that holds the
+/// fact. Citing the file is grounded; it does not make the answer verified.
+#[tokio::test(flavor = "multi_thread")]
+async fn citing_a_search_row_without_observing_the_supporting_bytes_is_not_verified() {
+    let dir = project("inspect-row", FAILING_TEST);
+    if !pax_available(&dir) {
+        return;
+    }
+    std::fs::write(
+        dir.join("src/facts.rs"),
+        "/// Expired sessions are purged after this many days.\npub fn purge_window() -> u32 {\n    let base = 30;\n    let grace = 5;\n    base + grace\n}\n",
+    )
+    .unwrap();
+    let (w, _) = run_kind(
+        &dir,
+        GoalKind::Inspect,
+        None,
+        vec![
+            search("purge_window"),
+            complete("`purge_window` returns a number of days; it is defined in src/facts.rs."),
+        ],
+    )
+    .await;
+    assert!(
+        w.report.observations.iter().all(|o| !o
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("grace")),
+        "the body that holds the fact was never observed"
+    );
+    assert!(matches!(w.report.outcome, WorkOutcome::Completed { .. }));
+    assert!(w.grounded, "the answer cites a file the search matched");
+    assert!(!w.verified);
+    assert_completed_means_goal_met(&w);
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
+    // The seam: for an inspection `verified` is false whatever was observed, until an
+    // independently owned predicate exists.
+    assert!(!GoalKind::Inspect.verified(&w.report.observations, &w.report.outcome));
     w.audit.assert_clean();
 }
 
@@ -838,6 +967,7 @@ async fn verify_completes_when_the_unchanged_project_passes() {
         describe(&w)
     );
     assert!(w.verified && w.goal_satisfied == Some(true));
+    assert_completed_means_goal_met(&w);
     assert_eq!(pax_passed(&w), 1, "PAX really passed");
     assert_eq!((w.writes, w.changed_writes), (0, 0));
     assert_eq!(
@@ -1195,7 +1325,8 @@ async fn a_file_larger_than_the_read_limit_is_inspectable_through_bounded_observ
         "{}",
         describe(&w)
     );
-    assert!(w.verified);
+    assert!(w.grounded && !w.verified, "grounded is not verified");
+    assert_eq!(w.exit_status(), chip_cli::verify::EXIT_NOT_VERIFIED);
     assert_eq!(
         std::fs::read_to_string(dir.join("src/big.rs")).unwrap(),
         source,

@@ -1772,7 +1772,10 @@ mod tests {
         assert_eq!(done["kind"], "inspect");
         assert_eq!(done["status"], "completed", "{done}");
         assert_eq!(done["result"]["goal_kind"], "inspect");
-        assert_eq!(done["result"]["verified"], true);
+        // An accepted inspect answer is grounded, not verified: Chip does not interpret it.
+        assert_eq!(done["result"]["verified"], false);
+        assert_eq!(done["result"]["grounded"], true);
+        assert_eq!(done["result"]["goal_satisfied"], true);
         assert!(
             done["result"]["answer"]
                 .as_str()
