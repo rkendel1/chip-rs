@@ -140,6 +140,12 @@ asks for 256 output tokens, temperature 0, JSON-object output, and is bounded to
 
 ## 7. The evaluation fixture
 
+> **Superseded in part.** The fixture has since been expanded to `micro-eval-2` (50 cases, 38 of them executed and
+> reproducible, a frozen held-out set, per-class and executed-versus-unexecuted reporting, candidate gating and an
+> ablation harness). See [`micro-model-ablation.md`](micro-model-ablation.md). The description below is the original
+> `micro-eval-1` design, kept for the record: its 12 synthetic cases remain in the fixture as unexecuted harness
+> fixtures and are **not ground truth**.
+
 `crates/chip-cli/tests/fixtures/micro/fixture.json` (version `micro-eval-1`, 22 cases: 11 calibration, 11 held-out),
 produced by `build.py` next to it.
 

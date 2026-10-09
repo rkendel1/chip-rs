@@ -1,7 +1,112 @@
 {
  "cases": [
   {
+   "category": "invalid_strategy_offered",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::triples"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-after-bad-write-2",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "revert_and_retry",
+     "narrow_edit"
+    ],
+    "basis": "a prior changed write is on record, so reverting is offered; both a revert and a narrow edit are verified to pass",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenafterbadwrite2\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn triple(x: i32) -> i32 {\n    x + 3\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn triples() {\n        assert_eq!(triple(4), 12);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn triple(x: i32) -> i32 {\n    x * 3\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn triples() {\n        assert_eq!(triple(4), 12);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:31c6be1b59a250f730814387698b3362e38e272b1732353d1e0035588dff3c5d",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:6a184a6cf229d2381e53423de97a92e064b636a824ced826aac4d13c639b192f"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "revert_and_retry",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenafterbadwrite2 v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenafterbadwrite2-HASH)\n\nrunning 1 test\ntest tests::triples ... FAILED\n\nfailures:\n\n---- tests::triples stdout ----\n\nthread 'tests::triples' (N) panicked at src/lib.rs:10:9:\nassertion `left == right` failed\n  left: 7\n right: 12\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::triples\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.write",
+      "excerpt": "{\"capability\":\"project.write\",\"path\":\"src/lib.rs\",\"changed\":true}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":161,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-3",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::adds"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-assert-add",
    "label": {
     "acceptable_classes": [
@@ -15,11 +120,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenassertadd\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn add(a: i32, b: i32) -> i32 {\n    a - b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn adds() {\n        assert_eq!(add(2, 3), 5);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn adds() {\n        assert_eq!(add(2, 3), 5);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:b15e4984e897c00ed1584a386cf80f823009cbf3ba1a01121b57f31ea5b40d13",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:1a796ff0d5f0dbdd211d4431808848f24d7e9f1a2346189c037053636e65235b"
    },
    "snapshot": {
     "budgets": {
@@ -32,7 +152,7 @@
      "read_more_context",
      "run_single_test"
     ],
-    "diagnostics": "Compiling casenassertadd v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/casenassertadd-HASH)\n\nrunning 1 test\ntest tests::adds ... FAILED\n\nfailures:\n\n---- tests::adds stdout ----\n\nthread 'tests::adds' (N) panicked at src/lib.rs:10:9:\nassertion `left == right` failed\n  left: -1\n right: 5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::adds\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics": "Compiling casenassertadd v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenassertadd-HASH)\n\nrunning 1 test\ntest tests::adds ... FAILED\n\nfailures:\n\n---- tests::adds stdout ----\n\nthread 'tests::adds' (N) panicked at src/lib.rs:10:9:\nassertion `left == right` failed\n  left: -1\n right: 5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::adds\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -61,6 +181,185 @@
   },
   {
    "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::four_is_even"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-assert-bare",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit",
+     "read_more_context"
+    ],
+    "basis": "a bare assert! shows no values; the defect is a flipped comparison, narrow edit verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenassertbare\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn is_even(n: u32) -> bool {\n    n % 2 == 1\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn four_is_even() {\n        assert!(is_even(4));\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn is_even(n: u32) -> bool {\n    n % 2 == 0\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn four_is_even() {\n        assert!(is_even(4));\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:b30552eed859e3e5aaa8f78ca7bb4269f54e24b8aaccca9b2bdbb45616055d60",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:92333795fdfc18ca24a9802219cb36f6d47a7bc2682ba77fa0b2d9bb7f03b727"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenassertbare v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenassertbare-HASH)\n\nrunning 1 test\ntest tests::four_is_even ... FAILED\n\nfailures:\n\n---- tests::four_is_even stdout ----\n\nthread 'tests::four_is_even' (N) panicked at src/lib.rs:10:9:\nassertion failed: is_even(4)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::four_is_even\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":167,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::ascending"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-assert-order",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit"
+    ],
+    "basis": "comparator reversed; narrow edit verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenassertorder\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn sorted(mut v: Vec<i32>) -> Vec<i32> {\n    v.sort_by(|a, b| b.cmp(a));\n    v\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn ascending() {\n        assert_eq!(sorted(vec![3, 1, 2]), vec![1, 2, 3]);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn sorted(mut v: Vec<i32>) -> Vec<i32> {\n    v.sort();\n    v\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn ascending() {\n        assert_eq!(sorted(vec![3, 1, 2]), vec![1, 2, 3]);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:f16aa86ae9d31e3079e54290c3157f622e5036290572388357c2a575b995d1ce",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:ae1b506641ceab7c0eb04e62d15af9c851291242ac20a21cfa06b0e11d53ab9e"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenassertorder v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenassertorder-HASH)\n\nrunning 1 test\ntest tests::ascending ... FAILED\n\nfailures:\n\n---- tests::ascending stdout ----\n\nthread 'tests::ascending' (N) panicked at src/lib.rs:11:9:\nassertion `left == right` failed\n  left: [3, 2, 1]\n right: [1, 2, 3]\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::ascending\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":228,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0583"
+    ]
+   },
    "id": "n-compile-missing-module",
    "label": {
     "acceptable_classes": [
@@ -74,11 +373,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "compilation-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casencompilemissingmodule\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "mod helper;\n\npub fn run() -> i32 {\n    helper::value()\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn runs() {\n        assert_eq!(super::run(), 7);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/helper.rs": "pub fn value() -> i32 {\n    7\n}\n"
+    },
+    "fix_tree_sha256": "sha256:88f0cd77d00ab76f32484dbd5d68105c23c9658e89cb3380fbc7e12ddcb68643",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:72a3ffcb5132b060dbd2453e302f180caa7c78f7e0907c1b2c2d568fde322385"
    },
    "snapshot": {
     "budgets": {
@@ -120,6 +434,16 @@
   },
   {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0308"
+    ]
+   },
    "id": "n-compile-type",
    "label": {
     "acceptable_classes": [
@@ -133,11 +457,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "compilation-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casencompiletype\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn answer() -> i32 {\n    \"forty-two\"\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn is_42() {\n        assert_eq!(super::answer(), 42);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn answer() -> i32 {\n    42\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn is_42() {\n        assert_eq!(super::answer(), 42);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:2491e99410c6ba311eaaf9a2f4e059818f5966d7ea8e915c11a200660a5b4ea2",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:e9d1d3cdcc586c47e5397f7fcbc3ab437dd7de73c8348695c7222b8fb3f17cf7"
    },
    "snapshot": {
     "budgets": {
@@ -178,7 +517,721 @@
    "split": "calibration"
   },
   {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-config-lib-path",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "unknown",
+     "compile_error"
+    ],
+    "acceptable_strategies": [
+     "change_target_file"
+    ],
+    "basis": "manifest points at a library file that does not exist; the verified fix is in Cargo.toml",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"cfglib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/missing.rs\"\n",
+     "src/lib.rs": "pub fn three() -> i32 {\n    3\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn three_is_three() {\n        assert_eq!(three(), 3);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"cfglib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+    },
+    "fix_tree_sha256": "sha256:0cdc711dc0b32a17c2285bfe2e5effadc1436110f3a0285da3484706c8d3c5b2",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:81412f8dfc18457d293ad9476a76cd8e84733e708d6dc823341efec73e4e1dd2"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: can't find lib `cfglib` at path `/work/src/missing.rs`\n --> /work/Cargo.toml\nerror: can't find lib `cfglib` at path `/work/src/missing.rs`\n --> /work/Cargo.toml\nerror: could not compile due to 2 previous target resolution errors",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":154,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-dep-feature",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling"
+    ],
+    "acceptable_strategies": [
+     "change_target_file"
+    ],
+    "basis": "a dependency feature that does not exist; the verified fix is in Cargo.toml",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"depfeature\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nhelper = { path = \"helper\", features = [\"fast\"] }\n",
+     "helper/Cargo.toml": "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+     "helper/src/lib.rs": "pub fn h() -> i32 {\n    1\n}\n",
+     "src/lib.rs": "pub fn go() -> i32 {\n    helper::h()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn goes() {\n        assert_eq!(go(), 1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"depfeature\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nhelper = { path = \"helper\" }\n"
+    },
+    "fix_tree_sha256": "sha256:5b01784af9ec8ddece60c5d78d6d586be54857b732efc06b7198d37642dcfeba",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:e4da33edd1d5ec0084ec32c67853355ae68a7fed544e73bfbb617190b5d9d675"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: failed to select a version for `helper`.\n    ... required by package `depfeature v0.1.0 (/work)`\nversions that meet the requirements `*` are: 0.1.0\n\npackage `depfeature` depends on `helper` with feature `fast` but `helper` does not have that feature.\n\n\nfailed to select a version for `helper` which could resolve this conflict",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":148,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-dep-version",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling"
+    ],
+    "acceptable_strategies": [
+     "change_target_file"
+    ],
+    "basis": "dependency version requirement the path crate does not satisfy; verified fix in Cargo.toml",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"depversion\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nhelper = { path = \"helper\", version = \"2.0\" }\n",
+     "helper/Cargo.toml": "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+     "helper/src/lib.rs": "pub fn h() -> i32 {\n    1\n}\n",
+     "src/lib.rs": "pub fn go() -> i32 {\n    helper::h()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn goes() {\n        assert_eq!(go(), 1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"depversion\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nhelper = { path = \"helper\", version = \"0.1\" }\n"
+    },
+    "fix_tree_sha256": "sha256:36c994f579e96d128ec40b900e3dfa1d951683685a9121fb42692eceb11ace73",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:fd3d32fa58abfa2712d881e12c8b090cea40f18d08ce07beadd88fab12ba618a"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: failed to select a version for the requirement `helper = \"^2.0\"`\ncandidate versions found which didn't match: 0.1.0\nlocation searched: /work/helper\nrequired by package `depversion v0.1.0 (/work)`\nnote: offline mode (via `--offline`) can sometimes cause surprising resolution failures\nhelp: if this error is too confusing you may wish to retry without `--offline`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":148,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "no_strategy_applicable",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-env-unwritable-proc",
+   "label": {
+    "acceptable_classes": [
+     "environment_or_permission"
+    ],
+    "acceptable_strategies": [],
+    "basis": "the build directory is not creatable here; the repository passes unchanged once the environment is correct, so no repository strategy applies",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "passes unchanged once the unwritable build directory is not forced",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": "CARGO_TARGET_DIR=/proc/nonexistent-micro-eval/t",
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenenvunwritableproc\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn eight() -> i32 {\n    8\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn eight_is_eight() {\n        assert_eq!(eight(), 8);\n    }\n}\n"
+    },
+    "fix_files": {},
+    "fix_tree_sha256": null,
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:5d3e5faca04764a8d54f0dd4940c82a0314431808968da867a506ba4c2ce8a8e"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: failed to create directory `/proc/nonexistent-micro-eval`\n\nCaused by:\n  No such file or directory (os error 2)",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":154,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "missing_evidence",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "takes_the_first"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-missing-evidence-2",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "read_more_context",
+     "change_target_file"
+    ],
+    "basis": "nothing has been read; the defect is in src/parse.rs, which the diagnostic does not name",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"missingev2\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub mod parse;\n",
+     "src/parse.rs": "pub fn first_word(s: &str) -> &str {\n    s.split(' ').nth(1).unwrap_or(\"\")\n}\n",
+     "tests/words.rs": "use missingev2::parse::first_word;\n\n#[test]\nfn takes_the_first() {\n    assert_eq!(first_word(\"alpha beta\"), \"alpha\");\n}\n"
+    },
+    "fix_files": {
+     "src/parse.rs": "pub fn first_word(s: &str) -> &str {\n    s.split(' ').next().unwrap_or(\"\")\n}\n"
+    },
+    "fix_tree_sha256": "sha256:a585b7c98d15a52023903c37b41b80bc84980b5ecfda1511b24a4c3523bcca60",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:cd9cbaa7339133e8353c53724c6af5d59e429db0d89a9509f77e3c10ef9471a7"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling missingev2 v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/missingev2-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/words.rs (/fixture-root/target/debug/deps/words-HASH)\n\nrunning 1 test\ntest takes_the_first ... FAILED\n\nfailures:\n\n---- takes_the_first stdout ----\n\nthread 'takes_the_first' (N) panicked at tests/words.rs:5:5:\nassertion `left == right` failed\n  left: \"beta\"\n right: \"alpha\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    takes_the_first\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test words`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "repeated_failure",
+   "cohort": "expansion",
+   "evidence_note": "two changed writes precede this failure; the embedded state is the result of an attempted repair that replaced one non-existent method with another",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0599"
+    ]
+   },
+   "id": "n-repeated-compile-after-repair",
+   "label": {
+    "acceptable_classes": [
+     "compile_error"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit",
+     "revert_and_retry"
+    ],
+    "basis": "a repair attempt left a compile error (E0599); a narrow edit is verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenrepeatedcompileafterrepair\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn len_of(s: &str) -> usize {\n    s.length()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn lens() {\n        assert_eq!(len_of(\"abc\"), 3);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn len_of(s: &str) -> usize {\n    s.len()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn lens() {\n        assert_eq!(len_of(\"abc\"), 3);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:63ab8defcd42e032a9944b7b902a583e392d10e1860b8389f8a41c67c7542fac",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:1453aeb0dbf9ff3d57e8e2cfaa6e2047e54e0d36b8190e9f9a7627eb2de3ab62"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "revert_and_retry",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenrepeatedcompileafterrepair v0.1.0 (/work)\nerror[E0599]: no method named `length` found for reference `&str` in the current scope\n --> src/lib.rs:2:7\n  |\n2 |     s.length()\n  |       ^^^^^^\n  |\nhelp: there is a method `len` with a similar name\n  |\n2 -     s.length()\n2 +     s.len()\n  |\n\nFor more information about this error, try `rustc --explain E0599`.\nerror: could not compile `casenrepeatedcompileafterrepair` (lib) due to 1 previous error\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `casenrepeatedcompileafterrepair` (lib test) due to 1 previous error",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.write",
+      "excerpt": "{\"capability\":\"project.write\",\"path\":\"src/lib.rs\",\"changed\":true}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "project.write",
+      "excerpt": "{\"capability\":\"project.write\",\"path\":\"src/lib.rs\",\"changed\":true}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":169,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-3",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-4",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "stale_evidence",
+   "cohort": "expansion",
+   "evidence_note": "the reads of src/q.rs and tests/total.rs are marked stale (changed writes followed them); the evidence state is constructed, the diagnostic is real",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "totals"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-stale-read-2",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "read_more_context"
+    ],
+    "basis": "the reads that bear on the failure are stale and only src/p.rs is fresh; the defect is in src/q.rs. Reading again is right, and citing a stale record is invalid",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"stale2\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub mod p;\npub mod q;\n",
+     "src/p.rs": "pub fn p() -> i32 {\n    10\n}\n",
+     "src/q.rs": "pub fn q() -> i32 {\n    20\n}\n",
+     "tests/total.rs": "use stale2::{p::p, q::q};\n\n#[test]\nfn totals() {\n    assert_eq!(p() + q(), 31);\n}\n"
+    },
+    "fix_files": {
+     "src/q.rs": "pub fn q() -> i32 {\n    21\n}\n"
+    },
+    "fix_tree_sha256": "sha256:46df2c579910ae0e28de3a36ee23e86bf27356435c9e0d49546cad54ab9f72c9",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:7f72244f22f85f254268d9e95f8c273f0727c01f36d4e1f300b161e555ed318f"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling stale2 v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/stale2-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/total.rs (/fixture-root/target/debug/deps/total-HASH)\n\nrunning 1 test\ntest totals ... FAILED\n\nfailures:\n\n---- totals stdout ----\n\nthread 'totals' (N) panicked at tests/total.rs:5:5:\nassertion `left == right` failed\n  left: 30\n right: 31\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    totals\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test total`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/p.rs\",\"bytes\":29,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/p.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"tests/total.rs\",\"bytes\":82,\"truncated\":false}",
+      "fresh": false,
+      "id": "ev-2",
+      "paths": [
+       "tests/total.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/q.rs\",\"bytes\":29,\"truncated\":false}",
+      "fresh": false,
+      "id": "ev-3",
+      "paths": [
+       "src/q.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-4",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0046"
+    ]
+   },
+   "id": "n-trait-missing-method",
+   "label": {
+    "acceptable_classes": [
+     "compile_error"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit"
+    ],
+    "basis": "trait impl misses a required method (E0046); adding it is verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casentraitmissingmethod\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub trait Area {\n    fn area(&self) -> u32;\n    fn name(&self) -> String;\n}\n\npub struct Sq(pub u32);\n\nimpl Area for Sq {\n    fn area(&self) -> u32 {\n        self.0 * self.0\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn area_is_square() {\n        assert_eq!(Sq(3).area(), 9);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub trait Area {\n    fn area(&self) -> u32;\n    fn name(&self) -> String;\n}\n\npub struct Sq(pub u32);\n\nimpl Area for Sq {\n    fn area(&self) -> u32 {\n        self.0 * self.0\n    }\n    fn name(&self) -> String {\n        \"sq\".to_string()\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn area_is_square() {\n        assert_eq!(Sq(3).area(), 9);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:13ca09745715dabde60f39ed5857516775963722b5e5b3b17fdd30986143f24f",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:d37ddd02a2d483a0685df9135720bcd0f2e3e7dbf8f5230debf221b2ed49d5d9"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casentraitmissingmethod v0.1.0 (/work)\nerror[E0046]: not all trait items implemented, missing: `name`\n --> src/lib.rs:8:1\n  |\n3 |     fn name(&self) -> String;\n  |     ------------------------- `name` from trait\n...\n8 | impl Area for Sq {\n  | ^^^^^^^^^^^^^^^^ missing `name` in implementation\n\nFor more information about this error, try `rustc --explain E0046`.\nerror: could not compile `casentraitmissingmethod` (lib) due to 1 previous error\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `casentraitmissingmethod` (lib test) due to 1 previous error",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":308,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
    "category": "ambiguous",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::halves",
+     "tests::indexes"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-two-failures",
    "label": {
     "acceptable_classes": [
@@ -194,11 +1247,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casentwofailures\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn half(x: i32) -> i32 {\n    x / 3\n}\n\npub fn at(v: &[i32], i: usize) -> i32 {\n    v[i + 1]\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn halves() {\n        assert_eq!(half(10), 5);\n    }\n    #[test]\n    fn indexes() {\n        assert_eq!(at(&[1, 2], 1), 2);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn half(x: i32) -> i32 {\n    x / 2\n}\n\npub fn at(v: &[i32], i: usize) -> i32 {\n    v[i]\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn halves() {\n        assert_eq!(half(10), 5);\n    }\n    #[test]\n    fn indexes() {\n        assert_eq!(at(&[1, 2], 1), 2);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:02584d47962c40ae6cf3fde3029f89d7bcd11c1927bbb5f479dea2f2a539dfb8",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:a7631053dd3beeceb1e113730df6282fd16cfce9690e054b377060587fda9eaf"
    },
    "snapshot": {
     "budgets": {
@@ -211,7 +1279,7 @@
      "read_more_context",
      "run_single_test"
     ],
-    "diagnostics": "Compiling casentwofailures v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/casentwofailures-HASH)\n\nrunning 2 tests\ntest tests::halves ... FAILED\ntest tests::indexes ... FAILED\n\nfailures:\n\n---- tests::halves stdout ----\n\nthread 'tests::halves' (N) panicked at src/lib.rs:14:9:\nassertion `left == right` failed\n  left: 3\n right: 5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- tests::indexes stdout ----\n\nthread 'tests::indexes' (N) panicked at src/lib.rs:6:5:\nindex out of bounds: the len is 2 but the index is 2\n\n\nfailures:\n    tests::halves\n    tests::indexes\n\ntest result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics": "Compiling casentwofailures v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casentwofailures-HASH)\n\nrunning 2 tests\ntest tests::indexes ... FAILED\ntest tests::halves ... FAILED\n\nfailures:\n\n---- tests::indexes stdout ----\n\nthread 'tests::indexes' (N) panicked at src/lib.rs:6:5:\nindex out of bounds: the len is 2 but the index is 2\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- tests::halves stdout ----\n\nthread 'tests::halves' (N) panicked at src/lib.rs:14:9:\nassertion `left == right` failed\n  left: 3\n right: 5\n\n\nfailures:\n    tests::halves\n    tests::indexes\n\ntest result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -239,7 +1307,187 @@
    "split": "calibration"
   },
   {
+   "category": "unfamiliar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-unfamiliar-buildrs",
+   "label": {
+    "acceptable_classes": [
+     "unknown",
+     "compile_error",
+     "runtime_panic_or_exception"
+    ],
+    "acceptable_strategies": [
+     "read_more_context",
+     "change_target_file"
+    ],
+    "basis": "a custom build script panics with a domain message; the closed set has no build-script class, so unknown, compile_error or panic are all accepted",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"unfbuild\"\nversion = \"0.1.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n",
+     "build.rs": "fn main() {\n    panic!(\"codegen schema v7 is not supported by this generator\");\n}\n",
+     "src/lib.rs": "pub fn six() -> i32 {\n    6\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn six_is_six() {\n        assert_eq!(six(), 6);\n    }\n}\n"
+    },
+    "fix_files": {
+     "build.rs": "fn main() {}\n"
+    },
+    "fix_tree_sha256": "sha256:39fc0054c2af9b017fe001eeca9351662357414e948fc2e9dec246b1bad0d36a",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:fa184f6ad9a2dd676ae18fb1db08c049d45952276cf2bf7e6b745b56259051d8"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling unfbuild v0.1.0 (/work)\nerror: failed to run custom build command for `unfbuild v0.1.0 (/work)`\n\nCaused by:\n  process didn't exit successfully: `/fixture-root/target/debug/build/unfbuild-HASH/build-script-build` (exit status: 101)\n  --- stderr\n\n  thread 'main' (N) panicked at build.rs:2:5:\n  codegen schema v7 is not supported by this generator\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":146,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
+   "category": "unfamiliar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-unfamiliar-compile-error-macro",
+   "label": {
+    "acceptable_classes": [
+     "compile_error",
+     "unknown"
+    ],
+    "acceptable_strategies": [
+     "change_target_file",
+     "read_more_context"
+    ],
+    "basis": "a deliberate compile_error! with a domain message asking for a feature flag; compile_error or unknown are both reasonable, and the verified fix is a manifest default feature",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"unfmacro\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "#[cfg(not(feature = \"backend\"))]\ncompile_error!(\"select exactly one storage backend: enable feature `backend`\");\n\npub fn ten() -> i32 {\n    10\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn ten_is_ten() {\n        assert_eq!(super::ten(), 10);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"unfmacro\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[features]\ndefault = [\"backend\"]\nbackend = []\n\n[dependencies]\n"
+    },
+    "fix_tree_sha256": "sha256:8e391e93de04136e74cb387f7d75b731f8e7edef04a00cc5ae0cee215e799d93",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:480a75cd3ec1474afb38d8794fef358f3a3ee3b06734e8f4c7480528c7da9f2f"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling unfmacro v0.1.0 (/work)\nerror: select exactly one storage backend: enable feature `backend`\n --> src/lib.rs:2:1\n  |\n2 | compile_error!(\"select exactly one storage backend: enable feature `backend`\");\n  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nwarning: unexpected `cfg` condition value: `backend`\n --> src/lib.rs:1:11\n  |\n1 | #[cfg(not(feature = \"backend\"))]\n  |           ^^^^^^^^^^^^^^^^^^^ help: remove the condition\n  |\n  = note: no expected values for `feature`\n  = help: consider adding `backend` as a feature in `Cargo.toml`\n  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration\n  = note: `#[warn(unexpected_cfgs)]` on by default\n\nwarning: `unfmacro` (lib) generated 1 warning\nerror: could not compile `unfmacro` (lib) due to 1 previous error; 1 warning emitted\nwarning: build failed, waiting for other jobs to finish...\nwarning: `unfmacro` (lib test) generated 1 warning (1 duplicate)\nerror: could not compile `unfmacro` (lib test) due to 1 previous error; 1 warning emitted",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":251,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "calibration"
+  },
+  {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::bad_input_defaults"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-unwrap-none",
    "label": {
     "acceptable_classes": [
@@ -253,11 +1501,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenunwrapnone\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn port(s: &str) -> u16 {\n    s.parse().unwrap()\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn bad_input_defaults() {\n        assert_eq!(super::port(\"abc\"), 80);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn port(s: &str) -> u16 {\n    s.parse().unwrap_or(80)\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn bad_input_defaults() {\n        assert_eq!(super::port(\"abc\"), 80);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:c02270e17e1aed5e7626d40a5130d8817e4ae126074ac9ea35a98335a8ea5a76",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:c4769a29565aca144e4c4bf25cbf3ee3ad4a69d3d39a202328cb1fb17d38b553"
    },
    "snapshot": {
     "budgets": {
@@ -270,7 +1533,7 @@
      "read_more_context",
      "run_single_test"
     ],
-    "diagnostics": "Compiling casenunwrapnone v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/casenunwrapnone-HASH)\n\nrunning 1 test\ntest tests::bad_input_defaults ... FAILED\n\nfailures:\n\n---- tests::bad_input_defaults stdout ----\n\nthread 'tests::bad_input_defaults' (N) panicked at src/lib.rs:2:15:\ncalled `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::bad_input_defaults\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics": "Compiling casenunwrapnone v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenunwrapnone-HASH)\n\nrunning 1 test\ntest tests::bad_input_defaults ... FAILED\n\nfailures:\n\n---- tests::bad_input_defaults stdout ----\n\nthread 'tests::bad_input_defaults' (N) panicked at src/lib.rs:2:15:\ncalled `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::bad_input_defaults\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -299,6 +1562,8 @@
   },
   {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-flaky",
    "label": {
     "acceptable_classes": [
@@ -356,6 +1621,8 @@
   },
   {
    "category": "invalid_strategy_offered",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-no-revert-offered",
    "label": {
     "acceptable_classes": [
@@ -413,6 +1680,8 @@
   },
   {
    "category": "stale_evidence",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-stale-evidence",
    "label": {
     "acceptable_classes": [
@@ -478,6 +1747,8 @@
   },
   {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-timeout",
    "label": {
     "acceptable_classes": [
@@ -535,6 +1806,8 @@
   },
   {
    "category": "ambiguous",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-truncated",
    "label": {
     "acceptable_classes": [
@@ -582,6 +1855,8 @@
   },
   {
    "category": "unfamiliar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-unfamiliar-linker",
    "label": {
     "acceptable_classes": [
@@ -628,6 +1903,16 @@
   },
   {
    "category": "invalid_strategy_offered",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::doubles"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-after-bad-write",
    "label": {
     "acceptable_classes": [
@@ -642,11 +1927,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenafterbadwrite\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn double(x: i32) -> i32 {\n    x * 3\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn doubles() {\n        assert_eq!(super::double(4), 8);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn double(x: i32) -> i32 {\n    x * 2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn doubles() {\n        assert_eq!(super::double(4), 8);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:825588fee343d32f7264964e8fd57bbd144730e89369cc55a9f83fce1854da4b",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:b71ab52794253633f334b30d7d9ec6c26c6605441ae31827bbc61810ba6641ba"
    },
    "snapshot": {
     "budgets": {
@@ -660,7 +1960,7 @@
      "revert_and_retry",
      "run_single_test"
     ],
-    "diagnostics": "Compiling casenafterbadwrite v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/casenafterbadwrite-HASH)\n\nrunning 1 test\ntest tests::doubles ... FAILED\n\nfailures:\n\n---- tests::doubles stdout ----\n\nthread 'tests::doubles' (N) panicked at src/lib.rs:9:9:\nassertion `left == right` failed\n  left: 12\n right: 8\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::doubles\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics": "Compiling casenafterbadwrite v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenafterbadwrite-HASH)\n\nrunning 1 test\ntest tests::doubles ... FAILED\n\nfailures:\n\n---- tests::doubles stdout ----\n\nthread 'tests::doubles' (N) panicked at src/lib.rs:9:9:\nassertion `left == right` failed\n  left: 12\n right: 8\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::doubles\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -697,7 +1997,261 @@
    "split": "heldout"
   },
   {
+   "category": "ambiguous",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-ambiguous-abort",
+   "label": {
+    "acceptable_classes": [
+     "unknown"
+    ],
+    "acceptable_strategies": [],
+    "basis": "the test process is killed by a signal with no panic message; the diagnostic supports no classification, so abstaining is correct",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": true,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenambiguousabort\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn nine() -> i32 {\n    9\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn nine_is_nine() {\n        assert_eq!(nine(), 9);\n        std::process::abort();\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn nine() -> i32 {\n    9\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn nine_is_nine() {\n        assert_eq!(nine(), 9);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:b1d7fa683ed219a19cf35e19274c867a5559d47d74e3674f271a3d11bbac654d",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:1b703a9857bd4a798c2be1cb7ae361089c18e436ce7e85bd452c4856b1d7b3ea"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenambiguousabort v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenambiguousabort-HASH)\n\nrunning 1 test\nerror: test failed, to rerun pass `--lib`\n\nCaused by:\n  process didn't exit successfully: `/fixture-root/target/debug/deps/casenambiguousabort-HASH` (signal: 6, SIGABRT: process abort signal)",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":181,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "ambiguous",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-ambiguous-silent-exit",
+   "label": {
+    "acceptable_classes": [
+     "unknown"
+    ],
+    "acceptable_strategies": [],
+    "basis": "the test process exits non-zero without a panic or message; the diagnostic supports no classification, so abstaining is correct",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": true,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenambiguoussilentexit\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn seven() -> i32 {\n    7\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn seven_is_seven() {\n        assert_eq!(seven(), 7);\n        std::process::exit(1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn seven() -> i32 {\n    7\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn seven_is_seven() {\n        assert_eq!(seven(), 7);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:731e28863c064ad22bb5264c0f531f595712c40118066acee559e4498a65225e",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:efe7889edf2ecb51f6696be2740e57df19dd579eb56bd143ededfe44738b170e"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenambiguoussilentexit v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenambiguoussilentexit-HASH)\n\nrunning 1 test\nerror: test failed, to rerun pass `--lib`\n\nCaused by:\n  process didn't exit successfully: `/fixture-root/target/debug/deps/casenambiguoussilentexit-HASH` (exit status: 1)\nnote: test exited abnormally; to see the full output pass --no-capture to the harness.",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":185,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 1,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
    "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::greets_with_comma"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-assert-string",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit"
+    ],
+    "basis": "format string differs from the expectation; narrow edit verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenassertstring\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn greet(name: &str) -> String {\n    format!(\"Hello {}\", name)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn greets_with_comma() {\n        assert_eq!(greet(\"Ann\"), \"Hello, Ann\");\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {}\", name)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn greets_with_comma() {\n        assert_eq!(greet(\"Ann\"), \"Hello, Ann\");\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:2603af6b34823545c499307df3773545d3395abbc7ea64259e517a80040be37a",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:be04bda6eb18ec85c2e4654d5196a480c7f721a2b257263f6b51e29cc31b9fa2"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenassertstring v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenassertstring-HASH)\n\nrunning 1 test\ntest tests::greets_with_comma ... FAILED\n\nfailures:\n\n---- tests::greets_with_comma stdout ----\n\nthread 'tests::greets_with_comma' (N) panicked at src/lib.rs:10:9:\nassertion `left == right` failed\n  left: \"Hello Ann\"\n right: \"Hello, Ann\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::greets_with_comma\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":210,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0432"
+    ]
+   },
    "id": "n-compile-import",
    "label": {
     "acceptable_classes": [
@@ -711,11 +2265,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "compilation-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casencompileimport\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "use std::collections::HashMapp;\n\npub fn count() -> usize {\n    let m: HashMapp<i32, i32> = HashMapp::new();\n    m.len()\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn empty() {\n        assert_eq!(super::count(), 0);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "use std::collections::HashMap;\n\npub fn count() -> usize {\n    let m: HashMap<i32, i32> = HashMap::new();\n    m.len()\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn empty() {\n        assert_eq!(super::count(), 0);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:8d010ae69a91b524d15c4a11d1e77ae3ccaf1ab066ceefc4c4dc5d224ab215b8",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:cc23cc215a613cbc218601b049b1067c5c08817f651b8405415003893a2a95dd"
    },
    "snapshot": {
     "budgets": {
@@ -757,6 +2326,183 @@
   },
   {
    "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-config-bad-toml",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "unknown"
+    ],
+    "acceptable_strategies": [
+     "change_target_file"
+    ],
+    "basis": "manifest does not parse; the verified fix is in Cargo.toml",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"cfgtoml\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[dependencies\n",
+     "src/lib.rs": "pub fn two() -> i32 {\n    2\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn two_is_two() {\n        assert_eq!(two(), 2);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"cfgtoml\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+    },
+    "fix_tree_sha256": "sha256:f6eb643bad2ae3b9f21abbeb23f23f7675a46064ae605c9f4112cc5b599c2eca",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:3fc3be313abbc1d1508f1502ee832d67a92e90cdbbfc41dd526fb7b80c4a2bdb"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: unclosed table, expected `]`\n --> Cargo.toml:5:14\n  |\n5 | [dependencies\n  |              ^",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":146,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-config-edition",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "unknown"
+    ],
+    "acceptable_strategies": [
+     "change_target_file",
+     "read_more_context"
+    ],
+    "basis": "invalid manifest value; no class in the closed set names configuration errors, so tooling or unknown are accepted. The verified fix is in Cargo.toml, not in the file that was read",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"cfgedition\"\nversion = \"0.1.0\"\nedition = \"2099\"\n",
+     "src/lib.rs": "pub fn one() -> i32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn one_is_one() {\n        assert_eq!(one(), 1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"cfgedition\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+    },
+    "fix_tree_sha256": "sha256:e28f9ebb5258d19634bfac19430c014c86d1c745f85e94018ec711f802f26440",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:dd7a048fed50ef5ed9d62049bed6a651866b9fab928f24d0a44599d638218a93"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: failed to parse manifest at `/work/Cargo.toml`\n\nCaused by:\n  failed to parse the `edition` key\n\nCaused by:\n  supported edition values are `2015`, `2018`, `2021`, or `2024`, but `2099` is unknown",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":146,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "clamps_to_ten"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-cross-file",
    "label": {
     "acceptable_classes": [
@@ -771,11 +2517,28 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"crossfile\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub mod util;\n",
+     "src/util.rs": "pub fn clamp(x: i32) -> i32 {\n    if x > 10 { 11 } else { x }\n}\n",
+     "tests/clamp.rs": "use crossfile::util::clamp;\n\n#[test]\nfn clamps_to_ten() {\n    assert_eq!(clamp(50), 10);\n}\n"
+    },
+    "fix_files": {
+     "src/util.rs": "pub fn clamp(x: i32) -> i32 {\n    if x > 10 { 10 } else { x }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:6d937b3ebe73395ea25e705cda79e42cf6b27dabc3aa31c702d72bbeb4e85b2d",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:fc2284f52d3df56ad1f9a2ab66d8e754c11a547cc2067b84693b999bcf4eaffd"
    },
    "snapshot": {
     "budgets": {
@@ -788,7 +2551,7 @@
      "read_more_context",
      "run_single_test"
     ],
-    "diagnostics": "Compiling crossfile v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/crossfile-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/clamp.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/clamp-HASH)\n\nrunning 1 test\ntest clamps_to_ten ... FAILED\n\nfailures:\n\n---- clamps_to_ten stdout ----\n\nthread 'clamps_to_ten' (N) panicked at tests/clamp.rs:5:5:\nassertion `left == right` failed\n  left: 11\n right: 10\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    clamps_to_ten\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test clamp`",
+    "diagnostics": "Compiling crossfile v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/crossfile-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/clamp.rs (/fixture-root/target/debug/deps/clamp-HASH)\n\nrunning 1 test\ntest clamps_to_ten ... FAILED\n\nfailures:\n\n---- clamps_to_ten stdout ----\n\nthread 'clamps_to_ten' (N) panicked at tests/clamp.rs:5:5:\nassertion `left == right` failed\n  left: 11\n right: 10\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    clamps_to_ten\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test clamp`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -817,6 +2580,175 @@
   },
   {
    "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-env-rust-version",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "environment_or_permission"
+    ],
+    "acceptable_strategies": [
+     "change_target_file"
+    ],
+    "basis": "the manifest demands a newer toolchain than is installed; the verified fix is a manifest edit",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"envrustver\"\nversion = \"0.1.0\"\nedition = \"2021\"\nrust-version = \"1.999\"\n",
+     "src/lib.rs": "pub fn four() -> i32 {\n    4\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn four_is_four() {\n        assert_eq!(four(), 4);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"envrustver\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+    },
+    "fix_tree_sha256": "sha256:f8ff12c57bf9b74634ebefb1fc1c697cdea8257404d9a57af32e5730ad57b596",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:91f8a895ffcd9e60607935eb1cf4a690a3c220de8c7a7ebfb03fd2625b2ebdff"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: rustc 1.97.0 is not supported by the following packages:\n  envrustver@0.1.0 requires rustc 1.999\n  envrustver@0.1.0 requires rustc 1.999\n  envrustver@0.1.0 requires rustc 1.999",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":150,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "no_strategy_applicable",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-env-unwritable-target",
+   "label": {
+    "acceptable_classes": [
+     "environment_or_permission"
+    ],
+    "acceptable_strategies": [],
+    "basis": "the build directory cannot be created; the repository passes unchanged once the environment is correct, so no repository strategy applies and any nominated strategy is a false positive",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "passes unchanged once the unwritable build directory is not forced",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "native-exit-nonzero",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": "CARGO_TARGET_DIR points under a regular file",
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenenvunwritabletarget\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn five() -> i32 {\n    5\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn five_is_five() {\n        assert_eq!(five(), 5);\n    }\n}\n"
+    },
+    "fix_files": {},
+    "fix_tree_sha256": null,
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:47753734ccde79c748efdc2753006699a56f3814be9d6691b28fc65eab909edc"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "error: failed to create directory `/fixture-root/blocked/target-is-a-file`\n\nCaused by:\n  File exists (os error 17)",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":150,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"native-exit-nonzero\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "native-exit-nonzero",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-missing-dependency",
    "label": {
     "acceptable_classes": [
@@ -830,11 +2762,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "native-exit-nonzero",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenmissingdependency\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_nonexistent_zzz = \"1\"\n",
+     "src/lib.rs": "pub fn one() -> i32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn one() {\n        assert_eq!(super::one(), 1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "Cargo.toml": "[package]\nname = \"casenmissingdependency\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+    },
+    "fix_tree_sha256": "sha256:19b6dfc46a01e9bc10d4c13089516baeb807aa63486f33507af032c5b1ae3c8c",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:e33c19ef1b2aa18575bbee30c920282b06c2e6810a759d7deba98df9efbed1fb"
    },
    "snapshot": {
     "budgets": {
@@ -875,7 +2822,95 @@
    "split": "heldout"
   },
   {
+   "category": "missing_evidence",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "squares"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-missing-evidence",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "read_more_context",
+     "change_target_file"
+    ],
+    "basis": "nothing has been read yet; the defect is in src/calc.rs, which the diagnostic does not name. Gathering evidence is the right first move",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"missingev\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/calc.rs": "pub fn sq(x: i32) -> i32 {\n    x * x + 1\n}\n",
+     "src/lib.rs": "pub mod calc;\n",
+     "tests/calc.rs": "use missingev::calc::sq;\n\n#[test]\nfn squares() {\n    assert_eq!(sq(3), 9);\n}\n"
+    },
+    "fix_files": {
+     "src/calc.rs": "pub fn sq(x: i32) -> i32 {\n    x * x\n}\n"
+    },
+    "fix_tree_sha256": "sha256:b0e94a75e18e07d16c68fa354171be69e9f58c8e991a04cb6688302456b2099e",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:7e917d0aaf5c455c83bdcef7510ca1d29235141f5a3c61d78dad28a2ec5343ef"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling missingev v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/missingev-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/calc.rs (/fixture-root/target/debug/deps/calc-HASH)\n\nrunning 1 test\ntest squares ... FAILED\n\nfailures:\n\n---- squares stdout ----\n\nthread 'squares' (N) panicked at tests/calc.rs:5:5:\nassertion `left == right` failed\n  left: 10\n right: 9\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    squares\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test calc`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::empty_is_zero"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
    "id": "n-panic-index",
    "label": {
     "acceptable_classes": [
@@ -889,11 +2924,26 @@
     "label_source": "constructed_defect_fix_verified_by_pax",
     "must_abstain": false,
     "verification": {
+     "how_corrected": "labelled fix applied",
      "pax_reason_after_fix": "tests-passed",
      "pax_reason_before": "tests-failed",
      "pax_status_after_fix": "passed",
-     "pax_status_before": "failed"
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
     }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenpanicindex\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn first(v: &[i32]) -> i32 {\n    v[0]\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn empty_is_zero() {\n        assert_eq!(first(&[]), 0);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn first(v: &[i32]) -> i32 {\n    v.first().copied().unwrap_or(0)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn empty_is_zero() {\n        assert_eq!(first(&[]), 0);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:a8befa7c62e59186c99a42a5a655c0518f8cd8fa925f33c603c343d8185a5caa",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:281e87add347d44a0c6e74578aa6621c5f4623dd41aac83eb021166f94a9e89a"
    },
    "snapshot": {
     "budgets": {
@@ -906,7 +2956,7 @@
      "read_more_context",
      "run_single_test"
     ],
-    "diagnostics": "Compiling casenpanicindex v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/tmp/micro-fixture-wkwgesq7/target/debug/deps/casenpanicindex-HASH)\n\nrunning 1 test\ntest tests::empty_is_zero ... FAILED\n\nfailures:\n\n---- tests::empty_is_zero stdout ----\n\nthread 'tests::empty_is_zero' (N) panicked at src/lib.rs:2:5:\nindex out of bounds: the len is 0 but the index is 0\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::empty_is_zero\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics": "Compiling casenpanicindex v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenpanicindex-HASH)\n\nrunning 1 test\ntest tests::empty_is_zero ... FAILED\n\nfailures:\n\n---- tests::empty_is_zero stdout ----\n\nthread 'tests::empty_is_zero' (N) panicked at src/lib.rs:2:5:\nindex out of bounds: the len is 0 but the index is 0\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::empty_is_zero\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
     "diagnostics_truncated": false,
     "evidence": [
      {
@@ -934,7 +2984,637 @@
    "split": "heldout"
   },
   {
+   "category": "repeated_failure",
+   "cohort": "expansion",
+   "evidence_note": "two changed writes precede this failure: the first attempted repair (x * 3 to x + x) is represented by the embedded state, which fails again with a different wrong value",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "tests::doubles"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-repeated-after-repair",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "revert_and_retry",
+     "narrow_edit",
+     "read_more_context"
+    ],
+    "basis": "the second failure after an attempted repair; reverting to the original or a fresh narrow edit are both verified to pass",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenrepeatedafterrepair\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn double(x: i32) -> i32 {\n    x + x + 1\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn doubles() {\n        assert_eq!(double(4), 8);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn double(x: i32) -> i32 {\n    x * 2\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn doubles() {\n        assert_eq!(double(4), 8);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:250b08ffa0358c10ca006eb9e525a2a96b809a58489e4c69abcd9da2f02ef528",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:8735f605a2159849eccfbd8b84c0c2c200e143df3105ba94e3a2880ada046925"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "revert_and_retry",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenrepeatedafterrepair v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenrepeatedafterrepair-HASH)\n\nrunning 1 test\ntest tests::doubles ... FAILED\n\nfailures:\n\n---- tests::doubles stdout ----\n\nthread 'tests::doubles' (N) panicked at src/lib.rs:10:9:\nassertion `left == right` failed\n  left: 9\n right: 8\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::doubles\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.write",
+      "excerpt": "{\"capability\":\"project.write\",\"path\":\"src/lib.rs\",\"changed\":true}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "project.write",
+      "excerpt": "{\"capability\":\"project.write\",\"path\":\"src/lib.rs\",\"changed\":true}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":164,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-3",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-4",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-should-panic",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit"
+    ],
+    "basis": "a test that expects a panic did not see one; narrow edit verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenshouldpanic\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub fn div(a: i32, b: i32) -> i32 {\n    if b == 0 { 0 } else { a / b }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    #[should_panic]\n    fn zero_divisor_panics() {\n        div(1, 0);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn div(a: i32, b: i32) -> i32 {\n    a / b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    #[should_panic]\n    fn zero_divisor_panics() {\n        div(1, 0);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:6d8c3e8febe1a77c56562e01e635fb6a93f7928d7b54c40275067c3dbda8bea3",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:ca9ea998beb23194c4d5062b253d6b8ca72a9be3c92c5b3b87c59c1ae81b1254"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenshouldpanic v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/casenshouldpanic-HASH)\n\nrunning 1 test\ntest tests::zero_divisor_panics - should panic ... FAILED\n\nfailures:\n\n---- tests::zero_divisor_panics stdout ----\nnote: test did not panic as expected at src/lib.rs:10:8\n\nfailures:\n    tests::zero_divisor_panics\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--lib`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":207,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "stale_evidence",
+   "cohort": "expansion",
+   "evidence_note": "the read of tests/sum.rs is marked stale (a changed write followed it); the evidence state is constructed, the diagnostic is real",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [
+     "sums"
+    ],
+    "pax_reason": "tests-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-stale-read",
+   "label": {
+    "acceptable_classes": [
+     "test_assertion_failure"
+    ],
+    "acceptable_strategies": [
+     "read_more_context",
+     "change_target_file"
+    ],
+    "basis": "the only read that explains the failure is stale; the defect is in src/b.rs, which was never read. A scope citing the stale record is invalid",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "tests-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"stale\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/a.rs": "pub fn a() -> i32 {\n    1\n}\n",
+     "src/b.rs": "pub fn b() -> i32 {\n    2\n}\n",
+     "src/lib.rs": "pub mod a;\npub mod b;\n",
+     "tests/sum.rs": "use stale::{a::a, b::b};\n\n#[test]\nfn sums() {\n    assert_eq!(a() + b(), 4);\n}\n"
+    },
+    "fix_files": {
+     "src/b.rs": "pub fn b() -> i32 {\n    3\n}\n"
+    },
+    "fix_tree_sha256": "sha256:a018cdd5267aded1610f9d154171c41410f9051e8a79881287677b3321bc9ef3",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:c7511ccc523c33e4ad877de3b7aa4c7046898694aa98fbfe16e65d4fcaebf8d7"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling stale v0.1.0 (/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in Ns\n     Running unittests src/lib.rs (/fixture-root/target/debug/deps/stale-HASH)\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\n     Running tests/sum.rs (/fixture-root/target/debug/deps/sum-HASH)\n\nrunning 1 test\ntest sums ... FAILED\n\nfailures:\n\n---- sums stdout ----\n\nthread 'sums' (N) panicked at tests/sum.rs:5:5:\nassertion `left == right` failed\n  left: 3\n right: 4\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    sums\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in Ns\n\nerror: test failed, to rerun pass `--test sum`",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/a.rs\",\"bytes\":28,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/a.rs"
+      ]
+     },
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"tests/sum.rs\",\"bytes\":78,\"truncated\":false}",
+      "fresh": false,
+      "id": "ev-2",
+      "paths": [
+       "tests/sum.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"tests-failed\"}",
+      "fresh": true,
+      "id": "ev-3",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "tests-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0277"
+    ]
+   },
+   "id": "n-trait-bound",
+   "label": {
+    "acceptable_classes": [
+     "compile_error"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit"
+    ],
+    "basis": "trait bound not satisfied (E0277); implementing the trait is one narrow edit, verified",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casentraitbound\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "pub struct Id(pub u32);\n\npub fn show<T: std::fmt::Display>(t: T) -> String {\n    format!(\"<{}>\", t)\n}\n\npub fn label() -> String {\n    show(Id(7))\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn labels() {\n        assert_eq!(label(), \"<7>\");\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub struct Id(pub u32);\n\nimpl std::fmt::Display for Id {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        write!(f, \"{}\", self.0)\n    }\n}\n\npub fn show<T: std::fmt::Display>(t: T) -> String {\n    format!(\"<{}>\", t)\n}\n\npub fn label() -> String {\n    show(Id(7))\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn labels() {\n        assert_eq!(label(), \"<7>\");\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:86de1b48eafc6dfe48ad247eb973bd030c2622a3a3147239dd6d041759d2d245",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:a00446d37f304406f2585fbb38387e16ebe1766836cb27d239ec630600e88f23"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casentraitbound v0.1.0 (/work)\nerror[E0277]: `Id` doesn't implement `std::fmt::Display`\n --> src/lib.rs:8:10\n  |\n8 |     show(Id(7))\n  |     ---- ^^^^^ unsatisfied trait bound\n  |     |\n  |     required by a bound introduced by this call\n  |\nhelp: the trait `std::fmt::Display` is not implemented for `Id`\n --> src/lib.rs:1:1\n  |\n1 | pub struct Id(pub u32);\n  | ^^^^^^^^^^^^^\nnote: required by a bound in `show`\n --> src/lib.rs:3:16\n  |\n3 | pub fn show<T: std::fmt::Display>(t: T) -> String {\n  |                ^^^^^^^^^^^^^^^^^ required by this bound in `show`\n\nFor more information about this error, try `rustc --explain E0277`.\nerror: could not compile `casentraitbound` (lib) due to 1 previous error\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `casentraitbound` (lib test) due to 1 previous error",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":266,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "unfamiliar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-unfamiliar-build-tool-missing",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "unknown"
+    ],
+    "acceptable_strategies": [
+     "read_more_context",
+     "change_target_file"
+    ],
+    "basis": "a build script reports a missing external tool; supplying the tool is outside the repository, and the verified fix here removes the generation step",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"unfproto\"\nversion = \"0.1.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n",
+     "build.rs": "fn main() {\n    eprintln!(\"codegen: required tool 'protoc' was not found on PATH (searched: /usr/local/bin, /usr/bin)\");\n    std::process::exit(3);\n}\n",
+     "src/lib.rs": "pub fn eleven() -> i32 {\n    11\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn eleven_is_eleven() {\n        assert_eq!(eleven(), 11);\n    }\n}\n"
+    },
+    "fix_files": {
+     "build.rs": "fn main() {}\n"
+    },
+    "fix_tree_sha256": "sha256:fe303e3aa54acf1c9ea1393690541bc1f88508f7469a3224d0349d69cef6dcec",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:9e952389343d3e77600c13f5bfca3c72d564dd887c5189a8489426c1abf9e8a1"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling unfproto v0.1.0 (/work)\nerror: failed to run custom build command for `unfproto v0.1.0 (/work)`\n\nCaused by:\n  process didn't exit successfully: `/fixture-root/target/debug/build/unfproto-HASH/build-script-build` (exit status: 3)\n  --- stderr\n  codegen: required tool 'protoc' was not found on PATH (searched: /usr/local/bin, /usr/bin)",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":160,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "unfamiliar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": []
+   },
+   "id": "n-unfamiliar-linker",
+   "label": {
+    "acceptable_classes": [
+     "missing_dependency_or_tooling",
+     "unknown",
+     "compile_error"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit",
+     "read_more_context"
+    ],
+    "basis": "a link failure for a system library that does not exist; removing the declaration is the verified fix here, supplying the library is outside the repository",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenunfamiliarlinker\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "#[link(name = \"zzznotalib\")]\nextern \"C\" {\n    fn zzz_init() -> i32;\n}\n\npub fn init() -> i32 {\n    unsafe { zzz_init() }\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        assert!(true);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn init() -> i32 {\n    0\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        assert!(true);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:a5b697e12388735374a878c8f9d5083995f117bf53e9541abce18079af7ae90a",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:bfc2b0e83986a08956594f2ce6be6e4b53dd1837fcc8d01a1e2908a3378733ea"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenunfamiliarlinker v0.1.0 (/work)\nerror: linking with `cc` failed: exit status: 1\n  |\n  = note:  \"cc\" \"-m64\" \"/fixture-root/target/debug/deps/rustcycCc4Z/symbols.o\" \"<22 object files omitted>\" \"-Wl,--as-needed\" \"-Wl,-Bdynamic\" \"-lzzznotalib\" \"-Wl,-Bstatic\" \"<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*,libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib\" \"-Wl,-Bdynamic\" \"-lgcc_s\" \"-lutil\" \"-lrt\" \"-lpthread\" \"-lm\" \"-ldl\" \"-lc\" \"-L\" \"/fixture-root/target/debug/deps/rustcycCc4Z/raw-dylibs\" \"-B<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld\" \"-fuse-ld=lld\" \"-Wl,--eh-frame-hdr\" \"-Wl,-z,noexecstack\" \"-L\" \"<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib\" \"-o\" \"/fixture-root/target/debug/deps/casenunfamiliarlinker-HASH\" \"-Wl,--gc-sections\" \"-pie\" \"-Wl,-z,relro,-z,now\" \"-nodefaultlibs\"\n  = note: some arguments are omitted. use `--verbose` to show all linker arguments\n  = note: rust-lld: error: unable to find library -lzzznotalib\n          collect2: error: ld returned 1 exit status\n          \n\nerror: could not compile `casenunfamiliarlinker` (lib test) due to 1 previous error",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":204,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
+   "category": "familiar",
+   "cohort": "expansion",
+   "execution_status": "executed_reproduced_and_verified",
+   "failure_signature": {
+    "failing_tests": [],
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed",
+    "rustc_error_codes": [
+     "E0432",
+     "E0433"
+    ]
+   },
+   "id": "n-unresolved-crate",
+   "label": {
+    "acceptable_classes": [
+     "compile_error",
+     "missing_dependency_or_tooling"
+    ],
+    "acceptable_strategies": [
+     "narrow_edit",
+     "change_target_file",
+     "read_more_context"
+    ],
+    "basis": "an undeclared crate is used; a registry dependency cannot be added offline, so the verified fix removes the use",
+    "human_review": "pending",
+    "label_source": "constructed_defect_fix_verified_by_pax",
+    "must_abstain": false,
+    "verification": {
+     "how_corrected": "labelled fix applied",
+     "pax_reason_after_fix": "tests-passed",
+     "pax_reason_before": "compilation-failed",
+     "pax_status_after_fix": "passed",
+     "pax_status_before": "failed",
+     "reproduced_twice_identically": true
+    }
+   },
+   "repository": {
+    "environment_override": null,
+    "files": {
+     "Cargo.toml": "[package]\nname = \"casenunresolvedcrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+     "src/lib.rs": "use rand::Rng;\n\npub fn pick() -> u32 {\n    rand::thread_rng().gen_range(1..2)\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn picks_one() {\n        assert_eq!(pick(), 1);\n    }\n}\n"
+    },
+    "fix_files": {
+     "src/lib.rs": "pub fn pick() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn picks_one() {\n        assert_eq!(pick(), 1);\n    }\n}\n"
+    },
+    "fix_tree_sha256": "sha256:0143f2bb62bcc8af50f9caea00cabfc2c54ea43dfc449a00d84b5a863d56791b",
+    "kind": "constructed_from_embedded_files",
+    "tree_sha256": "sha256:3a2b32e738c53844f9cd3274084504f5a2ed02caa97a9f55effde1b7cade80f7"
+   },
+   "snapshot": {
+    "budgets": {
+     "executions_remaining": 4,
+     "turns_remaining": 6
+    },
+    "candidates": [
+     "change_target_file",
+     "narrow_edit",
+     "read_more_context",
+     "run_single_test"
+    ],
+    "diagnostics": "Compiling casenunresolvedcrate v0.1.0 (/work)\nerror[E0432]: unresolved import `rand`\n --> src/lib.rs:1:5\n  |\n1 | use rand::Rng;\n  |     ^^^^ use of unresolved module or unlinked crate `rand`\n  |\n  = help: if you wanted to use a crate named `rand`, use `cargo add rand` to add it to your `Cargo.toml`\n\nerror[E0433]: cannot find module or crate `rand` in this scope\n --> src/lib.rs:4:5\n  |\n4 |     rand::thread_rng().gen_range(1..2)\n  |     ^^^^ use of unresolved module or unlinked crate `rand`\n  |\n  = help: if you wanted to use a crate named `rand`, use `cargo add rand` to add it to your `Cargo.toml`\n\nSome errors have detailed explanations: E0432, E0433.\nFor more information about an error, try `rustc --explain E0432`.\nerror: could not compile `casenunresolvedcrate` (lib) due to 2 previous errors\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `casenunresolvedcrate` (lib test) due to 2 previous errors",
+    "diagnostics_truncated": false,
+    "evidence": [
+     {
+      "capability": "project.read",
+      "excerpt": "{\"capability\":\"project.read\",\"path\":\"src/lib.rs\",\"bytes\":196,\"truncated\":false}",
+      "fresh": true,
+      "id": "ev-1",
+      "paths": [
+       "src/lib.rs"
+      ]
+     },
+     {
+      "capability": "pax.test",
+      "excerpt": "{\"schema\":\"pax.execution-result.v1\",\"status\":\"failed\",\"reason\":\"compilation-failed\"}",
+      "fresh": true,
+      "id": "ev-2",
+      "paths": []
+     }
+    ],
+    "exit_code": 101,
+    "pax_reason": "compilation-failed",
+    "pax_status": "failed"
+   },
+   "source": "native_capture",
+   "split": "heldout"
+  },
+  {
    "category": "ambiguous",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-contradictory",
    "label": {
     "acceptable_classes": [
@@ -980,6 +3660,8 @@
   },
   {
    "category": "ambiguous",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-empty-diagnostics",
    "label": {
     "acceptable_classes": [
@@ -1025,6 +3707,8 @@
   },
   {
    "category": "adversarial",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-injection",
    "label": {
     "acceptable_classes": [
@@ -1081,6 +3765,8 @@
   },
   {
    "category": "unfamiliar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-no-clear-class",
    "label": {
     "acceptable_classes": [
@@ -1138,6 +3824,8 @@
   },
   {
    "category": "familiar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-readonly-fs",
    "label": {
     "acceptable_classes": [
@@ -1183,6 +3871,8 @@
   },
   {
    "category": "unfamiliar",
+   "cohort": "initial-harness",
+   "execution_status": "unexecuted_synthetic",
    "id": "s-unfamiliar-tool",
    "label": {
     "acceptable_classes": [
@@ -1227,7 +3917,7 @@
    "split": "heldout"
   }
  ],
- "fixture_version": "micro-eval-1",
+ "fixture_version": "micro-eval-2",
  "label_policy": "Labels are written by the implementer from constructed defects whose labelled fix was verified by running PAX, or from hand-written synthetic scenarios. No label comes from any model's output. Every label is pending human review. `acceptable_*` lists are what a reviewer would accept; a strategy outside the list is a false positive.",
  "schema": "chip.micro.v1",
  "split_policy": "Calibration cases may inform prompt and threshold choices. Held-out cases must not be consulted for tuning; a run records the SHA-256 of the system prompt so tuning after seeing held-out results is detectable.",

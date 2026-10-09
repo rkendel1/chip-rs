@@ -909,6 +909,26 @@ pub const SYSTEM_PROMPT: &str = concat!(
     "than an abstention."
 );
 
+/// A digest of the contract text the model is given (the schema line of the prompt and the enumerations):
+/// it changes whenever the closed sets or the schema do.
+pub fn schema_digest() -> String {
+    let mut text = String::from(SCHEMA);
+    for set in [
+        FailureClass::ALL
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>(),
+        StrategyId::ALL.iter().map(|c| c.as_str()).collect(),
+        Applicability::ALL.iter().map(|c| c.as_str()).collect(),
+        AbstainReason::ALL.iter().map(|c| c.as_str()).collect(),
+        BlockedReason::ALL.iter().map(|c| c.as_str()).collect(),
+    ] {
+        text.push('|');
+        text.push_str(&set.join(","));
+    }
+    format!("sha256:{}", hex(&Sha256::digest(text.as_bytes())))
+}
+
 pub fn system_prompt_digest() -> String {
     format!("sha256:{}", hex(&Sha256::digest(SYSTEM_PROMPT.as_bytes())))
 }
@@ -1126,7 +1146,7 @@ impl Deterministic {
     }
 }
 
-fn response_json(r: &MicroResponse) -> serde_json::Value {
+pub fn response_json(r: &MicroResponse) -> serde_json::Value {
     serde_json::json!({
         "outcome": r.outcome.as_str(),
         "classification": r.classification.map(FailureClass::as_str),
@@ -1180,6 +1200,8 @@ impl ShadowRecord {
                     "snapshot_id": snapshot_id,
                     "contract_version": INTERIM_CONTRACT_VERSION,
                     "contract_version_basis": "interim: no Work Contract exists yet",
+                    "prompt_sha256": system_prompt_digest(),
+                    "schema_sha256": schema_digest(),
                     "provider": identity.provider,
                     "model": identity.model,
                     "endpoint": identity.endpoint,

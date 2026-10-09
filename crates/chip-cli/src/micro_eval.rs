@@ -52,8 +52,21 @@ pub struct Case {
     pub split: Split,
     pub category: String,
     pub source: String,
+    /// `initial-harness` (the first 22, kept as harness fixtures) or `expansion`.
+    pub cohort: String,
+    /// `executed_reproduced_and_verified` (a native tool was run, the failure reproduced identically and
+    /// the labelled correction made PAX pass) or `unexecuted_synthetic` (hand-written; nothing was run).
+    pub execution_status: String,
+    /// The case embeds the repository files needed to reproduce it.
+    pub reproducible: bool,
     pub snapshot: Snapshot,
     pub label: Label,
+}
+
+impl Case {
+    pub fn executed(&self) -> bool {
+        self.execution_status == "executed_reproduced_and_verified"
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +74,8 @@ pub struct Fixture {
     pub version: String,
     /// SHA-256 of the fixture file as read.
     pub sha256: String,
+    /// SHA-256 over the canonical JSON of every held-out case, in id order. Compared with the frozen value.
+    pub heldout_sha256: String,
     pub cases: Vec<Case>,
 }
 
@@ -154,6 +169,12 @@ fn parse_case(v: &serde_json::Value) -> Result<Case, String> {
     Ok(Case {
         category: text(v, "category").map_err(wrap)?.to_string(),
         source: text(v, "source").map_err(wrap)?.to_string(),
+        cohort: text(v, "cohort").map_err(wrap)?.to_string(),
+        execution_status: text(v, "execution_status").map_err(wrap)?.to_string(),
+        reproducible: v["repository"]["files"]
+            .as_object()
+            .is_some_and(|f| !f.is_empty())
+            && v["repository"]["tree_sha256"].is_string(),
         id,
         split,
         snapshot,
@@ -176,7 +197,20 @@ pub fn load(raw: &str) -> Result<Fixture, String> {
         .iter()
         .map(parse_case)
         .collect::<Result<Vec<_>, _>>()?;
+    let mut heldout: Vec<&serde_json::Value> = v["cases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["split"] == "heldout")
+        .collect();
+    heldout.sort_by_key(|c| c["id"].as_str().unwrap_or_default().to_string());
+    let canonical: String = heldout
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     Ok(Fixture {
+        heldout_sha256: format!("sha256:{}", hex(&Sha256::digest(canonical.as_bytes()))),
         version: text(&v, "fixture_version")?.to_string(),
         sha256: format!("sha256:{}", hex(&Sha256::digest(raw.as_bytes()))),
         cases,
@@ -192,6 +226,59 @@ pub struct Check {
     pub name: &'static str,
     pub passed: bool,
     pub detail: String,
+}
+
+/// The frozen held-out set: its case ids and content hash, recorded before any candidate model was evaluated.
+pub const FREEZE_PATH: &str = "tests/fixtures/micro/heldout.freeze.json";
+
+/// The freeze document for this fixture. Written once, by `micro_eval --freeze`, and never overwritten.
+pub fn freeze_document(f: &Fixture, commit: Option<String>) -> serde_json::Value {
+    let mut ids: Vec<&str> = f
+        .cases
+        .iter()
+        .filter(|c| c.split == Split::Heldout)
+        .map(|c| c.id.as_str())
+        .collect();
+    ids.sort_unstable();
+    serde_json::json!({
+        "fixture_version": f.version,
+        "heldout_ids": ids,
+        "heldout_sha256": f.heldout_sha256,
+        "frozen_at_commit": commit,
+        "rule": "Frozen before any candidate model was evaluated. Changing a held-out case, adding one, or moving one between splits requires a new fixture version and a new freeze; a run against a fixture whose held-out hash differs from this file is flagged and is not held-out evidence.",
+    })
+}
+
+/// Whether the held-out set is the one that was frozen.
+pub fn frozen_check(f: &Fixture, freeze_raw: Option<&str>) -> Check {
+    let name = "held-out set matches its freeze";
+    let Some(raw) = freeze_raw else {
+        return Check {
+            name,
+            passed: false,
+            detail: "no freeze file".into(),
+        };
+    };
+    let Ok(freeze) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Check {
+            name,
+            passed: false,
+            detail: "the freeze file does not parse".into(),
+        };
+    };
+    let now = freeze_document(f, None);
+    let same = freeze["fixture_version"] == now["fixture_version"]
+        && freeze["heldout_ids"] == now["heldout_ids"]
+        && freeze["heldout_sha256"] == now["heldout_sha256"];
+    Check {
+        name,
+        passed: same,
+        detail: if same {
+            "ok".into()
+        } else {
+            "the held-out cases differ from the frozen set".into()
+        },
+    }
 }
 
 /// Structural checks on the fixture itself: the properties the evaluation relies on.
@@ -265,6 +352,32 @@ pub fn fixture_checks(f: &Fixture) -> Vec<Check> {
             .collect(),
     );
     check(
+        "executed and unexecuted cases are distinguished",
+        f.cases
+            .iter()
+            .filter(|c| {
+                let native = c.source == "native_capture";
+                (native && (!c.executed() || !c.reproducible))
+                    || (!native && (c.executed() || c.source != "synthetic"))
+            })
+            .map(|c| c.id.clone())
+            .collect(),
+    );
+    check(
+        "enough executed cases per split to compute an interval",
+        [Split::Calibration, Split::Heldout]
+            .into_iter()
+            .filter(|s| {
+                f.cases
+                    .iter()
+                    .filter(|c| c.split == *s && c.executed())
+                    .count()
+                    < 10
+            })
+            .map(|s| s.name().to_string())
+            .collect(),
+    );
+    check(
         "stale evidence appears in the fixture",
         if f.cases
             .iter()
@@ -289,6 +402,9 @@ pub fn fixture_checks(f: &Fixture) -> Vec<Check> {
             "ambiguous" => "category present: ambiguous",
             "stale_evidence" => "category present: stale_evidence",
             "invalid_strategy_offered" => "category present: invalid_strategy_offered",
+            "missing_evidence" => "category present: missing_evidence",
+            "repeated_failure" => "category present: repeated_failure",
+            "no_strategy_applicable" => "category present: no_strategy_applicable",
             _ => "category present: adversarial",
         };
         check(
@@ -565,6 +681,29 @@ fn mean(values: &[u32]) -> serde_json::Value {
     }
 }
 
+/// The 95 % Wilson score interval for `k` successes in `n` trials. With `n = 0` there is no interval.
+pub fn wilson(k: usize, n: usize) -> serde_json::Value {
+    if n == 0 {
+        return serde_json::json!({"k": 0, "n": 0, "low": null, "high": null});
+    }
+    let (k, nf) = (k as f64, n as f64);
+    let z = 1.959_963_984_540_054_f64;
+    let p = k / nf;
+    let denom = 1.0 + z * z / nf;
+    let centre = (p + z * z / (2.0 * nf)) / denom;
+    let half = z * ((p * (1.0 - p) / nf) + z * z / (4.0 * nf * nf)).sqrt() / denom;
+    serde_json::json!({"k": k as usize, "n": n, "low": (centre - half).max(0.0), "high": (centre + half).min(1.0)})
+}
+
+/// The class a case is filed under in per-class reporting: its first acceptable class, or `unknown`
+/// where abstention is required.
+pub fn primary_class(c: &Case) -> &'static str {
+    if c.label.must_abstain {
+        return "unknown";
+    }
+    c.label.classes.first().map_or("unknown", |c| c.as_str())
+}
+
 const NOT_IN_SHADOW: &str = "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07";
 
 /// The metrics for a set of results. Every rate carries its numerator and denominator; a rate whose
@@ -690,6 +829,13 @@ pub fn metrics(results: &[&CaseResult]) -> serde_json::Value {
             "inappropriate_abstentions": answerable_declined,
             "inappropriate_abstention_rate": rate(answerable_declined, answerable.len()),
         },
+        "confidence_95_wilson": {
+            "schema_valid_rate": wilson(valids.len(), replied.len()),
+            "classification_accuracy_over_valid_replies": wilson(correct, valids.len()),
+            "false_positive_strategy_rate": wilson(false_positives, nominations.len()),
+            "appropriate_abstention_rate": wilson(must_declined, must.len()),
+            "inappropriate_abstention_rate": wilson(answerable_declined, answerable.len()),
+        },
         "latency_ms": {
             "p50": if timing_available { percentile(&latencies, 0.5) } else { serde_json::Value::Null },
             "p95": if timing_available { percentile(&latencies, 0.95) } else { serde_json::Value::Null },
@@ -752,42 +898,124 @@ pub struct RunContext<'a> {
     pub repository: serde_json::Value,
     pub scripted: Option<&'static str>,
     pub fixture: &'a Fixture,
+    /// The text of `heldout.freeze.json`, when available.
+    pub freeze: Option<&'a str>,
+    /// For a replay: the record whose replies were scored again. A replay is never a new inference run.
+    pub replayed_from: Option<serde_json::Value>,
+    /// The candidate being evaluated and what its operator declared about it (artifact, quantization, runtime,
+    /// context limit, hardware); absent fields are reported as unreported, never guessed.
+    pub candidate: Option<serde_json::Value>,
+}
+
+fn prediction(r: &CaseResult) -> serde_json::Value {
+    let (status, nomination, rejection, provider_error) = match &r.attempt.nomination {
+        Nomination::Valid(v) => ("valid", Some(crate::micro::response_json(v)), None, None),
+        Nomination::Rejected(x) => (
+            "rejected",
+            None,
+            Some(serde_json::json!({"code": x.code.as_str(), "detail": x.detail})),
+            None,
+        ),
+        Nomination::ProviderFailed(e) => ("provider_failed", None, None, Some(e.clone())),
+        Nomination::TimedOut => ("timed_out", None, None, None),
+    };
+    let class_correct = valid(r).map(|v| {
+        r.case
+            .label
+            .classes
+            .contains(&v.classification.unwrap_or(FailureClass::Unknown))
+    });
+    let strategy_false_positive = valid(r).and_then(|v| {
+        (v.strategy.is_some() && v.applicability != Some(Applicability::NotApplicable)).then(|| {
+            r.case.label.must_abstain || !r.case.label.strategies.contains(&v.strategy.unwrap())
+        })
+    });
+    serde_json::json!({
+        "case": r.case.id,
+        "split": r.case.split.name(),
+        "category": r.case.category,
+        "failure_class": primary_class(&r.case),
+        "execution_status": r.case.execution_status,
+        "expected": {
+            "classes": r.case.label.classes.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+            "strategies": r.case.label.strategies.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+            "must_abstain": r.case.label.must_abstain,
+            "human_review": r.case.label.human_review,
+        },
+        "status": status,
+        "nomination": nomination,
+        "rejection": rejection,
+        "provider_error": provider_error,
+        "raw_reply": r.attempt.reply,
+        "class_correct": class_correct,
+        "strategy_false_positive": strategy_false_positive,
+        "latency_ms": r.attempt.latency.as_millis() as u64,
+        "prompt_tokens": r.attempt.prompt_tokens,
+        "completion_tokens": r.attempt.completion_tokens,
+    })
 }
 
 /// The run record: what ran, against what, with what settings, and how it scored. A blocked run
 /// reports no metrics at all.
+///
+/// The primary evidence is `metrics.heldout_executed`: held-out cases whose failure was reproduced by running
+/// real tools. Unexecuted synthetic cases are scored separately and are harness fixtures, not ground truth.
 pub fn record(ctx: &RunContext<'_>, results: &[CaseResult]) -> serde_json::Value {
-    let checks = fixture_checks(ctx.fixture);
-    let by_split =
-        |s: Split| -> Vec<&CaseResult> { results.iter().filter(|r| r.case.split == s).collect() };
+    let mut checks = fixture_checks(ctx.fixture);
+    checks.push(frozen_check(ctx.fixture, ctx.freeze));
+    let select = |split: Option<Split>, executed: Option<bool>| -> Vec<&CaseResult> {
+        results
+            .iter()
+            .filter(|r| split.is_none_or(|s| r.case.split == s))
+            .filter(|r| executed.is_none_or(|e| r.case.executed() == e))
+            .collect()
+    };
+    let by_class = |split: Split| -> serde_json::Value {
+        let mut classes: BTreeMap<&str, Vec<&CaseResult>> = BTreeMap::new();
+        for r in results
+            .iter()
+            .filter(|r| r.case.split == split && r.case.executed())
+        {
+            classes.entry(primary_class(&r.case)).or_default().push(r);
+        }
+        classes
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), metrics(&v)))
+            .collect()
+    };
     let has_metrics = ctx.kind != RunKind::Blocked;
-    let verified_native = ctx
-        .fixture
-        .cases
-        .iter()
-        .filter(|c| c.label.label_source == "constructed_defect_fix_verified_by_pax")
-        .count();
+    let executed = ctx.fixture.cases.iter().filter(|c| c.executed()).count();
+    let frozen_intact = checks.last().is_some_and(|c| c.passed);
     serde_json::json!({
-        "schema": "chip.micro-eval.v1",
+        "schema": "chip.micro-eval.v2",
         "status": ctx.kind.name(),
-        "evidence_about_a_model": ctx.kind == RunKind::Completed,
+        "new_inference": matches!(ctx.kind, RunKind::Completed),
+        "evidence_about_a_model": ctx.kind == RunKind::Completed && frozen_intact,
+        "heldout_frozen_intact": frozen_intact,
         "blocked_reason": ctx.blocked_reason,
         "scripted_responder": ctx.scripted,
+        "replayed_from": ctx.replayed_from,
+        "candidate": ctx.candidate,
         "authority_granted": "none",
         "fixture": {
             "version": ctx.fixture.version,
             "sha256": ctx.fixture.sha256,
+            "heldout_sha256": ctx.fixture.heldout_sha256,
             "cases": ctx.fixture.cases.len(),
+            "executed_cases": executed,
+            "unexecuted_cases": ctx.fixture.cases.len() - executed,
             "label_verification": {
-                "fix_verified_by_pax": verified_native,
-                "synthetic_unverified": ctx.fixture.cases.len() - verified_native,
-                "human_review": "pending",
+                "executed_reproduced_and_verified": executed,
+                "unexecuted_synthetic": ctx.fixture.cases.len() - executed,
+                "independently_human_reviewed": ctx.fixture.cases.iter().filter(|c| c.label.human_review == "reviewed").count(),
+                "human_review_pending": ctx.fixture.cases.iter().filter(|c| c.label.human_review == "pending").count(),
             },
             "checks": checks.iter().map(|c| serde_json::json!({"check": c.name, "passed": c.passed, "detail": c.detail})).collect::<Vec<_>>(),
         },
         "prompt_sha256": crate::micro::system_prompt_digest(),
         "contract": {
             "schema": crate::micro::SCHEMA,
+            "schema_sha256": crate::micro::schema_digest(),
             "version": crate::micro::INTERIM_CONTRACT_VERSION,
             "version_basis": "interim: no Work Contract exists yet",
         },
@@ -803,26 +1031,23 @@ pub fn record(ctx: &RunContext<'_>, results: &[CaseResult]) -> serde_json::Value
         "repository": ctx.repository,
         "metrics": if has_metrics {
             serde_json::json!({
-                "calibration": metrics(&by_split(Split::Calibration)),
-                "heldout": metrics(&by_split(Split::Heldout)),
+                "heldout_executed": metrics(&select(Some(Split::Heldout), Some(true))),
+                "heldout_unexecuted": metrics(&select(Some(Split::Heldout), Some(false))),
+                "calibration_executed": metrics(&select(Some(Split::Calibration), Some(true))),
+                "calibration_unexecuted": metrics(&select(Some(Split::Calibration), Some(false))),
+                "heldout_all": metrics(&select(Some(Split::Heldout), None)),
+                "calibration_all": metrics(&select(Some(Split::Calibration), None)),
+                "by_failure_class": {
+                    "heldout_executed": by_class(Split::Heldout),
+                    "calibration_executed": by_class(Split::Calibration),
+                },
             })
         } else {
             serde_json::Value::Null
         },
         "replies": results.iter().filter_map(|r| r.attempt.reply.as_ref().map(|reply| (r.case.id.clone(), reply.clone()))).collect::<BTreeMap<_, _>>(),
-        "results": if has_metrics {
-            serde_json::json!(results.iter().map(|r| serde_json::json!({
-                "case": r.case.id,
-                "split": r.case.split.name(),
-                "category": r.case.category,
-                "status": match &r.attempt.nomination {
-                    Nomination::Valid(_) => "valid",
-                    Nomination::Rejected(_) => "rejected",
-                    Nomination::ProviderFailed(_) => "provider_failed",
-                    Nomination::TimedOut => "timed_out",
-                },
-                "rejection": match &r.attempt.nomination { Nomination::Rejected(x) => Some(x.code.as_str()), _ => None },
-            })).collect::<Vec<_>>())
+        "predictions": if has_metrics {
+            serde_json::json!(results.iter().map(prediction).collect::<Vec<_>>())
         } else {
             serde_json::Value::Null
         },
@@ -834,6 +1059,8 @@ pub fn blocked(
     fixture: &Fixture,
     reason: String,
     repository: serde_json::Value,
+    freeze: Option<&str>,
+    candidate: Option<serde_json::Value>,
 ) -> serde_json::Value {
     record(
         &RunContext {
@@ -844,6 +1071,9 @@ pub fn blocked(
             repository,
             scripted: None,
             fixture,
+            freeze,
+            replayed_from: None,
+            candidate,
         },
         &[],
     )
@@ -1073,6 +1303,8 @@ mod tests {
             &f,
             "no shadow model is configured".into(),
             serde_json::json!({"git_commit": null}),
+            None,
+            None,
         );
         assert_eq!(r["status"], "blocked");
         assert_eq!(r["evidence_about_a_model"], false);
@@ -1094,6 +1326,9 @@ mod tests {
             repository: serde_json::json!({}),
             scripted: Some("adversarial"),
             fixture: &f,
+            freeze: Some(include_str!("../tests/fixtures/micro/heldout.freeze.json")),
+            replayed_from: None,
+            candidate: None,
         };
         let rec = record(&ctx, &rs);
         assert_eq!(rec["status"], "scripted_self_test");
@@ -1112,21 +1347,190 @@ mod tests {
             ..ctx
         };
         let rec2 = record(&ctx2, &again);
-        assert_eq!(
-            rec["metrics"]["heldout"], rec2["metrics"]["heldout"],
-            "held-out results reproduce exactly"
-        );
-        assert_eq!(
-            rec["metrics"]["calibration"],
-            rec2["metrics"]["calibration"]
-        );
+        for key in [
+            "heldout_executed",
+            "heldout_all",
+            "calibration_executed",
+            "calibration_all",
+            "by_failure_class",
+        ] {
+            assert_eq!(
+                rec["metrics"][key], rec2["metrics"][key],
+                "{key} reproduces exactly"
+            );
+        }
+        // A replay is not a new inference run and is not evidence about a model by itself.
+        assert_eq!(rec2["status"], "replay");
+        assert_eq!(rec2["new_inference"], false);
+        assert_eq!(rec2["evidence_about_a_model"], false);
         // Failures and rejections stay in the held-out numbers; they are not dropped.
-        let h = &rec2["metrics"]["heldout"];
+        let h = &rec2["metrics"]["heldout_executed"];
         assert!(
             h["rejected_replies"].as_u64().unwrap() + h["provider_failures"].as_u64().unwrap() > 0,
             "{h}"
         );
         assert!(h["abstention"]["cases_requiring_abstention_answered"].is_number());
+        // Every case has a recorded prediction with its raw reply and its outcome.
+        let predictions = rec2["predictions"].as_array().unwrap();
+        assert_eq!(predictions.len(), f.cases.len());
+        assert!(
+            predictions
+                .iter()
+                .all(|p| p.get("raw_reply").is_some() && p.get("status").is_some())
+        );
+    }
+
+    #[test]
+    fn executed_and_unexecuted_cases_are_scored_separately_and_the_primary_set_is_executed() {
+        let f = fixture();
+        let rs = run(&Scripted(Script::Oracle));
+        let ctx = RunContext {
+            kind: RunKind::ScriptedSelfTest,
+            blocked_reason: None,
+            model: None,
+            timeout: Duration::from_secs(1),
+            repository: serde_json::json!({}),
+            scripted: Some("oracle"),
+            fixture: &f,
+            freeze: Some(include_str!("../tests/fixtures/micro/heldout.freeze.json")),
+            replayed_from: None,
+            candidate: None,
+        };
+        let rec = record(&ctx, &rs);
+        let executed = f.cases.iter().filter(|c| c.executed()).count();
+        assert_eq!(rec["fixture"]["executed_cases"], executed);
+        assert_eq!(rec["fixture"]["unexecuted_cases"], f.cases.len() - executed);
+        assert_eq!(
+            rec["fixture"]["label_verification"]["independently_human_reviewed"],
+            0
+        );
+        let m = &rec["metrics"];
+        let n = |k: &str| m[k]["cases"].as_u64().unwrap();
+        assert_eq!(
+            n("heldout_executed") + n("heldout_unexecuted"),
+            n("heldout_all")
+        );
+        assert_eq!(
+            n("calibration_executed") + n("calibration_unexecuted"),
+            n("calibration_all")
+        );
+        assert!(n("heldout_executed") >= 10 && n("calibration_executed") >= 10);
+        // Per failure class, over executed cases only; the classes partition them.
+        let by = m["by_failure_class"]["heldout_executed"]
+            .as_object()
+            .unwrap();
+        let total: u64 = by.values().map(|v| v["cases"].as_u64().unwrap()).sum();
+        assert_eq!(total, n("heldout_executed"));
+        assert!(by.contains_key("compile_error") && by.contains_key("test_assertion_failure"));
+        // The oracle is a ceiling for the arithmetic, never evidence.
+        assert_eq!(rec["evidence_about_a_model"], false);
+    }
+
+    #[test]
+    fn the_held_out_set_must_match_its_freeze_and_a_changed_case_is_detected() {
+        let f = fixture();
+        let freeze = include_str!("../tests/fixtures/micro/heldout.freeze.json");
+        let ok = frozen_check(&f, Some(freeze));
+        assert!(ok.passed, "{}", ok.detail);
+        // Changing one held-out case changes the hash and fails the check.
+        let raw = include_str!("../tests/fixtures/micro/fixture.json");
+        let heldout_id = f
+            .cases
+            .iter()
+            .find(|c| c.split == Split::Heldout)
+            .unwrap()
+            .id
+            .clone();
+        let mut v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        for c in v["cases"].as_array_mut().unwrap() {
+            if c["id"] == heldout_id.as_str() {
+                c["snapshot"]["diagnostics"] = "changed after the freeze".into();
+            }
+        }
+        let tampered = load(&v.to_string()).unwrap();
+        assert!(!frozen_check(&tampered, Some(freeze)).passed);
+        // Moving a case between splits is detected too.
+        let mut v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        for c in v["cases"].as_array_mut().unwrap() {
+            if c["id"] == heldout_id.as_str() {
+                c["split"] = "calibration".into();
+            }
+        }
+        assert!(!frozen_check(&load(&v.to_string()).unwrap(), Some(freeze)).passed);
+        assert!(
+            !frozen_check(&f, None).passed,
+            "no freeze file is not a pass"
+        );
+        // A run against a tampered fixture does not claim to be held-out evidence.
+        let rs = Vec::new();
+        let ctx = RunContext {
+            kind: RunKind::Completed,
+            blocked_reason: None,
+            model: None,
+            timeout: Duration::from_secs(1),
+            repository: serde_json::json!({}),
+            scripted: None,
+            fixture: &tampered,
+            freeze: Some(freeze),
+            replayed_from: None,
+            candidate: None,
+        };
+        let rec = record(&ctx, &rs);
+        assert_eq!(rec["heldout_frozen_intact"], false);
+        assert_eq!(rec["evidence_about_a_model"], false);
+    }
+
+    #[test]
+    fn wilson_intervals_have_the_right_shape_and_no_interval_for_no_data() {
+        let w = wilson(0, 0);
+        assert!(w["low"].is_null() && w["n"] == 0);
+        let all = wilson(10, 10);
+        assert!((all["high"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!(
+            all["low"].as_f64().unwrap() > 0.69 && all["low"].as_f64().unwrap() < 0.73,
+            "{all}"
+        );
+        let half = wilson(5, 10);
+        let (lo, hi) = (
+            half["low"].as_f64().unwrap(),
+            half["high"].as_f64().unwrap(),
+        );
+        assert!(
+            lo < 0.5 && hi > 0.5 && (lo - 0.2366).abs() < 0.01 && (hi - 0.7634).abs() < 0.01,
+            "{half}"
+        );
+        let none = wilson(0, 10);
+        assert_eq!(none["low"], 0.0);
+    }
+
+    #[test]
+    fn candidates_are_never_substituted() {
+        // The candidate file lists accepted names; the bench refuses a run whose configured model is not one.
+        let spec: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/micro/candidates.json")).unwrap();
+        let keys: Vec<&str> = spec["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["key"].as_str().unwrap())
+            .collect();
+        assert!(
+            keys.contains(&"qwen2.5-coder-1.5b-instruct")
+                && keys.contains(&"llama-3.2-1b-instruct")
+        );
+        let all: Vec<&str> = spec["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|c| c["accepted_model_names"].as_array().unwrap())
+            .map(|n| n.as_str().unwrap())
+            .collect();
+        let unique: std::collections::BTreeSet<&&str> = all.iter().collect();
+        assert_eq!(
+            unique.len(),
+            all.len(),
+            "an accepted name belongs to exactly one candidate"
+        );
     }
 
     #[test]

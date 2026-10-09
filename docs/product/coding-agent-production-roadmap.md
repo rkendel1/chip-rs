@@ -601,7 +601,9 @@ improvements are measured against.
   closed catalog, under the versioned `chip.micro.v1` contract with strict validation. The nomination is recorded
   beside the runtime's deterministic outcome and nowhere else. A fixed, labelled evaluation fixture and a
   reproducible harness (`cargo bench -p chip-cli --bench micro_eval`) measure it. Specified in
-  [`micro-model-shadow.md`](micro-model-shadow.md).
+  [`micro-model-shadow.md`](micro-model-shadow.md); the controlled-ablation follow-up (expanded executed fixture, frozen
+  held-out set, candidate gating, A/B harness; configuration C not enabled; real-model runs blocked) is in
+  [`micro-model-ablation.md`](micro-model-ablation.md).
 * **Acceptance.** The checklist of `micro-model-shadow.md` section 9. It adds no authority (MS-02, MS-05 posture:
   off by default, nothing accepted that the normal path would not accept: here nothing is accepted at all).
   Contract version and snapshot identity are interim stand-ins until RIC-02 and RIC-03.

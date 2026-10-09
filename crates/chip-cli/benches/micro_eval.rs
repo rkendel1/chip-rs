@@ -10,6 +10,10 @@
 //!   --self-test MODE     score a scripted responder (oracle, abstain, adversarial) to test the harness.
 //!                        Labelled `scripted_self_test`; says nothing about any model.
 //!   --replay RECORD      score the replies of an earlier record again (reproducibility).
+//!   --candidate KEY      evaluate one of the candidates of tests/fixtures/micro/candidates.json; the configured model
+//!                        must be one of its accepted names or the run is blocked (no substitution).
+//!   --list-candidates    print the candidates.
+//!   --freeze             write tests/fixtures/micro/heldout.freeze.json once (never overwrites).
 //!   --out PATH           also write the record to PATH (default target/micro-eval/record-<time>.json).
 //!
 //! Exit: 0 the run completed (or the self-test/replay did), 3 blocked, 2 usage.
@@ -45,9 +49,67 @@ fn repository() -> serde_json::Value {
 
 fn usage(why: &str) -> ! {
     eprintln!(
-        "error: {why}\nusage: micro_eval [--self-test oracle|abstain|adversarial | --replay RECORD] [--out PATH]"
+        "error: {why}\nusage: micro_eval [--candidate KEY | --self-test oracle|abstain|adversarial | --replay RECORD | --list-candidates | --freeze] [--out PATH]"
     );
     std::process::exit(2)
+}
+
+const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/micro");
+
+fn read(name: &str) -> Option<String> {
+    std::fs::read_to_string(format!("{DIR}/{name}")).ok()
+}
+
+fn sha256(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(text.as_bytes());
+    format!(
+        "sha256:{}",
+        digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )
+}
+
+/// The candidate named `key`, with what the operator declared about the artifact.
+fn candidate(key: &str, configured_model: Option<&str>) -> Result<serde_json::Value, String> {
+    let spec: serde_json::Value =
+        serde_json::from_str(&read("candidates.json").ok_or("candidates.json is missing")?)
+            .map_err(|e| format!("candidates.json: {e}"))?;
+    let entry = spec["candidates"]
+        .as_array()
+        .and_then(|a| a.iter().find(|c| c["key"] == key))
+        .ok_or_else(|| format!("unknown candidate `{key}`"))?;
+    let declared: serde_json::Map<String, serde_json::Value> = spec["declare_environment"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(field, var)| {
+            let value = std::env::var(var.as_str().unwrap_or_default())
+                .ok()
+                .filter(|v| !v.trim().is_empty());
+            (
+                field.clone(),
+                value.map_or(serde_json::json!("unreported"), serde_json::Value::from),
+            )
+        })
+        .collect();
+    let matches = configured_model.is_some_and(|m| {
+        entry["accepted_model_names"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|n| n.as_str().is_some_and(|n| n.eq_ignore_ascii_case(m)))
+    });
+    Ok(serde_json::json!({
+        "key": key,
+        "display": entry["display"],
+        "configured_model": configured_model,
+        "configured_model_is_this_candidate": matches,
+        "declared": declared,
+        "sampling": {"temperature": 0.0, "max_output_tokens": micro::MAX_OUTPUT_TOKENS},
+    }))
 }
 
 fn main() {
@@ -55,7 +117,8 @@ fn main() {
         .skip(1)
         .filter(|a| a != "--bench")
         .collect();
-    let (mut self_test, mut replay, mut out) = (None, None, None);
+    let (mut self_test, mut replay, mut out, mut cand) = (None, None, None, None);
+    let (mut list, mut freeze_it) = (false, false);
     let mut i = 0;
     while i < args.len() {
         let take = |i: &mut usize| {
@@ -68,17 +131,44 @@ fn main() {
             "--self-test" => self_test = Some(take(&mut i)),
             "--replay" => replay = Some(take(&mut i)),
             "--out" => out = Some(take(&mut i)),
+            "--candidate" => cand = Some(take(&mut i)),
+            "--list-candidates" => list = true,
+            "--freeze" => freeze_it = true,
             other => usage(&format!("unexpected argument `{other}`")),
         }
         i += 1;
     }
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/",
-        "tests/fixtures/micro/fixture.json"
-    );
-    let raw = std::fs::read_to_string(path).unwrap_or_else(|e| usage(&format!("{path}: {e}")));
+    if list {
+        println!(
+            "{}",
+            read("candidates.json").unwrap_or_else(|| usage("candidates.json is missing"))
+        );
+        return;
+    }
+    let raw = read("fixture.json").unwrap_or_else(|| usage("fixture.json is missing"));
     let fixture = micro_eval::load(&raw).unwrap_or_else(|e| usage(&e));
+    if freeze_it {
+        let path = format!("{DIR}/heldout.freeze.json");
+        if std::path::Path::new(&path).exists() {
+            usage(
+                "heldout.freeze.json already exists; a freeze is never overwritten (a new fixture version needs a new freeze)",
+            );
+        }
+        let commit = git(&["rev-parse", "HEAD"]);
+        let doc = micro_eval::freeze_document(&fixture, commit);
+        std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap() + "\n")
+            .unwrap_or_else(|e| usage(&format!("{path}: {e}")));
+        println!(
+            "froze {} held-out cases: {}",
+            doc["heldout_ids"].as_array().map_or(0, Vec::len),
+            fixture.heldout_sha256
+        );
+        return;
+    }
+    let freeze_text = read("heldout.freeze.json");
+    let freeze = freeze_text.as_deref();
+    // Structural failures stop the run; the frozen check is reported in the record (and fails the run's
+    // claim to be held-out evidence) rather than aborting, so a modified fixture is visible, not hidden.
     if let Some(failed) = micro_eval::fixture_checks(&fixture)
         .iter()
         .find(|c| !c.passed)
@@ -97,8 +187,14 @@ fn main() {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_millis)
         .unwrap_or(micro::DEFAULT_TIMEOUT);
+    let configured_model = std::env::var("CHIP_MICRO_MODEL")
+        .ok()
+        .filter(|m| !m.trim().is_empty());
+    let candidate_info = cand
+        .as_deref()
+        .map(|key| candidate(key, configured_model.as_deref()).unwrap_or_else(|e| usage(&e)));
 
-    let (kind, scripted, model, blocked_reason, results) = if let Some(mode) = self_test {
+    let (kind, scripted, model, replayed_from, results) = if let Some(mode) = self_test {
         let (script, name) = match mode.as_str() {
             "oracle" => (Script::Oracle, "oracle"),
             "abstain" => (Script::AbstainAll, "abstain"),
@@ -110,21 +206,54 @@ fn main() {
     } else if let Some(file) = replay {
         let text =
             std::fs::read_to_string(&file).unwrap_or_else(|e| usage(&format!("{file}: {e}")));
-        let record: serde_json::Value =
+        let original: serde_json::Value =
             serde_json::from_str(&text).unwrap_or_else(|e| usage(&format!("{file}: {e}")));
-        let replies = record["replies"]
+        let replies = original["replies"]
             .as_object()
             .unwrap_or_else(|| usage("the record has no `replies`"))
             .iter()
             .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
             .collect();
+        let from = serde_json::json!({
+            "record_sha256": sha256(&text),
+            "status": original["status"],
+            "model": original["model"],
+            "candidate": original["candidate"],
+            "evidence_about_a_model": original["evidence_about_a_model"],
+            "note": "scored again from recorded replies; no model was asked in this run",
+        });
         let rs = runtime.block_on(run_cases(&fixture, &Replay(replies)));
-        (RunKind::Replay, None, None, None, rs)
+        (RunKind::Replay, None, None, Some(from), rs)
     } else {
+        if let Some(info) = &candidate_info
+            && info["configured_model_is_this_candidate"] != true
+        {
+            let why = format!(
+                "candidate {} is not available: the configured model ({}) is not one of its accepted names; no substitution",
+                info["key"],
+                configured_model.as_deref().unwrap_or("none")
+            );
+            finish(
+                micro_eval::blocked(&fixture, why, repository(), freeze, candidate_info.clone()),
+                out,
+                true,
+            );
+            unreachable!()
+        }
         match micro::resolve(&Selection::default(), |name| std::env::var(name).ok()) {
             Err(e) => {
                 let why = format!("no shadow model is configured ({e}); nothing was asked");
-                finish(micro_eval::blocked(&fixture, why, repository()), out, true);
+                finish(
+                    micro_eval::blocked(
+                        &fixture,
+                        why,
+                        repository(),
+                        freeze,
+                        candidate_info.clone(),
+                    ),
+                    out,
+                    true,
+                );
                 unreachable!()
             }
             Ok(config) => {
@@ -153,7 +282,17 @@ fn main() {
                         identity.endpoint,
                         first.unwrap_or_else(|| "timed out".into())
                     );
-                    finish(micro_eval::blocked(&fixture, why, repository()), out, true);
+                    finish(
+                        micro_eval::blocked(
+                            &fixture,
+                            why,
+                            repository(),
+                            freeze,
+                            candidate_info.clone(),
+                        ),
+                        out,
+                        true,
+                    );
                     unreachable!()
                 }
                 (RunKind::Completed, None, Some(identity), None, rs)
@@ -162,12 +301,15 @@ fn main() {
     };
     let ctx = RunContext {
         kind,
-        blocked_reason,
+        blocked_reason: None,
         model,
         timeout,
         repository: repository(),
         scripted,
         fixture: &fixture,
+        freeze,
+        replayed_from,
+        candidate: candidate_info,
     };
     finish(record(&ctx, &results), out, false);
 }
