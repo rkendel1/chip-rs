@@ -1,0 +1,18 @@
+{
+ "start": {
+  "second_request_bytes": 277198,
+  "decisive_marker_reached_model": true,
+  "truncation_notice_in_request": [
+   "cap"
+  ],
+  "terminal_state": "blocked"
+ },
+ "end": {
+  "second_request_bytes": 277198,
+  "decisive_marker_reached_model": false,
+  "truncation_notice_in_request": [
+   "cap"
+  ],
+  "terminal_state": "blocked"
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "status_before_kill": [
+  "running",
+  "queued",
+  "queued"
+ ],
+ "lookup_after_restart": [
+  [
+   404,
+   "work_not_found"
+  ],
+  [
+   404,
+   "work_not_found"
+  ],
+  [
+   404,
+   "work_not_found"
+  ]
+ ]
+}

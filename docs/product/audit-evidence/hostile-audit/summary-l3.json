@@ -1,0 +1,33 @@
+{
+ "submitted": 300,
+ "max_retained_work": 10,
+ "metrics": {
+  "retained_work": 300,
+  "retained_escalated_work": 300,
+  "evicted_work": 0,
+  "escalated_work": 300,
+  "submitted_work": 300
+ },
+ "rss_kib_start": 6968,
+ "rss_kib_end": 16064,
+ "seconds": 29.7,
+ "what_the_client_gets_for_an_escalated_work": {
+  "status": "escalated",
+  "lifecycle": "escalated",
+  "result_keys": [
+   "answer",
+   "audit",
+   "capability_requests",
+   "changed_writes",
+   "command",
+   "context",
+   "endpoint",
+   "executions_by_capability",
+   "exit_status",
+   "failed_observations",
+   "goal",
+   "goal_kind"
+  ],
+  "outcome_reason": "I am unsure which convention the maintainers want; a person must decide"
+ }
+}

@@ -1,0 +1,8 @@
+{
+ "cancel_http": 200,
+ "cancel_note": "advisory: no further model call will be made; work already in flight is not interrupted, and the outcome is whatever the runtime establishes",
+ "seconds_after_cancel_until_terminal": 20.48,
+ "final_status": "failed",
+ "test_processes_alive_at_cancel": 2,
+ "model_requests": 1
+}

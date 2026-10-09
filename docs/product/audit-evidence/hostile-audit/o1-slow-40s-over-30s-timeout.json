@@ -1,0 +1,20 @@
+{
+ "name": "o1-slow-40s-over-30s-timeout",
+ "goal": "Fix the failing tests in this project",
+ "kind": null,
+ "exit": 3,
+ "wall_s": 30.01,
+ "model_requests": 1,
+ "request_bytes": [
+  4893
+ ],
+ "stderr_tail": "error: the selected model did not answer (openai-compatible audit-adversary at http://127.0.0.1:33349): model escalation failed: provider error: timeout: request exceeded the configured timeout. No other provider or model was tried.\n",
+ "stdout_raw": "",
+ "changed_files": [],
+ "acceptance": {
+  "visible_pass": false,
+  "visible_tail": "80597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\n\nfailures:\n    parses_single_digit_fraction\n    refuses_overdraft\n\ntest result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s\n\n   Compiling ledger v0.1.0 (/tmp/accept-q6tqh2cz)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s\n     Running tests/visible.rs (/tmp/claude-0/aud/shared-target/debug/deps/visible-1c798cd7daf6801d)\nerror: test failed, to rerun pass `--test visible`\n",
+  "hidden_pass": false,
+  "hidden_tail": "9a9efae3f533d3/library/core/src/ops/function.rs:250:5\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\n\nfailures:\n    hidden_overdraft_is_exact\n    hidden_single_digit_fractions_in_general\n\ntest result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s\n\n   Compiling ledger v0.1.0 (/tmp/accept-q6tqh2cz)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s\n     Running tests/hidden.rs (/tmp/claude-0/aud/shared-target/debug/deps/hidden-b049f159d3138761)\nerror: test failed, to rerun pass `--test hidden`\n"
+ }
+}

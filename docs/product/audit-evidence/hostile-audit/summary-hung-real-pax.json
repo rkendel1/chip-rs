@@ -1,0 +1,8 @@
+{
+ "chip_terminal_state": "failed",
+ "exit": 4,
+ "wall_s": 300.01,
+ "outcome_reason": "execution failed: pax did not finish within the time limit",
+ "test_binary_processes_still_alive_after_chip_exited": "1",
+ "cargo_test_processes_still_alive": "1"
+}

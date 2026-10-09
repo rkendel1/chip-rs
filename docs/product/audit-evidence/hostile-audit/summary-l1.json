@@ -1,0 +1,14 @@
+{
+ "cancel_http": 200,
+ "cancel_body": {
+  "note": "advisory: no further model call will be made; work already in flight is not interrupted, and the outcome is whatever the runtime establishes",
+  "status": "cancellation_requested",
+  "work_id": "work_5473d9d4c2dcf49e"
+ },
+ "cancel_call_latency_s": 0.0,
+ "seconds_after_cancel_until_terminal": 6.07,
+ "final_status": "failed",
+ "result_reason": "model escalation failed: provider error: provider error: cancellation was requested; no further model call was made",
+ "in_flight_decision_executed_after_cancel": true,
+ "model_requests": 1
+}
