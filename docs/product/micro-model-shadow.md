@@ -136,7 +136,7 @@ Fixed system instruction (its SHA-256 identifies the prompt version in every run
 
 The snapshot is one JSON document, so repository text is an escaped string and cannot close the delimiter or change
 the structure (tested with a diagnostic that contains `END SNAPSHOT`, a fake instruction and a quote). The request
-asks for 256 output tokens, temperature 0, JSON-object output, and is bounded to 12 KiB.
+asks for 256 output tokens, temperature 0, and **requests** a JSON-object reply, and is bounded to 12 KiB. ("Requests": only the OpenAI-compatible adapter sends the format; the Ollama and Anthropic adapters ignore it, and run records' `json_object_output: true` means requested, not applied. See [`atomic-agent-technique-audit.md`](atomic-agent-technique-audit.md) section 2.)
 
 ## 7. The evaluation fixture
 
