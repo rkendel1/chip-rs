@@ -9,6 +9,21 @@ compacting. See section 6 for the exact numbers and section 7 for what would cha
 This is an experiment, not an adoption. Nothing in Chip's product path changed. The experiment is
 one leaf crate, `crates/chip-session-memory`, that nothing depends on. Remove it by deleting that
 directory, its line in the workspace `members`, its row in `crates.md`, and this document.
+**Before removing it, move `benches/service_retention.rs` (and keep
+`docs/product/service-retention*.json`)**: that harness verifies the production retention fix in
+`chip serve`, which is not an experiment and does not depend on any storage engine.
+
+> **Status of this document (2026-10).** Historical record of the first experiment (Phases A to G,
+> FeltDB only). It is **superseded for the storage question** by
+> [`session-store-comparison.md`](session-store-comparison.md), which runs the same contract against
+> SQLite, redb and a `durability`-crate journal and records the decision: **no durable session store
+> until a concrete resume-after-restart requirement exists** (roadmap item P3-01 in
+> [`coding-agent-production-roadmap.md`](coding-agent-production-roadmap.md)). Everything here is
+> **measured** on one machine and one synthetic workload, in a debug-or-release build as stated per
+> table, unless a sentence says *inferred*, *proposed* or *unverified*. Numbers are not production
+> guarantees. File references such as `crates/feltdb/...` name the FeltDB repository
+> (`rkendel1/flow_db`), not this one. The SQLite follow-up proposed in section 8 was carried out in
+> the comparison document.
 
 ## 1. Question
 
@@ -25,7 +40,7 @@ tests, not from TypeScript declarations or WASM bindings; and Chip at `6914386`.
 
 | Question | Finding |
 | --- | --- |
-| Crate | `feltdb` 0.2.0, workspace `crates/feltdb`; dependencies `serde`, `serde_json`, `tokio` (`sync`, `macros`, `rt`, `time`, plus `net`/`io-util`/`rt-multi-thread` off wasm32), `async-stream`, `async-trait`, `sha2`, `ed25519-dalek`, `rand`, `bincode`. No feature flags. `wasmi` is a dev-dependency only |
+| Crate | `feltdb` 0.2.0 (`crates/feltdb` in the FeltDB repository, not this one); dependencies `serde`, `serde_json`, `tokio` (`sync`, `macros`, `rt`, `time`, plus `net`/`io-util`/`rt-multi-thread` off wasm32), `async-stream`, `async-trait`, `sha2`, `ed25519-dalek`, `rand`, `bincode`. No feature flags. `wasmi` is a dev-dependency only |
 | Public API used | `FeltDb::open(path)`, `insert`, `insert_if_absent`, `update`, `delete`, `get`, `get_value`, `query_collection`, `list_collection_page`, `collection_cardinality`, `list_cardinalities`, `apply_atomic_transaction`, `sequence`, `state_digest`, `set_durability_mode`, `StateStore::{with_feltdb, collect_unreachable, set_retention_policy, history_of}`, `add_sync_peer`, `acknowledge_peer_versions`, `compact_operation_log`. Errors are `FlowError` |
 | In-memory backend | **None.** `FeltDb::open` takes a path and always creates a journal file and a `<path>.lock` ownership file. `MemoryStorage` is re-exported but `FeltDb` never uses it (it is an append-log helper with no get/query/delete). `StateStore::new_volatile()` is documented "for testing state semantics in isolation... production must use `with_feltdb`". Neither is a session store |
 | Smallest supported mode | The file journal in a temporary directory. Filesystem effects, asserted in `native_proof.rs`: exactly two files, `x.felt` and `x.felt.lock` |
@@ -37,7 +52,7 @@ tests, not from TypeScript declarations or WASM bindings; and Chip at `6914386`.
 | Deletion | `delete` appends a tombstone and removes the row from memory. It **does not** release the payload: every write also mints a **revision row** (under `state`) holding a copy of the payload, and an **operation** in the in-memory change log holding another. After deleting 50 records the 50 revision rows remain and the deleted payload is still readable through `StateStore::history_of` (asserted) |
 | Reclamation mechanisms | (a) `StateStore::collect_unreachable` removes revision rows; with no refs it removes *all* revision history, live records' included. (b) `compact_operation_log(peers)` prunes only operations every listed peer has acknowledged and **returns immediately with no peers**; with one acknowledging peer it prunes and rewrites the journal as a snapshot. (c) `set_retention_policy(keep_last(n))` bounds revisions per resource if set before the writes, at the price of a retention row per resource. No supported call returns memory to the operating system |
 | Shutdown | There is no `close()`. Dropping the last handle releases the store, including its ownership lock (asserted). After the drop the process heap in use falls to the baseline; the allocator still holds what it reserved |
-| Existing tests that establish this | `crash_durability_contract`, `durable_corruption_contract`, `local_process_ownership`, `compaction_stall_contract`, `pr34_query_collection`, `pr35_equality_index`, `durable_backup_contract` in `crates/feltdb/tests/`; and the assertions in `crates/chip-session-memory/tests/feltdb_facts.rs`, which re-establish the facts this design depends on |
+| Existing tests that establish this | `crash_durability_contract`, `durable_corruption_contract`, `local_process_ownership`, `compaction_stall_contract`, `pr34_query_collection`, `pr35_equality_index`, `durable_backup_contract` in the FeltDB repository's `crates/feltdb/tests/`; and the assertions in `crates/chip-session-memory/tests/feltdb_facts.rs`, which re-establish the facts this design depends on |
 
 ### 2.2 Chip
 
