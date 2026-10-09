@@ -7,24 +7,28 @@ the build environment (no local runtime, no model files, no network route to fet
 
 ## 0. Landing verification, reconciled
 
-Run on commit `6a4e81b` (the RIC-08 landing, tree clean at the start), with PAX 0.4.1 on `PATH`:
+Full record: [`audit-evidence/micro-ablation/verification.md`](audit-evidence/micro-ablation/verification.md). PAX 0.4.1
+on `PATH`.
 
-| Check | Result |
-| --- | --- |
-| `cargo fmt --all -- --check` | pass |
-| `cargo check --workspace --all-targets` | pass |
-| `cargo test --workspace --no-fail-fast` | 151 test binaries `ok`, **0 failures** |
-| `scripts/audit-dependencies.sh` | pass |
-| `scripts/check-design-docs.py` | pass (71 requirements, 0 problems) |
-| `cargo clippy --workspace --all-targets` | 84 diagnostics; **0 in any RIC-08 file**; pre-existing count at `890a832` (before RIC-08) in section 0.1 |
+| Check | `6a4e81b` (the landing) | `5c60bfe` (the evaluated commit, tree clean before and after) |
+| --- | --- | --- |
+| `cargo fmt --check` | pass | pass |
+| `cargo check --workspace --all-targets` | pass | pass |
+| `cargo test --workspace --no-fail-fast` | 151 binaries ok, 0 failures | 150 ok, **1 failure** |
+| dependency audit, design-docs checker | pass | pass |
+| clippy diagnostics | 84 | 84 (84 at `890a832`, before RIC-08; none in any RIC-08 or ablation file) |
 
-Caveat on that run: two files were edited while it was running (the fixture build script and, after the test binaries
-had been compiled, evaluation sources). The authoritative record is therefore the **re-run on the final commit of this
-change**, below (section 0.2). Before that, the first run after the landing found one real failure, in the
-architecture guard (`micro.rs` named a forbidden crate in a test string); it was fixed in `6a4e81b` and is not
-a pre-existing failure. No failure that predates RIC-08 was found.
+* The first run on the landing was not authoritative (files were edited while it ran); the run on the evaluated
+  commit is. An earlier failure in the architecture guard was a real regression of RIC-08, fixed in `6a4e81b`.
+* **The one remaining failure** is `chip-session-memory`'s `feltdb::compaction_interrupted_at_every_seam_loses_nothing_and_a_rerun_completes`,
+  once, under full-workspace load. That crate has **no diff** against the pre-RIC-08 commit, the test passed in the
+  first run, passed 3 of 3 isolated re-runs, and the whole `contract` binary then passed. So it is **not a regression
+  from this change**, but it is also **not root-caused**: it is an intermittent failure in a frozen experiment crate,
+  recorded as such and not called a flake.
+* Clippy: the diagnostic count is unchanged from before RIC-08, so none are introduced.
 
-Evidence: [`audit-evidence/micro-ablation/verification.md`](audit-evidence/micro-ablation/verification.md).
+Do not read this as "fully verified" without that failure: the workspace is green except for one intermittent,
+unexplained, unrelated test.
 
 ## 1. The evaluation corpus (`micro-eval-2`)
 
