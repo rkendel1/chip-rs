@@ -1775,7 +1775,7 @@ mod tests {
             "tokio::process",
             "std::fs",
             "tokio::fs",
-            "chip_compute",
+            concat!("chip_", "compute"),
             "&mut SoftwareWork",
             "&mut WorkReport",
             "CapabilityRequest",

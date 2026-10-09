@@ -176,6 +176,7 @@ const PRODUCT_MODULES: &[&str] = &[
     "service",
     "local_environment",
     "provider_selection",
+    "micro",
 ];
 
 /// Known remaining couplings from the product path to a proof module, listed so they cannot grow:
