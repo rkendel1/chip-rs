@@ -505,6 +505,7 @@ improvements are measured against.
 | RIC-06 Deterministic pre-model evaluation (beyond the baseline) | P1 | not started | RIC-02, RIC-03 | P1-05, P1-V3 | HA-07 (mitigation) |
 | RIC-07 Local-first routing and real-model evaluation | P1 (7a) / P2 (routing) | blocked on a model (7a) | 7a: none; routing: RIC-01 to RIC-06 | P2-03, P2-05, P2-D3, P2-D4 | HA-10, HA-19 |
 | RIC-08 Shadow-mode micro-model evaluation | P2 | implemented, shadow only; real-model evaluation blocked on a model | none (interim stand-ins for RIC-02, RIC-03) | P2-03 (measurement half) | none |
+| RIC-09 Inference-efficiency experiments (from the Atomic Agent technique audit) | P2 | not started | none to build; real-model measurement blocked on RIC-07a | P1-05 (partly) | none (HA-07 is the related finding) |
 
 ### RIC-01 Trustworthy execution and verification (P0)
 * **Scope.** The minimum that removes the two Critical audit findings, in a form that later *becomes* contract and ledger
@@ -614,6 +615,26 @@ improvements are measured against.
 * **Verification.** Validator positive and negative tests, shadow-isolation tests through the real binary, the
   fixture's structural checks, the scripted self-test and replay. The real-model evaluation is **blocked** (no model
   available in the build environment) and says so.
+
+### RIC-09 Inference-efficiency experiments (P2; from [`atomic-agent-technique-audit.md`](atomic-agent-technique-audit.md))
+* **Scope.** Three small, independently shippable experiments, each opened only because the audit read a concrete gap in
+  the code, not because the technique exists elsewhere. **9a** an optional FX output-constraint request
+  (`Free`, `JsonObject`, `JsonSchema`) with a capability report and a recorded `constraint_applied`, so run records stop
+  stating a *requested* JSON-object format as applied (the Ollama and Anthropic adapters ignore it); plus redaction of
+  recorded shadow replies. **9b** per-request digests and lengths of the stable and variable prompt portions and
+  provider-reported prompt-evaluation figures where available, then an ablation of the work-loop request layout (stable
+  instructions leading, versus after the observations as today). **9c** an extracted failure-signature line in the micro
+  snapshot, and later a ledger-backed packet (after RIC-03).
+* **Acceptance.** Each part has a written hypothesis and ablation in the audit document (sections 2 to 4) and is measured
+  against the frozen `micro-eval-2` held-out set or the fixed task suite before anything changes by default. They add no
+  authority (MS-05) and keep context a deterministic function with disclosed omissions (EL-17). The validator stays
+  authoritative whether or not a constraint is applied.
+* **Dependencies / constraints.** 9a and 9b none; 9c ledger-backed form RIC-03. No Chip-side cache, no dependency, no
+  store. Layout changes are model-visible and are experiments, never refactors. Real-model results are **blocked** (no
+  model) and recorded as such.
+* **Verification.** Adapter tests that a constraint reaches the wire only where supported; a test that an unsupported
+  constraint is reported as not applied; a redaction test with a token-shaped string in a diagnostic; the existing
+  validator and replay-reproduction tests unchanged; the ablations of the audit.
 
 ## P3: deferred (no current requirement; do not promote without a requirement, a contract and measurable acceptance)
 
