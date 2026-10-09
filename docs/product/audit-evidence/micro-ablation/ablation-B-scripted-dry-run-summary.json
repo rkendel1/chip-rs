@@ -1,0 +1,534 @@
+{
+ "schema": "chip.micro-ablation.v1",
+ "config": "B",
+ "repository": {
+  "git_commit": "6a4e81b13619a4121b24bf950958898a2912d164",
+  "working_tree_dirty": true
+ },
+ "fixture": {
+  "version": "micro-eval-2",
+  "sha256": "sha256:2b7c94e78e37049b6fd207978a2fcff0d80c46eef8b74b9890f16a1f44e9e8b2"
+ },
+ "goal": "Fix the failing tests in this project.",
+ "tasks": 36,
+ "repeat": 1,
+ "authority_granted": "none",
+ "status": "scripted_dry_run",
+ "evidence_about_a_model": false,
+ "note": "scripted work model and scripted heuristic: this tests the harness and says nothing about any model",
+ "work_model": null,
+ "shadow_model": null,
+ "candidate": null,
+ "settings": {
+  "max_turns": 12,
+  "max_executions": 8,
+  "timeout_s": 900
+ },
+ "metrics": {
+  "overall": {
+   "runs": 36,
+   "verified_completion": {
+    "rate": 0.6666666666666666,
+    "k": 24,
+    "n": 36,
+    "low": 0.5033399787115652,
+    "high": 0.7978538117569468
+   },
+   "zero_model_verified_completion": {
+    "rate": 0.0,
+    "k": 0,
+    "n": 36,
+    "low": 0.0,
+    "high": 0.09641862859446367
+   },
+   "local_only_verified_completion": {
+    "rate": 0.0,
+    "k": 0,
+    "n": 36,
+    "low": 0.0,
+    "high": 0.09641862859446367
+   },
+   "regression": {
+    "rate": 0.0,
+    "k": 0,
+    "n": 36,
+    "low": 0.0,
+    "high": 0.09641862859446367
+   },
+   "regression_among_chip_verified": {
+    "rate": 0.0,
+    "k": 0,
+    "n": 24,
+    "low": 1.3877787807814457e-17,
+    "high": 0.13797620467498017
+   },
+   "verification_disagreements": 0,
+   "larger_model_calls_per_success": {
+    "value": null,
+    "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+   },
+   "model_calls_per_success": 2.0,
+   "model_tokens_per_success": 2676.375,
+   "tokens_unavailable_reason": null,
+   "total_task_latency_ms": {
+    "p50": 320.63869299997805,
+    "p95": 1472.7655059999734
+   },
+   "escalation": {
+    "rate": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 36,
+     "low": 0.0,
+     "high": 0.09641862859446367
+    },
+    "reasons": {}
+   },
+   "cost": {
+    "value": null,
+    "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+   },
+   "micro_shadow": {
+    "records": 36,
+    "asked": 12,
+    "skipped": 24,
+    "status_counts": {
+     "skipped": 24,
+     "valid": 12
+    },
+    "latency_ms": {
+     "p50": 2,
+     "p95": 2
+    },
+    "mean_prompt_tokens": 1574.1666666666667,
+    "mean_completion_tokens": 60.25,
+    "classification_accuracy": {
+     "value": null,
+     "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+    },
+    "outcome_changed_by_shadow": 0
+   }
+  },
+  "by_failure_class": {
+   "compile_error": {
+    "runs": 8,
+    "verified_completion": {
+     "rate": 0.625,
+     "k": 5,
+     "n": 8,
+     "low": 0.30574239460262737,
+     "high": 0.8631557141764026
+    },
+    "zero_model_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 8,
+     "low": 0.0,
+     "high": 0.32440756488388023
+    },
+    "local_only_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 8,
+     "low": 0.0,
+     "high": 0.32440756488388023
+    },
+    "regression": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 8,
+     "low": 0.0,
+     "high": 0.32440756488388023
+    },
+    "regression_among_chip_verified": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 5,
+     "low": 0.0,
+     "high": 0.43448246478317476
+    },
+    "verification_disagreements": 0,
+    "larger_model_calls_per_success": {
+     "value": null,
+     "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+    },
+    "model_calls_per_success": 2.0,
+    "model_tokens_per_success": 2690.0,
+    "tokens_unavailable_reason": null,
+    "total_task_latency_ms": {
+     "p50": 284.4498389999899,
+     "p95": 1157.8902070000368
+    },
+    "escalation": {
+     "rate": {
+      "rate": 0.0,
+      "k": 0,
+      "n": 8,
+      "low": 0.0,
+      "high": 0.32440756488388023
+     },
+     "reasons": {}
+    },
+    "cost": {
+     "value": null,
+     "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+    },
+    "micro_shadow": {
+     "records": 8,
+     "asked": 3,
+     "skipped": 5,
+     "status_counts": {
+      "skipped": 5,
+      "valid": 3
+     },
+     "latency_ms": {
+      "p50": 2,
+      "p95": 2
+     },
+     "mean_prompt_tokens": 1447.0,
+     "mean_completion_tokens": 58.0,
+     "classification_accuracy": {
+      "value": null,
+      "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+     },
+     "outcome_changed_by_shadow": 0
+    }
+   },
+   "missing_dependency_or_tooling": {
+    "runs": 9,
+    "verified_completion": {
+     "rate": 0.6666666666666666,
+     "k": 6,
+     "n": 9,
+     "low": 0.3542021355803963,
+     "high": 0.879416181613089
+    },
+    "zero_model_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 9,
+     "low": 0.0,
+     "high": 0.2991450484195441
+    },
+    "local_only_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 9,
+     "low": 0.0,
+     "high": 0.2991450484195441
+    },
+    "regression": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 9,
+     "low": 0.0,
+     "high": 0.2991450484195441
+    },
+    "regression_among_chip_verified": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 6,
+     "low": 2.7755575615628914e-17,
+     "high": 0.3903342879021653
+    },
+    "verification_disagreements": 0,
+    "larger_model_calls_per_success": {
+     "value": null,
+     "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+    },
+    "model_calls_per_success": 2.0,
+    "model_tokens_per_success": 2659.8333333333335,
+    "tokens_unavailable_reason": null,
+    "total_task_latency_ms": {
+     "p50": 257.5612140000203,
+     "p95": 777.4200500000461
+    },
+    "escalation": {
+     "rate": {
+      "rate": 0.0,
+      "k": 0,
+      "n": 9,
+      "low": 0.0,
+      "high": 0.2991450484195441
+     },
+     "reasons": {}
+    },
+    "cost": {
+     "value": null,
+     "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+    },
+    "micro_shadow": {
+     "records": 9,
+     "asked": 3,
+     "skipped": 6,
+     "status_counts": {
+      "skipped": 6,
+      "valid": 3
+     },
+     "latency_ms": {
+      "p50": 2,
+      "p95": 2
+     },
+     "mean_prompt_tokens": 1261.0,
+     "mean_completion_tokens": 61.0,
+     "classification_accuracy": {
+      "value": null,
+      "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+     },
+     "outcome_changed_by_shadow": 0
+    }
+   },
+   "runtime_panic_or_exception": {
+    "runs": 2,
+    "verified_completion": {
+     "rate": 1.0,
+     "k": 2,
+     "n": 2,
+     "low": 0.34238022750665303,
+     "high": 1.0
+    },
+    "zero_model_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 2,
+     "low": 0.0,
+     "high": 0.6576197724933469
+    },
+    "local_only_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 2,
+     "low": 0.0,
+     "high": 0.6576197724933469
+    },
+    "regression": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 2,
+     "low": 0.0,
+     "high": 0.6576197724933469
+    },
+    "regression_among_chip_verified": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 2,
+     "low": 0.0,
+     "high": 0.6576197724933469
+    },
+    "verification_disagreements": 0,
+    "larger_model_calls_per_success": {
+     "value": null,
+     "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+    },
+    "model_calls_per_success": 2.0,
+    "model_tokens_per_success": 2690.0,
+    "tokens_unavailable_reason": null,
+    "total_task_latency_ms": {
+     "p50": 279.14234799993665,
+     "p95": 279.4465919999993
+    },
+    "escalation": {
+     "rate": {
+      "rate": 0.0,
+      "k": 0,
+      "n": 2,
+      "low": 0.0,
+      "high": 0.6576197724933469
+     },
+     "reasons": {}
+    },
+    "cost": {
+     "value": null,
+     "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+    },
+    "micro_shadow": {
+     "records": 2,
+     "asked": 0,
+     "skipped": 2,
+     "status_counts": {
+      "skipped": 2
+     },
+     "latency_ms": {
+      "p50": null,
+      "p95": null
+     },
+     "mean_prompt_tokens": null,
+     "mean_completion_tokens": null,
+     "classification_accuracy": {
+      "value": null,
+      "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+     },
+     "outcome_changed_by_shadow": 0
+    }
+   },
+   "test_assertion_failure": {
+    "runs": 14,
+    "verified_completion": {
+     "rate": 0.6428571428571429,
+     "k": 9,
+     "n": 14,
+     "low": 0.38764423103907397,
+     "high": 0.8365526824644587
+    },
+    "zero_model_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 14,
+     "low": 1.3877787807814457e-17,
+     "high": 0.2153108027376358
+    },
+    "local_only_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 14,
+     "low": 1.3877787807814457e-17,
+     "high": 0.2153108027376358
+    },
+    "regression": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 14,
+     "low": 1.3877787807814457e-17,
+     "high": 0.2153108027376358
+    },
+    "regression_among_chip_verified": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 9,
+     "low": 0.0,
+     "high": 0.2991450484195441
+    },
+    "verification_disagreements": 0,
+    "larger_model_calls_per_success": {
+     "value": null,
+     "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+    },
+    "model_calls_per_success": 2.0,
+    "model_tokens_per_success": 2675.4444444444443,
+    "tokens_unavailable_reason": null,
+    "total_task_latency_ms": {
+     "p50": 349.3867810000211,
+     "p95": 1518.7750489999416
+    },
+    "escalation": {
+     "rate": {
+      "rate": 0.0,
+      "k": 0,
+      "n": 14,
+      "low": 1.3877787807814457e-17,
+      "high": 0.2153108027376358
+     },
+     "reasons": {}
+    },
+    "cost": {
+     "value": null,
+     "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+    },
+    "micro_shadow": {
+     "records": 14,
+     "asked": 5,
+     "skipped": 9,
+     "status_counts": {
+      "skipped": 9,
+      "valid": 5
+     },
+     "latency_ms": {
+      "p50": 2,
+      "p95": 2
+     },
+     "mean_prompt_tokens": 1849.2,
+     "mean_completion_tokens": 61.0,
+     "classification_accuracy": {
+      "value": null,
+      "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+     },
+     "outcome_changed_by_shadow": 0
+    }
+   },
+   "unknown": {
+    "runs": 3,
+    "verified_completion": {
+     "rate": 0.6666666666666666,
+     "k": 2,
+     "n": 3,
+     "low": 0.2076596008020477,
+     "high": 0.9385080552796037
+    },
+    "zero_model_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 3,
+     "low": 5.551115123125783e-17,
+     "high": 0.5614970317550454
+    },
+    "local_only_verified_completion": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 3,
+     "low": 5.551115123125783e-17,
+     "high": 0.5614970317550454
+    },
+    "regression": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 3,
+     "low": 5.551115123125783e-17,
+     "high": 0.5614970317550454
+    },
+    "regression_among_chip_verified": {
+     "rate": 0.0,
+     "k": 0,
+     "n": 2,
+     "low": 0.0,
+     "high": 0.6576197724933469
+    },
+    "verification_disagreements": 0,
+    "larger_model_calls_per_success": {
+     "value": null,
+     "reason": "chip work has no larger-model tier today (RIC-07b), so larger-model calls are structurally zero and cannot be compared"
+    },
+    "model_calls_per_success": 2.0,
+    "model_tokens_per_success": 2682.5,
+    "tokens_unavailable_reason": null,
+    "total_task_latency_ms": {
+     "p50": 320.0990590000856,
+     "p95": 1322.0128060000889
+    },
+    "escalation": {
+     "rate": {
+      "rate": 0.0,
+      "k": 0,
+      "n": 3,
+      "low": 5.551115123125783e-17,
+      "high": 0.5614970317550454
+     },
+     "reasons": {}
+    },
+    "cost": {
+     "value": null,
+     "reason": "no price was configured (CHIP_PRICE_IN_PER_MTOK / CHIP_PRICE_OUT_PER_MTOK); a local model's cost is not measured"
+    },
+    "micro_shadow": {
+     "records": 3,
+     "asked": 1,
+     "skipped": 2,
+     "status_counts": {
+      "skipped": 2,
+      "valid": 1
+     },
+     "latency_ms": {
+      "p50": 2,
+      "p95": 2
+     },
+     "mean_prompt_tokens": 1520.0,
+     "mean_completion_tokens": 61.0,
+     "classification_accuracy": {
+      "value": null,
+      "reason": "the final failing state of an ablation run is not labelled; classification accuracy is measured on the fixture (micro_eval), not here"
+     },
+     "outcome_changed_by_shadow": 0
+    }
+   }
+  }
+ }
+}

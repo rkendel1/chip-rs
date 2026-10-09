@@ -1,0 +1,9 @@
+{
+  "a": "/tmp/abl2/record-A-dry.json",
+  "b": "/tmp/abl2/record-B-dry.json",
+  "scripted_dry_run": true,
+  "evidence_about_a_model": false,
+  "problems": [],
+  "pairs_compared": 36,
+  "identical_outcomes": true
+}

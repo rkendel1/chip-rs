@@ -1,0 +1,20 @@
+{
+  "schema": "chip.micro-ablation.v1",
+  "config": "C",
+  "repository": {
+    "git_commit": "621b1ae7c183bfcf1d5a5cef4aa94c4b42a090e9",
+    "working_tree_dirty": false
+  },
+  "fixture": {
+    "version": "micro-eval-2",
+    "sha256": "sha256:2b7c94e78e37049b6fd207978a2fcff0d80c46eef8b74b9890f16a1f44e9e8b2"
+  },
+  "goal": "Fix the failing tests in this project.",
+  "tasks": 36,
+  "repeat": 1,
+  "authority_granted": "none",
+  "status": "not_enabled",
+  "reason": "configuration C needs an explicitly reviewed integration through which a micro-model nomination can influence strategy selection, validated by a Typed Repair Engine. Neither exists, and granting that authority is a separate reviewed change; nothing here enables it",
+  "evidence_about_a_model": false,
+  "metrics": null
+}
