@@ -65,6 +65,7 @@ Summary of the state (details in each item):
 * **Verification:** scripted scenarios where the defect is fixed and the assignment is not (must not
   verify); a real-model run (P2-05); the falsification list in `coding-agent-evaluation.md` section 7.
 * **Audit 2026-10-09:** HA-02 reproduced the gap black-box: a requested feature never written, with the visible tests green, ends `completed`, `verified: true`, exit 0 while the independent acceptance check fails (case `v6`). No status change (still partial), evidence upgraded from "observed in the harness" to "reproduced on the real binary". See [`hostile-autonomous-agent-audit.md`](hostile-autonomous-agent-audit.md).
+* **Design (2026-10-09):** acceptance becomes an explicit, runtime-owned predicate in the Work Contract: `acceptance.state`, `basis`, and `clarification_required` when none can be established (WC-06 to WC-09, WC-18); a completion on a baseline-only basis is reported as not goal-level. Implemented by **RIC-02**. Status unchanged (partial).
 
 ### P0-02 Success rests on independently verifiable outcomes, not the model's claims
 * **Status:** implemented for `change` and `verify`; not for `inspect`.
@@ -141,6 +142,7 @@ Summary of the state (details in each item):
 * **Verification:** isolation tests in the provider's repository; path-policy tests; a scripted
   injection scenario showing the boundary refuses it.
 * **Audit 2026-10-09:** status stays partial; the audit **raises the urgency**. HA-01: verifying a repository executes its own `build.rs` and `.cargo/config.toml` rustc wrapper with the user's permissions, with no model write at all (`--kind verify`); HA-13: `config/secrets.toml`, `.aws/credentials` and `id_rsa` are readable and sent to the provider; HA-14: the reserved-name check is case-sensitive (`.ENV`, `.Git` accepted); HA-15: file content reaches the model verbatim and a `build.rs` write is allowed (chains to HA-01). The scripted model's attempts at writing outside the root, absolute paths, `.env`, `.git` and `shell.exec` were all refused.
+* **Design (2026-10-09):** trust and tooling rules become contract fields (`authority.trust`, WC-13) and the test-surface policy becomes a verification requirement (WC-17). Implemented first, by **RIC-01**. Status unchanged (partial).
 
 ### P0-07 Test and verification failures cannot be silently converted into success
 * **Status:** implemented (within what PAX reports).
@@ -174,6 +176,7 @@ Summary of the state (details in each item):
 * **Acceptance:** `project.write` carries the content hash of the version the model read (or the work holds a tree-level lock); a mismatch is a failed observation the model sees; a second process on the same directory is refused or serialized; the `c1` and `c2` scenarios end with the external edit intact.
 * **Depends on:** none. **Constraint:** no new capability class; a precondition on the existing write.
 * **Verification:** the audit scenarios `c1` and `c2` promoted to tests.
+* **Design (2026-10-09):** the write precondition and the four fingerprint check points are specified as EL-10 and EL-11 and are part of **RIC-01**.
 
 ---
 
@@ -189,6 +192,7 @@ Summary of the state (details in each item):
   checkpoints are defined as a state a new attempt can start from (not a storage format).
 * **Depends on:** P1-02, P1-04. **Constraint:** no database; in-memory first.
 * **Verification:** ladder scenarios promoted from the harness into a product-level test.
+* **Design (2026-10-09):** attempt identity, strategy fingerprints and `attempt.failure` records are specified (EL-13); the contract version binds every attempt (WC-10). Implemented by **RIC-02** and **RIC-03**. Status unchanged (partial).
 
 ### P1-02 Resume interrupted work only under a defined recovery contract
 * **Status:** missing, by decision.
@@ -211,6 +215,7 @@ Summary of the state (details in each item):
 * **Acceptance:** the handoff structure is product code with a size bound that fits the surface;
   claims are labelled as assertions, facts as observations.
 * **Verification:** the handoff negative tests (`coding_agent`) run against the product type.
+* **Design (2026-10-09):** the handoff is a deterministic projection of contract and ledger (EL-17, BC-14), not transcript text. **RIC-03**, **RIC-04**.
 
 ### P1-04 Repair budgets; no endless retry or escalation loops
 * **Status:** missing in the product (present in the evaluation harness only).
@@ -221,6 +226,7 @@ Summary of the state (details in each item):
   to stop on a repeated identical failure; budget reported in the result.
 * **Verification:** scripted repeat-failure scenario; limits visible in JSON.
 * **Audit 2026-10-09:** HA-09: the product does not detect repeated identical failures; 8 executions and 9 model calls are spent before `limit_reached` (the harness policy stops at the third). HA-06 suggests the budget should also cover malformed replies.
+* **Design (2026-10-09):** repeat detection and the repair budget are classifier rules BC-R5 and the typed strategy catalog (BC-09). **RIC-04**.
 
 ### P1-05 Bounded context construction and evidence selection
 * **Status:** partial.
@@ -232,6 +238,7 @@ Summary of the state (details in each item):
   omitted observation is disclosed to the model.
 * **Verification:** context-discipline tests plus a real-model run (P2-05).
 * **Audit 2026-10-09:** HA-07: with no budget, request size grows by about one observation per call (4.9 KB to 274 KB over nine calls reading 32 KB each); the Ollama adapter never sends `num_ctx`. HA-08: test output beyond 256 KiB is cut at the head with no truncation notice, so a decisive failure at the end never reaches the model.
+* **Design (2026-10-09):** context is a deterministic function of (contract, ledger, budget) with disclosed omissions (EL-17); the micro-step gate narrows the next call (MS). **RIC-03**, **RIC-05**, **RIC-06**.
 
 ### P1-06 Completed, incomplete, blocked and human-required are distinguishable
 * **Status:** partial.
@@ -251,6 +258,7 @@ Summary of the state (details in each item):
   assume a stronger model succeeds, and an addressable human-decision record (P0-03).
 * **Depends on:** P1-04, P2-03. **Verification:** real-model runs per tier (P2-05).
 * **Audit 2026-10-09:** HA-10 confirmed by execution: one provider per process; `escalate` is terminal with only a reason; the ladder is not linked into `chip work`.
+* **Design (2026-10-09):** escalation is classified, not assumed: only `reasoning_insufficiency` (BC-R7) may trigger a stronger-model handoff, never missing criteria, authority or trustworthy evidence (BC-14, BC-15); the human-addressed stops are specified (blockage-classifier section 8). **RIC-04** (classification), **RIC-07** (routing).
 
 ### P1-08 Each escalation carries evidence, prior attempts, constraints and remaining uncertainty
 * **Status:** partial.
@@ -259,6 +267,7 @@ Summary of the state (details in each item):
 * **Acceptance / verification:** as P1-03, plus a test that an escalation lacking any of the four is
   refused.
 * **Audit 2026-10-09:** HA-10: the escalated result a client receives has the model's reason but no structured handoff.
+* **Design (2026-10-09):** the escalation payload is built only from the contract and ledger (BC-14); claims are labelled as claims (EL-02). **RIC-04**.
 
 ---
 
@@ -283,6 +292,7 @@ Summary of the state (details in each item):
 * **Depends on:** PAX (owner of per-test results), P0-01. **Verification:** tamper scenarios
   (`coding_agent/integrity.rs` is the prototype).
 * **Audit 2026-10-09:** **priority raised from P1 to P0 by HA-02.** Five of five constructed false-success cases (assertions weakened, tests ignored, failing tests deleted, requested feature absent, visible test special-cased) end `verified: true`, exit 0 on the real binary; the same cases emptying every test or disabling the test target are correctly refused (`not_run`, `no-tests-executed`). The result lists `paths_written` including the edited test file but raises no signal. The ID is kept so existing references remain valid.
+* **Design (2026-10-09):** test-surface protection is a verification requirement (WC-17) and an eligibility column in the ledger matrix (EL-14, evidence-ledger section 7). **RIC-01** first, then **RIC-03**.
 
 ### P1-V3 Trustworthy build, test, binary-acceptance and repository-integrity checks
 * **Status:** partial.
@@ -303,6 +313,7 @@ Summary of the state (details in each item):
   outlive retention, that is a requirement for P3-01, not an implicit unbounded map.
 * **Verification:** documentation review; a test that an expired work never fabricates a result (exists:
   `finished_work_is_bounded_and_the_oldest_is_evicted_first`).
+* **Design (2026-10-09):** every completion decision cites ledger records, verified for integrity before the decision (EL-14, EL-15). **RIC-03**.
 
 ### P1-V5 Integrate PAX only for capabilities it implements; document missing ones
 * **Status:** implemented, ongoing.
@@ -319,6 +330,7 @@ Summary of the state (details in each item):
   exist (P1-01), so evidence cannot yet be tied to an attempt identity.
 * **Acceptance:** result JSON names the evidence that supports `verified` (execution id of the
   deciding `pax.test`). **Verification:** schema test.
+* **Design (2026-10-09):** evidence is bound to attempt, execution, contract version and the repository fingerprint at production (evidence-ledger section 1). **RIC-03**.
 
 ---
 
@@ -387,6 +399,7 @@ Summary of the state (details in each item):
 ### P2-03 Policy-driven escalation that does not assume a stronger model succeeds
 * **Status:** missing in the product (see P1-07). **Acceptance:** the stop rule is a tested policy
   (budget, repeated failure), and a stronger tier's failure is a normal outcome.
+* **Design (2026-10-09):** the stop rule is the classifier: a stronger tier's failure is a normal outcome and a second `reasoning_insufficiency` at the top tier is a human-addressed stop (BC-15). **RIC-07b**.
 
 ### P2-04 FX in the production path
 * **Status:** the request was to document FX as unavailable until implemented; **validated against
@@ -407,6 +420,7 @@ Summary of the state (details in each item):
   stored as scripted vs real, separately labelled.
 * **Verification:** the stored run, reproducible by command.
 * **Audit 2026-10-09:** the audit built the harness for this (fixture with two seeded defects and hidden acceptance tests, `audit/hostile/`) and could not run it: no weights are reachable from the audit environment, no GPU (`audit-evidence/hostile-audit/local-model-probe.txt`). HA-19: the repository's opt-in real-model tests print `SKIPPED` and report `ok`.
+* **Design (2026-10-09):** the evaluation is staged in **RIC-07**: 7a baseline of today's behavior on a fixed suite (no dependency on the new contracts), 7b routing, 7c comparative runs. The 85 % local-model figure is an **evaluation goal**, not an implementation criterion, until 7a has a reproducible real-model baseline.
 
 ---
 
@@ -459,6 +473,126 @@ None is justified until a real-model run shows the need (`capabilities.md` secti
   grounded, never verified.
 
 ---
+
+## Runtime intelligence contracts: implementation tickets (RIC)
+
+Design: [`work-contract.md`](work-contract.md), [`evidence-ledger.md`](evidence-ledger.md),
+[`blockage-classifier.md`](blockage-classifier.md), [`micro-step-proposal-gate.md`](micro-step-proposal-gate.md).
+These tickets *implement and refine* existing items; they do not replace them. Each ticket lists the existing
+roadmap ids it refines, the normative requirements (`WC-`, `EL-`, `BC-`, `MS-`) that are its acceptance criteria,
+its dependencies and its verification. Nothing here is implemented; every status is **not started**.
+
+**Principle (repeated because it is the failure mode to avoid):** a stronger model is not a substitute for missing
+acceptance criteria, authority, or trustworthy evidence. Only a classified `reasoning_insufficiency` (BC-R7) may
+trigger a stronger-model handoff.
+
+**Order and why.** Trust and verification first (RIC-01), because a contract or a ledger on top of a verifier that
+can be gamed (HA-01, HA-02) builds on sand. The Work Contract second (RIC-02): it becomes the runtime's stable control
+object, and the ledger and classifier read it instead of inventing state of their own. Dependency note: the
+contract's acceptance derivation (WC-06, rows 2 to 4 of its table) needs a **baseline verification**, so that single
+pre-model step belongs to RIC-02; RIC-06 covers the rest of deterministic pre-model evaluation (candidate derivation,
+runtime-scheduled re-verification, cost reporting). A real-model **baseline of today's free-form behavior** (RIC-07a)
+has no dependency on RIC-01 to RIC-06 and should be taken as soon as a model is available; it is what the later
+improvements are measured against.
+
+| Ticket | Priority | Status | Depends on | Refines | Closes audit findings |
+| --- | --- | --- | --- | --- | --- |
+| RIC-01 Trustworthy execution and verification | P0 | not started | none | P0-06, P0-09, P1-V2, P0-04 (partly) | HA-01, HA-02 (v3a to v3c), HA-03, HA-04, HA-12, HA-14 |
+| RIC-02 Work Contract: schema, immutability, versioning, clarification, baseline | P0 | not started | RIC-01 | P0-01, P1-01, P1-O4 | HA-02 (v6, v7: labelled, closed only with submitter criteria), HA-05 (budgets/timeouts as contract fields) |
+| RIC-03 Evidence Ledger: invalidation and attempt linkage | P1 | not started | RIC-02 | P1-V4, P1-V6, P1-03, P1-05, P1-02 (in-process) | HA-08, HA-16 (in process) |
+| RIC-04 Deterministic blockage classification and typed repair strategies | P1 | not started | RIC-03 | P1-04, P1-06, P1-07, P1-08, P2-03 | HA-06, HA-09, HA-10 (classification half) |
+| RIC-05 Bounded micro-step proposals (default off) | P2 | not started | RIC-02, RIC-03, RIC-04 | P1-05 | HA-06, HA-07 (mitigation) |
+| RIC-06 Deterministic pre-model evaluation (beyond the baseline) | P1 | not started | RIC-02, RIC-03 | P1-05, P1-V3 | HA-07 (mitigation) |
+| RIC-07 Local-first routing and real-model evaluation | P1 (7a) / P2 (routing) | blocked on a model (7a) | 7a: none; routing: RIC-01 to RIC-06 | P2-03, P2-05, P2-D3, P2-D4 | HA-10, HA-19 |
+
+### RIC-01 Trustworthy execution and verification (P0)
+* **Scope.** The minimum that removes the two Critical audit findings, in a form that later *becomes* contract and ledger
+  data: (1) a **trust gate** for project tooling: no `pax.test` in a repository not marked trusted unless the environment
+  isolates it or the submitter makes an explicit trust decision (WC-13; HA-01); a `warn` rollout first, then `enforce`;
+  (2) **test-surface protection**: record the baseline test surface (PAX `project.observe` test facts when available,
+  else a path-based fingerprint of test-bearing files) and refuse `verified` when it changes without an authorizing
+  decision (WC-17, EL-14 test-surface column; HA-02); (3) **write preconditions** and a tree-fingerprint check at the
+  four points of EL-10 (EL-01, EL-10, EL-11; HA-03, HA-04); (4) children are killed with their parent or process group
+  (HA-12); (5) the reserved-name check folds case (HA-14).
+* **Acceptance.** EL-01, EL-10, EL-11, EL-18, EL-19, WC-13 (trust), WC-17 (surface), and the audit scenarios `o4-*`, `v3a`, `v3b`,
+  `v3c`, `c1`, `c2`, `i1`, `o5-write-dot-ENV` promoted from `audit/hostile` to CI tests, each ending as the requirement
+  states; `rollout=warn` and `rollout=enforce` both tested.
+* **Dependencies / constraints.** None. No new capability class; no persistence; the isolation *mechanism* belongs to an
+  `EnvironmentProvider` outside this repository, so the ticket only enforces the gate and documents the requirement.
+* **Verification.** The promoted scenarios; a differential test that the gate adds no permission (MS-05 style) for the
+  trust decision; the existing 1139-test workspace run unchanged.
+
+### RIC-02 Work Contract (P0)
+* **Scope.** `WorkContract` in `chip-core` with canonical serialization, immutability, versions and history (WC-01 to
+  WC-05, WC-19, WC-20); acceptance derivation including the baseline verification and `clarification_required`
+  (WC-06 to WC-09, section 4 of the design) in `warn` then `enforce`; version binding on events (WC-10, WC-11); authority
+  and budgets including configurable model timeout and re-ask budget (WC-12, WC-14, WC-15); `compile_to_spec`; result
+  fields (`acceptance_basis`, `verified_against`, WC-18).
+* **Acceptance.** WC-01 to WC-20 as written; audit scenarios `v6` and `v7` are *labelled* `verified_against: failing_baseline_tests,
+  goal_level: false` without submitter criteria, and are not verified until a submitter criterion that exercises the feature
+  or the general behavior passes (WC-18); a green-baseline `change` goal with no criteria ends `escalated`
+  (to a human) with `clarification_required`; `e-*` limits reproduce through contract
+  budgets; HA-05's slow-server scenario passes with a larger configured timeout.
+* **Dependencies / constraints.** RIC-01. Public API additive; struct-literal breakage avoided (`#[non_exhaustive]` or
+  builders, HA-20). No FX change.
+* **Verification.** The table-driven tests named in each requirement; the existing event-order and audit tests unchanged.
+
+### RIC-03 Evidence Ledger (P1)
+* **Scope.** In-memory ledger with record schema, hash chain, dependency DAG, `freshness()` and `verify_ledger()`
+  (EL-02, EL-03, EL-05, EL-08, EL-09, EL-12 to EL-17); `attempt.failure` records and attempt identity (EL-13; P1-01);
+  completion eligibility from the ledger (EL-14); deterministic context projection replacing transcript carry-over
+  (EL-17; P1-05); disclosure of truncated diagnostics (HA-08).
+* **Acceptance.** EL-01 to EL-19, including the eligibility matrix of the design, section 7, as one table-driven test.
+* **Dependencies / constraints.** RIC-02 (every record binds a contract version). The existing `EvidenceStore` remains for
+  reuse only. No persistence.
+* **Verification.** Property tests for invalidation propagation; tamper tests for integrity; the audit scenarios `v5`,
+  `c1`, `c2`, `i2` (second run in-process context) and the `o7-flood-*` cases.
+
+### RIC-04 Deterministic blockage classification and typed repair strategies (P1)
+* **Scope.** `classify()` with the eight rules and signals of the design (BC-01 to BC-13); a **typed strategy catalog**
+  (a strategy has an id, a type from a closed set, a target criterion, target files, and a fingerprint; initial types:
+  `read_more_context`, `run_single_test`, `narrow_edit`, `revert_and_retry`, `change_target_file`, `micro_step`);
+  repair budget and repeat-failure stop (P1-04); terminal mapping reusing existing states (section 8 of the design);
+  the human-addressed payloads (P1-08).
+* **Acceptance.** BC-01 to BC-13 and the corpus of the design, section 6, run in CI; `e-repeat-identical-wrong-write-then-
+  test` ends after `repeat_threshold`, not at the execution limit (HA-09).
+* **Dependencies / constraints.** RIC-03. No model call in the classifier; no stronger-model handoff yet (RIC-07).
+* **Verification.** The corpus; a source-level test forbidding clock/model/random use in the module (BC-01).
+
+### RIC-05 Bounded micro-step proposals (P2, default off)
+* **Scope.** `chip.micro-step.v1` parser, validation V1 to V9, mode selection and events, budgets and loop guards
+  (MS-01 to MS-11).
+* **Acceptance.** MS-01 to MS-11; the differential no-bypass test (MS-05) passes with every audit attack; the setting is
+  off by default (MS-02).
+* **Dependencies / constraints.** RIC-02, RIC-03, RIC-04. It MUST NOT become the default or be described as an improvement
+  before MS-12.
+* **Verification.** The tests above; the A/B evaluation belongs to RIC-07.
+
+### RIC-06 Deterministic pre-model evaluation (P1)
+* **Scope.** Candidate derivation from failing-test references and PAX structure facts (WC-16); runtime-scheduled
+  re-verification after invalidating writes (BC-08); bounded cost and its reporting (WC-21 to WC-23); skipping when it
+  cannot change the contract.
+* **Acceptance.** WC-16, WC-21, WC-22, WC-23, BC-08.
+* **Dependencies / constraints.** RIC-02, RIC-03. The performance invariant (`crates.md` section 1): no unnecessary
+  subprocesses; the cost of pre-model steps is reported and bounded.
+* **Verification.** Determinism test (byte-identical candidates); cost report on a `verify` run (exactly one verification).
+
+### RIC-07 Local-first routing and real-model evaluation (P1 for 7a, P2 for routing)
+* **7a. Baseline evaluation of the current system (no dependencies; blocked on a model).** The fixed task suite (the
+  `audit/hostile` fixture plus further fixtures with independent acceptance), a pre-registered evaluation plan (suite,
+  repetitions *N*, decision rules, reported variance), run against at least one real local model with today's free-form
+  behavior. Scripted and real results are never mixed. **This baseline is what every later change is measured against.**
+* **7b. Routing.** A configurable stronger tier, handoff only on BC-R7 with budget (BC-14, BC-15, BC-16; P2-03), handoff
+  outcomes recorded; human-addressed stops otherwise.
+* **7c. Comparative evaluation.** Free-form vs micro-step (MS-12), local-only vs escalation-enabled, with cost,
+  tokens, time, escalation outcomes (P2-02, P2-05).
+* **Acceptance.** 7a: the plan, the stored traces and the reported baseline success and regression rates with variance.
+  7b: BC-14 to BC-16. 7c: results published before any default changes.
+* **Evaluation goal, not an acceptance criterion.** The 85 % local-model verified-completion target is measured on the
+  fixed suite once a reproducible real-local-model baseline exists. No ticket may cite it as an implementation criterion
+  before then (WC §11, MS-13).
+* **Dependencies / constraints.** 7a none; 7b RIC-01 to RIC-06; 7c RIC-05 and 7b. Provider integration stays with FX.
+* **Verification.** The stored evaluation artifacts.
 
 ## P3: deferred (no current requirement; do not promote without a requirement, a contract and measurable acceptance)
 

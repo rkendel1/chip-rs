@@ -96,7 +96,10 @@ that show it, in [`docs/product/production-boundary.md`](docs/product/production
 remains before Chip is a production coding agent is the prioritized backlog
 [`docs/product/coding-agent-production-roadmap.md`](docs/product/coding-agent-production-roadmap.md),
 and known limitations and TODO-like findings are classified in
-[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md). An adversarial,
+[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md). The normative **design** (not implemented) for how Chip should turn limited model intelligence into independently
+verified work is the Work Contract, Evidence Ledger, Blockage Classifier and Micro-step Proposal Gate documents under
+`docs/product/` (start at [`work-contract.md`](docs/product/work-contract.md)); the tickets are RIC-01 to RIC-07 in the
+roadmap. An adversarial,
 evidence-first assessment of whether Chip can be trusted to finish coding work local-first (with its
 readiness judgments, findings and what could not be tested) is
 [`docs/product/hostile-autonomous-agent-audit.md`](docs/product/hostile-autonomous-agent-audit.md).

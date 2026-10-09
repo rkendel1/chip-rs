@@ -139,6 +139,7 @@ not a reason to adopt it.
 | How well does the scripted lifecycle work end to end? | [`coding-agent-evaluation.md`](coding-agent-evaluation.md) |
 | How much does Chip cost per call? | [`performance.md`](performance.md) |
 | Where does project-structure observation belong? | [`project-observation-boundary.md`](project-observation-boundary.md) |
+| What are the runtime's control, evidence and blockage contracts (design only)? | [`work-contract.md`](work-contract.md), [`evidence-ledger.md`](evidence-ledger.md), [`blockage-classifier.md`](blockage-classifier.md), [`micro-step-proposal-gate.md`](micro-step-proposal-gate.md); tickets RIC-01 to RIC-07 in the roadmap |
 | Did a durable session store pay off? | [`session-store-comparison.md`](session-store-comparison.md) (and the earlier [`session-memory-experiment.md`](session-memory-experiment.md)) |
 | Research constitution and invariants | `AGENTS.md` |
 

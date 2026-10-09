@@ -3,7 +3,7 @@
 Pinned to commit `f9e0e3bf5d870122b36d79ff3df765901cd46588`, audited 2026-10-09 from a **fresh clone**
 (`/home/user/audit-clean`). The auditor's stance is a developer who wants to run a **local model**,
 let Chip work alone, and pay for a stronger model or a person's time only when the evidence says so.
-The canonical backlog is [`coding-agent-production-roadmap.md`](coding-agent-production-roadmap.md);
+The canonical backlog is [`coding-agent-production-roadmap.md`](coding-agent-production-roadmap.md) (its tickets RIC-01 to RIC-07 are the design response to these findings; see [`work-contract.md`](work-contract.md));
 this report adds findings and evidence to it and does not carry a second task list. Raw evidence is in
 [`audit-evidence/hostile-audit/`](audit-evidence/hostile-audit/) and the harness in `audit/hostile/`.
 
