@@ -35,6 +35,7 @@ const CLI_PRODUCT_MODULES: &[&str] = &[
     "service.rs",
     "local_environment.rs",
     "provider_selection.rs",
+    "micro.rs",
 ];
 
 fn crates_dir() -> PathBuf {

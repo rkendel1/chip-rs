@@ -47,3 +47,8 @@ serde_json = "1"
 [[bench]]
 name = "baseline"
 harness = false
+
+# The shadow-mode micro-model evaluation: `cargo bench -p chip-cli --bench micro_eval`.
+[[bench]]
+name = "micro_eval"
+harness = false

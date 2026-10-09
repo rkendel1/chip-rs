@@ -196,6 +196,19 @@ agent. The model supplies judgment; Chip validates every request, performs every
 observes the result and decides from those observations whether the goal is met. Every model gets
 the same boundary: nothing about the provider or model identity grants authority.
 
+### Shadow-mode micro-model (optional, observation only)
+
+```sh
+CHIP_MICRO_PROVIDER=ollama CHIP_MICRO_MODEL=<tiny-model> chip work --micro-shadow --json "<goal>"
+```
+
+After the work is final, a separately configured small model may be asked to classify the last failure and
+nominate one repair strategy. The reply is validated against `chip.micro.v1`, recorded under `micro_shadow`
+beside the runtime's own decision, and **has no authority**: it cannot execute, repair, escalate, complete or
+change the exit status. Without `--micro-shadow` nothing changes. It never falls back to the work model. See
+[`docs/product/micro-model-shadow.md`](docs/product/micro-model-shadow.md); the evaluation harness is
+`cargo bench -p chip-cli --bench micro_eval` (blocked, exit 3, without a model; never a pass).
+
 ### Selecting the model
 
 Precedence, the same every time: command line (`--provider`, `--model`, `--endpoint`), then the

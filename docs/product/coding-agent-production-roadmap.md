@@ -504,6 +504,7 @@ improvements are measured against.
 | RIC-05 Bounded micro-step proposals (default off) | P2 | not started | RIC-02, RIC-03, RIC-04 | P1-05 | HA-06, HA-07 (mitigation) |
 | RIC-06 Deterministic pre-model evaluation (beyond the baseline) | P1 | not started | RIC-02, RIC-03 | P1-05, P1-V3 | HA-07 (mitigation) |
 | RIC-07 Local-first routing and real-model evaluation | P1 (7a) / P2 (routing) | blocked on a model (7a) | 7a: none; routing: RIC-01 to RIC-06 | P2-03, P2-05, P2-D3, P2-D4 | HA-10, HA-19 |
+| RIC-08 Shadow-mode micro-model evaluation | P2 | implemented, shadow only; real-model evaluation blocked on a model | none (interim stand-ins for RIC-02, RIC-03) | P2-03 (measurement half) | none |
 
 ### RIC-01 Trustworthy execution and verification (P0)
 * **Scope.** The minimum that removes the two Critical audit findings, in a form that later *becomes* contract and ledger
@@ -593,6 +594,24 @@ improvements are measured against.
   before then (WC §11, MS-13).
 * **Dependencies / constraints.** 7a none; 7b RIC-01 to RIC-06; 7c RIC-05 and 7b. Provider integration stays with FX.
 * **Verification.** The stored evaluation artifacts.
+
+### RIC-08 Shadow-mode micro-model evaluation (P2; implemented as observation only)
+* **Scope.** An optional, explicitly configured, provider-neutral shadow interface (`chip work --micro-shadow`,
+  `CHIP_MICRO_*`) through which a small model classifies the last failure and nominates one repair strategy from a
+  closed catalog, under the versioned `chip.micro.v1` contract with strict validation. The nomination is recorded
+  beside the runtime's deterministic outcome and nowhere else. A fixed, labelled evaluation fixture and a
+  reproducible harness (`cargo bench -p chip-cli --bench micro_eval`) measure it. Specified in
+  [`micro-model-shadow.md`](micro-model-shadow.md).
+* **Acceptance.** The checklist of `micro-model-shadow.md` section 9. It adds no authority (MS-02, MS-05 posture:
+  off by default, nothing accepted that the normal path would not accept: here nothing is accepted at all).
+  Contract version and snapshot identity are interim stand-ins until RIC-02 and RIC-03.
+* **Dependencies / constraints.** None to build. No execution path, no new dependency, no persistence, no change to
+  the Work Contract or Evidence Ledger. It cannot show reduced larger-model calls or better verified completion:
+  that needs the controlled ablation of RIC-07 (7c). Any authority change is a separate, reviewed ticket gated by
+  held-out evidence (`micro-model-shadow.md` section 10).
+* **Verification.** Validator positive and negative tests, shadow-isolation tests through the real binary, the
+  fixture's structural checks, the scripted self-test and replay. The real-model evaluation is **blocked** (no model
+  available in the build environment) and says so.
 
 ## P3: deferred (no current requirement; do not promote without a requirement, a contract and measurable acceptance)
 
