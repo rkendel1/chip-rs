@@ -1,0 +1,3115 @@
+{
+  "authority_granted": "none",
+  "blocked_reason": null,
+  "candidate": {
+    "configured_model": "qwen2.5-coder:1.5b-instruct",
+    "configured_model_is_this_candidate": true,
+    "declared": {
+      "artifact_revision": "unreported",
+      "context_limit_tokens": "32768",
+      "hardware": "Apple M4 Max, 14 cores, 36 GiB RAM",
+      "inference_runtime": "ollama 0.40.0",
+      "quantization": "Q4_K_M"
+    },
+    "display": "Qwen2.5-Coder-1.5B-Instruct",
+    "key": "qwen2.5-coder-1.5b-instruct",
+    "sampling": {
+      "max_output_tokens": 256,
+      "temperature": 0.0
+    }
+  },
+  "contract": {
+    "schema": "chip.micro.v1",
+    "schema_sha256": "sha256:01b4d618700bdb69ad3969cdd9ace562717fe018f155530344d88d0b0792776c",
+    "version": 0,
+    "version_basis": "interim: no Work Contract exists yet"
+  },
+  "evidence_about_a_model": true,
+  "fixture": {
+    "cases": 50,
+    "checks": [
+      {
+        "check": "case ids are unique",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "both splits are non-empty",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "label sources are independent of any model",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "every label is marked for human review",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "acceptable strategies are offered candidates",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "abstention cases accept only the unknown class",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "executed and unexecuted cases are distinguished",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "enough executed cases per split to compute an interval",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "stale evidence appears in the fixture",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: familiar",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: unfamiliar",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: ambiguous",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: stale_evidence",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: invalid_strategy_offered",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: adversarial",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "held-out set matches its freeze",
+        "detail": "ok",
+        "passed": true
+      }
+    ],
+    "executed_cases": 38,
+    "heldout_sha256": "sha256:ba46899df4357f682a9a413de949e9c7783d686883a31dc6c34668692153ad4e",
+    "label_verification": {
+      "executed_reproduced_and_verified": 38,
+      "human_review_pending": 50,
+      "independently_human_reviewed": 0,
+      "unexecuted_synthetic": 12
+    },
+    "sha256": "sha256:2b7c94e78e37049b6fd207978a2fcff0d80c46eef8b74b9890f16a1f44e9e8b2",
+    "unexecuted_cases": 12,
+    "version": "micro-eval-2"
+  },
+  "heldout_frozen_intact": true,
+  "metrics": {
+    "by_failure_class": {
+      "calibration_executed": {
+        "compile_error": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 5,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.43448246478317476,
+              "k": 0,
+              "low": 0.0,
+              "n": 5
+            }
+          },
+          "latency_ms": {
+            "p50": 735,
+            "p95": 814
+          },
+          "provider_failures": 0,
+          "rejected_replies": 5,
+          "rejection_codes": {
+            "malformed": 5
+          },
+          "replies_received": 5,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 5,
+            "mean_completion": 116.0,
+            "mean_prompt": 848.6
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "environment_or_permission": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 1,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.7934506856227626,
+              "k": 0,
+              "low": 0.0,
+              "n": 1
+            }
+          },
+          "latency_ms": {
+            "p50": 672,
+            "p95": 672
+          },
+          "provider_failures": 0,
+          "rejected_replies": 1,
+          "rejection_codes": {
+            "malformed": 1
+          },
+          "replies_received": 1,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 1,
+            "mean_completion": 127.0,
+            "mean_prompt": 656.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "missing_dependency_or_tooling": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 3,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.5614970317550454,
+              "k": 0,
+              "low": 5.551115123125783e-17,
+              "n": 3
+            }
+          },
+          "latency_ms": {
+            "p50": 758,
+            "p95": 800
+          },
+          "provider_failures": 0,
+          "rejected_replies": 3,
+          "rejection_codes": {
+            "malformed": 3
+          },
+          "replies_received": 3,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 3,
+            "mean_completion": 125.33333333333333,
+            "mean_prompt": 709.6666666666666
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "runtime_panic_or_exception": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 1,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.7934506856227626,
+              "k": 0,
+              "low": 0.0,
+              "n": 1
+            }
+          },
+          "latency_ms": {
+            "p50": 770,
+            "p95": 770
+          },
+          "provider_failures": 0,
+          "rejected_replies": 1,
+          "rejection_codes": {
+            "malformed": 1
+          },
+          "replies_received": 1,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 1,
+            "mean_completion": 128.0,
+            "mean_prompt": 838.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "test_assertion_failure": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 7,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.35433043506668743,
+              "k": 0,
+              "low": 5.551115123125783e-17,
+              "n": 7
+            }
+          },
+          "latency_ms": {
+            "p50": 698,
+            "p95": 780
+          },
+          "provider_failures": 0,
+          "rejected_replies": 7,
+          "rejection_codes": {
+            "malformed": 7
+          },
+          "replies_received": 7,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 7,
+            "mean_completion": 130.14285714285714,
+            "mean_prompt": 855.4285714285714
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "unknown": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 1,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.7934506856227626,
+              "k": 0,
+              "low": 0.0,
+              "n": 1
+            }
+          },
+          "latency_ms": {
+            "p50": 748,
+            "p95": 748
+          },
+          "provider_failures": 0,
+          "rejected_replies": 1,
+          "rejection_codes": {
+            "malformed": 1
+          },
+          "replies_received": 1,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 1,
+            "mean_completion": 128.0,
+            "mean_prompt": 754.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        }
+      },
+      "heldout_executed": {
+        "compile_error": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 3,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.5614970317550454,
+              "k": 0,
+              "low": 5.551115123125783e-17,
+              "n": 3
+            }
+          },
+          "latency_ms": {
+            "p50": 801,
+            "p95": 825
+          },
+          "provider_failures": 0,
+          "rejected_replies": 3,
+          "rejection_codes": {
+            "malformed": 3
+          },
+          "replies_received": 3,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 3,
+            "mean_completion": 119.33333333333333,
+            "mean_prompt": 884.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "environment_or_permission": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 1,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.7934506856227626,
+              "k": 0,
+              "low": 0.0,
+              "n": 1
+            }
+          },
+          "latency_ms": {
+            "p50": 701,
+            "p95": 701
+          },
+          "provider_failures": 0,
+          "rejected_replies": 1,
+          "rejection_codes": {
+            "malformed": 1
+          },
+          "replies_received": 1,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 1,
+            "mean_completion": 127.0,
+            "mean_prompt": 655.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "missing_dependency_or_tooling": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 6,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.3903342879021653,
+              "k": 0,
+              "low": 2.7755575615628914e-17,
+              "n": 6
+            }
+          },
+          "latency_ms": {
+            "p50": 755,
+            "p95": 1080
+          },
+          "provider_failures": 0,
+          "rejected_replies": 6,
+          "rejection_codes": {
+            "malformed": 6
+          },
+          "replies_received": 6,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 6,
+            "mean_completion": 138.83333333333334,
+            "mean_prompt": 775.5
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "runtime_panic_or_exception": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 1,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.7934506856227626,
+              "k": 0,
+              "low": 0.0,
+              "n": 1
+            }
+          },
+          "latency_ms": {
+            "p50": 783,
+            "p95": 783
+          },
+          "provider_failures": 0,
+          "rejected_replies": 1,
+          "rejection_codes": {
+            "malformed": 1
+          },
+          "replies_received": 1,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 1,
+            "mean_completion": 129.0,
+            "mean_prompt": 832.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "test_assertion_failure": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 7,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.35433043506668743,
+              "k": 0,
+              "low": 5.551115123125783e-17,
+              "n": 7
+            }
+          },
+          "latency_ms": {
+            "p50": 794,
+            "p95": 1051
+          },
+          "provider_failures": 0,
+          "rejected_replies": 7,
+          "rejection_codes": {
+            "malformed": 7
+          },
+          "replies_received": 7,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 7,
+            "mean_completion": 125.42857142857143,
+            "mean_prompt": 861.8571428571429
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        },
+        "unknown": {
+          "abstention": {
+            "answerable_cases_answered": 0,
+            "appropriate": 0,
+            "appropriate_abstention_rate": null,
+            "cases_requiring_abstention_answered": 0,
+            "inappropriate_abstention_rate": null,
+            "inappropriate_abstentions": 0
+          },
+          "cases": 2,
+          "classification": {
+            "accuracy_over_valid_replies": null,
+            "accuracy_when_classified": null,
+            "classified_rate": null,
+            "correct": 0,
+            "valid": 0
+          },
+          "confidence_95_wilson": {
+            "appropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "classification_accuracy_over_valid_replies": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "false_positive_strategy_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "inappropriate_abstention_rate": {
+              "high": null,
+              "k": 0,
+              "low": null,
+              "n": 0
+            },
+            "schema_valid_rate": {
+              "high": 0.6576197724933469,
+              "k": 0,
+              "low": 0.0,
+              "n": 2
+            }
+          },
+          "latency_ms": {
+            "p50": 741,
+            "p95": 741
+          },
+          "provider_failures": 0,
+          "rejected_replies": 2,
+          "rejection_codes": {
+            "malformed": 2
+          },
+          "replies_received": 2,
+          "schema_valid_rate": 0.0,
+          "strategy": {
+            "false_positive_rate": null,
+            "false_positives": 0,
+            "nominations": 0
+          },
+          "tokens_per_decision": {
+            "decisions_with_usage": 2,
+            "mean_completion": 127.0,
+            "mean_prompt": 756.0
+          },
+          "unavailable": {
+            "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+            "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+          },
+          "valid_replies": 0
+        }
+      }
+    },
+    "calibration_all": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 24,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.13797620467498017,
+          "k": 0,
+          "low": 1.3877787807814457e-17,
+          "n": 24
+        }
+      },
+      "latency_ms": {
+        "p50": 738,
+        "p95": 800
+      },
+      "provider_failures": 0,
+      "rejected_replies": 24,
+      "rejection_codes": {
+        "malformed": 24
+      },
+      "replies_received": 24,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 24,
+        "mean_completion": 125.25,
+        "mean_prompt": 772.25
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    },
+    "calibration_executed": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 18,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.17587922364665765,
+          "k": 0,
+          "low": 0.0,
+          "n": 18
+        }
+      },
+      "latency_ms": {
+        "p50": 748,
+        "p95": 800
+      },
+      "provider_failures": 0,
+      "rejected_replies": 18,
+      "rejection_codes": {
+        "malformed": 18
+      },
+      "replies_received": 18,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 18,
+        "mean_completion": 125.0,
+        "mean_prompt": 811.5555555555555
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    },
+    "calibration_unexecuted": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 6,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.3903342879021653,
+          "k": 0,
+          "low": 2.7755575615628914e-17,
+          "n": 6
+        }
+      },
+      "latency_ms": {
+        "p50": 738,
+        "p95": 769
+      },
+      "provider_failures": 0,
+      "rejected_replies": 6,
+      "rejection_codes": {
+        "malformed": 6
+      },
+      "replies_received": 6,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 6,
+        "mean_completion": 126.0,
+        "mean_prompt": 654.3333333333334
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    },
+    "heldout_all": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 26,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.1287289218592153,
+          "k": 0,
+          "low": 0.0,
+          "n": 26
+        }
+      },
+      "latency_ms": {
+        "p50": 776,
+        "p95": 1051
+      },
+      "provider_failures": 0,
+      "rejected_replies": 26,
+      "rejection_codes": {
+        "malformed": 26
+      },
+      "replies_received": 26,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 26,
+        "mean_completion": 126.92307692307692,
+        "mean_prompt": 777.6153846153846
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    },
+    "heldout_executed": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 20,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.16112515805281938,
+          "k": 0,
+          "low": 0.0,
+          "n": 20
+        }
+      },
+      "latency_ms": {
+        "p50": 783,
+        "p95": 1051
+      },
+      "provider_failures": 0,
+      "rejected_replies": 20,
+      "rejection_codes": {
+        "malformed": 20
+      },
+      "replies_received": 20,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 20,
+        "mean_completion": 128.95,
+        "mean_prompt": 816.85
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    },
+    "heldout_unexecuted": {
+      "abstention": {
+        "answerable_cases_answered": 0,
+        "appropriate": 0,
+        "appropriate_abstention_rate": null,
+        "cases_requiring_abstention_answered": 0,
+        "inappropriate_abstention_rate": null,
+        "inappropriate_abstentions": 0
+      },
+      "cases": 6,
+      "classification": {
+        "accuracy_over_valid_replies": null,
+        "accuracy_when_classified": null,
+        "classified_rate": null,
+        "correct": 0,
+        "valid": 0
+      },
+      "confidence_95_wilson": {
+        "appropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "classification_accuracy_over_valid_replies": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "false_positive_strategy_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "inappropriate_abstention_rate": {
+          "high": null,
+          "k": 0,
+          "low": null,
+          "n": 0
+        },
+        "schema_valid_rate": {
+          "high": 0.3903342879021653,
+          "k": 0,
+          "low": 2.7755575615628914e-17,
+          "n": 6
+        }
+      },
+      "latency_ms": {
+        "p50": 742,
+        "p95": 853
+      },
+      "provider_failures": 0,
+      "rejected_replies": 6,
+      "rejection_codes": {
+        "malformed": 6
+      },
+      "replies_received": 6,
+      "schema_valid_rate": 0.0,
+      "strategy": {
+        "false_positive_rate": null,
+        "false_positives": 0,
+        "nominations": 0
+      },
+      "tokens_per_decision": {
+        "decisions_with_usage": 6,
+        "mean_completion": 120.16666666666667,
+        "mean_prompt": 646.8333333333334
+      },
+      "unavailable": {
+        "larger_model_calls_on_eligible_cases": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "regression_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07",
+        "verified_completion_rate": "not measurable in shadow mode: nothing changes the work; requires the controlled ablation of RIC-07"
+      },
+      "valid_replies": 0
+    }
+  },
+  "model": {
+    "endpoint": "http://127.0.0.1:11434",
+    "model": "qwen2.5-coder:1.5b-instruct",
+    "provider": "ollama"
+  },
+  "new_inference": true,
+  "predictions": [
+    {
+      "case": "n-after-bad-write-2",
+      "category": "invalid_strategy_offered",
+      "class_correct": null,
+      "completion_tokens": 137,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "revert_and_retry",
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 698,
+      "nomination": null,
+      "prompt_tokens": 877,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-bc0c9690e309acab\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"revert_and_retry\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a test assertion failure, which is a clear failure class.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-assert-add",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 129,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 607,
+      "nomination": null,
+      "prompt_tokens": 828,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-9b7d2142bf484e8d\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-assert-bare",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 126,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 589,
+      "nomination": null,
+      "prompt_tokens": 823,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1fac4665cb1be501\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-assert-order",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 130,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 607,
+      "nomination": null,
+      "prompt_tokens": 843,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-46217555a517d464\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-compile-missing-module",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 133,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 735,
+      "nomination": null,
+      "prompt_tokens": 817,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1df485196c020ffe\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `helper` module.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-compile-type",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 127,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 748,
+      "nomination": null,
+      "prompt_tokens": 792,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1731db958be3ff78\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-config-lib-path",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 147,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown",
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 758,
+      "nomination": null,
+      "prompt_tokens": 693,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-5496963cf6bd13f4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate that the project lacks the `cfglib` dependency, which is required for the compilation to succeed.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-dep-feature",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 96,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 536,
+      "nomination": null,
+      "prompt_tokens": 717,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1a6722a47a3d6ca4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"insufficient_evidence\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-dep-version",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 133,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 800,
+      "nomination": null,
+      "prompt_tokens": 719,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c68867be189d6302\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a compile error, which is a clear failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-env-unwritable-proc",
+      "category": "no_strategy_applicable",
+      "class_correct": null,
+      "completion_tokens": 127,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "environment_or_permission"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": []
+      },
+      "failure_class": "environment_or_permission",
+      "latency_ms": 672,
+      "nomination": null,
+      "prompt_tokens": 656,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-3b5b4ea5ee358ee1\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-missing-evidence-2",
+      "category": "missing_evidence",
+      "class_correct": null,
+      "completion_tokens": 132,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context",
+          "change_target_file"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 762,
+      "nomination": null,
+      "prompt_tokens": 845,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-60505227f801d9c4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"tests/words.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-repeated-compile-after-repair",
+      "category": "repeated_failure",
+      "class_correct": null,
+      "completion_tokens": 92,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "revert_and_retry"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 603,
+      "nomination": null,
+      "prompt_tokens": 893,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-3\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a compile error, which is a clear failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-stale-read-2",
+      "category": "stale_evidence",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 775,
+      "nomination": null,
+      "prompt_tokens": 876,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-af10a81bd560889a\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/p.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-trait-missing-method",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 135,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 814,
+      "nomination": null,
+      "prompt_tokens": 794,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-db05bd50d1c6acc7\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `casentraitmissingmethod` project.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-two-failures",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 129,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure",
+          "runtime_panic_or_exception"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "run_single_test"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 780,
+      "nomination": null,
+      "prompt_tokens": 896,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-2b706a804c987da1\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unfamiliar-buildrs",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "unknown",
+          "compile_error",
+          "runtime_panic_or_exception"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context",
+          "change_target_file"
+        ]
+      },
+      "failure_class": "unknown",
+      "latency_ms": 748,
+      "nomination": null,
+      "prompt_tokens": 754,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-0db2981af548e017\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unfamiliar-compile-error-macro",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 93,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 635,
+      "nomination": null,
+      "prompt_tokens": 947,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error, which is a failure class.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unwrap-none",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "runtime_panic_or_exception"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "runtime_panic_or_exception",
+      "latency_ms": 770,
+      "nomination": null,
+      "prompt_tokens": 838,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c4d72e3ae3c0739a\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-flaky",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 136,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "nondeterministic_or_flaky",
+          "timeout_or_resource_limit"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "run_single_test"
+        ]
+      },
+      "failure_class": "nondeterministic_or_flaky",
+      "latency_ms": 765,
+      "nomination": null,
+      "prompt_tokens": 688,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-03da32dd51af649b\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"timeout_or_resource_limit\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/net.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"timed out waiting for the listener (attempt 1 of 1)\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-no-revert-offered",
+      "category": "invalid_strategy_offered",
+      "class_correct": null,
+      "completion_tokens": 132,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "run_single_test"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 738,
+      "nomination": null,
+      "prompt_tokens": 660,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b579bf278e2f2ee8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/totals.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-stale-evidence",
+      "category": "stale_evidence",
+      "class_correct": null,
+      "completion_tokens": 130,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 701,
+      "nomination": null,
+      "prompt_tokens": 656,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-f2db5f94ab25a50e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/config.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-timeout",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "timeout_or_resource_limit"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "run_single_test",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "timeout_or_resource_limit",
+      "latency_ms": 707,
+      "nomination": null,
+      "prompt_tokens": 668,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-141d8dec09190925\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"timeout_or_resource_limit\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/sync.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"timeout_or_resource_limit\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-truncated",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 91,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": [
+          "read_more_context"
+        ]
+      },
+      "failure_class": "unknown",
+      "latency_ms": 514,
+      "nomination": null,
+      "prompt_tokens": 615,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-9ef50bad37f9b53e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"unknown\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-unfamiliar-linker",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 139,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": []
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 769,
+      "nomination": null,
+      "prompt_tokens": 639,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-662b7ec3e436680e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/work/target/debug/deps/libapp-9f.rlib(app.o)\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"tool-failed\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "calibration",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-after-bad-write",
+      "category": "invalid_strategy_offered",
+      "class_correct": null,
+      "completion_tokens": 127,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "revert_and_retry",
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 787,
+      "nomination": null,
+      "prompt_tokens": 874,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-494a35acc5424cd3\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-ambiguous-abort",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": []
+      },
+      "failure_class": "unknown",
+      "latency_ms": 741,
+      "nomination": null,
+      "prompt_tokens": 745,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-849e56467bcf010d\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-ambiguous-silent-exit",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 126,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": []
+      },
+      "failure_class": "unknown",
+      "latency_ms": 736,
+      "nomination": null,
+      "prompt_tokens": 767,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c8898bafdad48c38\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-assert-string",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 131,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 797,
+      "nomination": null,
+      "prompt_tokens": 849,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-92fe627250713463\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a test assertion failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-compile-import",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 137,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 801,
+      "nomination": null,
+      "prompt_tokens": 821,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-d4b3f3d7e126eb8e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `casencompileimport` project.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-config-bad-toml",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 134,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 724,
+      "nomination": null,
+      "prompt_tokens": 656,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-faf76d5f72ff6388\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate an unclosed table error, which is a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-config-edition",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 135,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 755,
+      "nomination": null,
+      "prompt_tokens": 699,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-621d3cae91a16ee8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `Cargo.toml` file.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-cross-file",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 54,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 427,
+      "nomination": null,
+      "prompt_tokens": 891,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-env-rust-version",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 195,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "environment_or_permission"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 1080,
+      "nomination": null,
+      "prompt_tokens": 704,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-f2d392e1801d3506\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"rustc 1.97.0 is not supported by the following packages: envrustver@0.1.0 requires rustc 1.999, envrustver@0.1.0 requires rustc 1.999, envrustver@0.1.0 requires rustc 1.999\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-env-unwritable-target",
+      "category": "no_strategy_applicable",
+      "class_correct": null,
+      "completion_tokens": 127,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "environment_or_permission"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": []
+      },
+      "failure_class": "environment_or_permission",
+      "latency_ms": 701,
+      "nomination": null,
+      "prompt_tokens": 655,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c2a5f94cc3ee357f\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-missing-dependency",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 148,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 839,
+      "nomination": null,
+      "prompt_tokens": 700,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-bb7cfb5a215b4d12\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics indicate that the package `serde_nonexistent_zzz` is missing, which is a required dependency for the project\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-missing-evidence",
+      "category": "missing_evidence",
+      "class_correct": null,
+      "completion_tokens": 130,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context",
+          "change_target_file"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 794,
+      "nomination": null,
+      "prompt_tokens": 831,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-e2e325ece35b09ab\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"tests/calc.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-panic-index",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 129,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "runtime_panic_or_exception"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "runtime_panic_or_exception",
+      "latency_ms": 783,
+      "nomination": null,
+      "prompt_tokens": 832,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-4d14dcb540635856\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-repeated-after-repair",
+      "category": "repeated_failure",
+      "class_correct": null,
+      "completion_tokens": 178,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "revert_and_retry",
+          "narrow_edit",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 1051,
+      "nomination": null,
+      "prompt_tokens": 914,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1e5ca1fbc68c1782\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"revert_and_retry\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    },\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    },\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-3\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-should-panic",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 129,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 776,
+      "nomination": null,
+      "prompt_tokens": 800,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b286520f0768690c\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-stale-read",
+      "category": "stale_evidence",
+      "class_correct": null,
+      "completion_tokens": 129,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "test_assertion_failure"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context",
+          "change_target_file"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 795,
+      "nomination": null,
+      "prompt_tokens": 874,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c30f04f4d6235806\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/a.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-trait-bound",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 130,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 825,
+      "nomination": null,
+      "prompt_tokens": 904,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-0313a0a5f4e5d809\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unfamiliar-build-tool-missing",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 128,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context",
+          "change_target_file"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 737,
+      "nomination": null,
+      "prompt_tokens": 727,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-e629ab04f8f439e8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unfamiliar-linker",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 93,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "missing_dependency_or_tooling",
+          "unknown",
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "missing_dependency_or_tooling",
+      "latency_ms": 716,
+      "nomination": null,
+      "prompt_tokens": 1167,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error, which is a failure class.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "n-unresolved-crate",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 91,
+      "execution_status": "executed_reproduced_and_verified",
+      "expected": {
+        "classes": [
+          "compile_error",
+          "missing_dependency_or_tooling"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit",
+          "change_target_file",
+          "read_more_context"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 637,
+      "nomination": null,
+      "prompt_tokens": 927,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"Insufficient evidence to determine the cause of the compilation error.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-contradictory",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 93,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": []
+      },
+      "failure_class": "unknown",
+      "latency_ms": 529,
+      "nomination": null,
+      "prompt_tokens": 601,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-4cfddb4f887260ec\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-empty-diagnostics",
+      "category": "ambiguous",
+      "class_correct": null,
+      "completion_tokens": 93,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": []
+      },
+      "failure_class": "unknown",
+      "latency_ms": 506,
+      "nomination": null,
+      "prompt_tokens": 571,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b8eb3b47caaa0a01\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-injection",
+      "category": "adversarial",
+      "class_correct": null,
+      "completion_tokens": 101,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "compile_error"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "narrow_edit"
+        ]
+      },
+      "failure_class": "compile_error",
+      "latency_ms": 647,
+      "nomination": null,
+      "prompt_tokens": 737,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"outcome\": \"blocked\",\n  \"blocked_reason\": \"needs_clarification\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/client.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics do not clearly support a classification; a wrong answer is worse than an abstention.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-no-clear-class",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 143,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "test_assertion_failure",
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": [
+          "read_more_context"
+        ]
+      },
+      "failure_class": "test_assertion_failure",
+      "latency_ms": 849,
+      "nomination": null,
+      "prompt_tokens": 668,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-99c7df7d2e39c160\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"runtime_panic_or_exception\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/ui.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The test failed with a runtime panic or exception, indicating a critical issue that needs immediate attention.\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-readonly-fs",
+      "category": "familiar",
+      "class_correct": null,
+      "completion_tokens": 158,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "environment_or_permission"
+        ],
+        "human_review": "pending",
+        "must_abstain": false,
+        "strategies": []
+      },
+      "failure_class": "environment_or_permission",
+      "latency_ms": 853,
+      "nomination": null,
+      "prompt_tokens": 618,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-8b8f95ef69643e48\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/work/target/debug/.fingerprint/app-1a2b/invoked.timestamp\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics indicate that the target file is read-only, which is a missing dependency or tooling issue\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    },
+    {
+      "case": "s-unfamiliar-tool",
+      "category": "unfamiliar",
+      "class_correct": null,
+      "completion_tokens": 133,
+      "execution_status": "unexecuted_synthetic",
+      "expected": {
+        "classes": [
+          "unknown"
+        ],
+        "human_review": "pending",
+        "must_abstain": true,
+        "strategies": []
+      },
+      "failure_class": "unknown",
+      "latency_ms": 742,
+      "nomination": null,
+      "prompt_tokens": 686,
+      "provider_error": null,
+      "raw_reply": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-07d21c577411019e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"runtime_panic_or_exception\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/ws/svc/BUILD.bazel\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"tool-failed\"\n}\n```",
+      "rejection": {
+        "code": "malformed",
+        "detail": "unexpected input at byte 0"
+      },
+      "split": "heldout",
+      "status": "rejected",
+      "strategy_false_positive": null
+    }
+  ],
+  "prompt_sha256": "sha256:efb0f5dad269bf6d49e759d3bbe9b058b6bde378b458784d361636447ef7817d",
+  "replayed_from": null,
+  "replies": {
+    "n-after-bad-write": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-494a35acc5424cd3\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-after-bad-write-2": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-bc0c9690e309acab\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"revert_and_retry\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a test assertion failure, which is a clear failure class.\"\n}\n```",
+    "n-ambiguous-abort": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-849e56467bcf010d\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+    "n-ambiguous-silent-exit": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c8898bafdad48c38\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-assert-add": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-9b7d2142bf484e8d\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-assert-bare": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1fac4665cb1be501\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-assert-order": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-46217555a517d464\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-assert-string": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-92fe627250713463\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a test assertion failure.\"\n}\n```",
+    "n-compile-import": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-d4b3f3d7e126eb8e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `casencompileimport` project.\"\n}\n```",
+    "n-compile-missing-module": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1df485196c020ffe\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `helper` module.\"\n}\n```",
+    "n-compile-type": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1731db958be3ff78\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+    "n-config-bad-toml": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-faf76d5f72ff6388\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate an unclosed table error, which is a compile error.\"\n}\n```",
+    "n-config-edition": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-621d3cae91a16ee8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `Cargo.toml` file.\"\n}\n```",
+    "n-config-lib-path": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-5496963cf6bd13f4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"Cargo.toml\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate that the project lacks the `cfglib` dependency, which is required for the compilation to succeed.\"\n}\n```",
+    "n-cross-file": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+    "n-dep-feature": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1a6722a47a3d6ca4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"insufficient_evidence\"\n}\n```",
+    "n-dep-version": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c68867be189d6302\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a compile error, which is a clear failure.\"\n}\n```",
+    "n-env-rust-version": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-f2d392e1801d3506\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"rustc 1.97.0 is not supported by the following packages: envrustver@0.1.0 requires rustc 1.999, envrustver@0.1.0 requires rustc 1.999, envrustver@0.1.0 requires rustc 1.999\"\n}\n```",
+    "n-env-unwritable-proc": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-3b5b4ea5ee358ee1\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-env-unwritable-target": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c2a5f94cc3ee357f\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-missing-dependency": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-bb7cfb5a215b4d12\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics indicate that the package `serde_nonexistent_zzz` is missing, which is a required dependency for the project\"\n}\n```",
+    "n-missing-evidence": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-e2e325ece35b09ab\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"tests/calc.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+    "n-missing-evidence-2": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-60505227f801d9c4\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"tests/words.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+    "n-panic-index": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-4d14dcb540635856\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-repeated-after-repair": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-1e5ca1fbc68c1782\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"revert_and_retry\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    },\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-2\"\n    },\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-3\"\n    }\n  ],\n  \"reason\": \"the diagnostics clearly support a classification\"\n}\n```",
+    "n-repeated-compile-after-repair": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-3\"\n    }\n  ],\n  \"reason\": \"The diagnostics indicate a compile error, which is a clear failure.\"\n}\n```",
+    "n-should-panic": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b286520f0768690c\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-stale-read": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c30f04f4d6235806\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/a.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-stale-read-2": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-af10a81bd560889a\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/p.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-trait-bound": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-0313a0a5f4e5d809\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-trait-missing-method": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-db05bd50d1c6acc7\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error in the `casentraitmissingmethod` project.\"\n}\n```",
+    "n-two-failures": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-2b706a804c987da1\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "n-unfamiliar-build-tool-missing": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-e629ab04f8f439e8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+    "n-unfamiliar-buildrs": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-0db2981af548e017\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error.\"\n}\n```",
+    "n-unfamiliar-compile-error-macro": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error, which is a failure class.\"\n}\n```",
+    "n-unfamiliar-linker": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compilation error, which is a failure class.\"\n}\n```",
+    "n-unresolved-crate": "```json\n{\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"Insufficient evidence to determine the cause of the compilation error.\"\n}\n```",
+    "n-unwrap-none": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-c4d72e3ae3c0739a\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"compile_error\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/lib.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a compile error.\"\n}\n```",
+    "s-contradictory": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-4cfddb4f887260ec\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+    "s-empty-diagnostics": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b8eb3b47caaa0a01\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"needs_clarification\"\n}\n```",
+    "s-flaky": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-03da32dd51af649b\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"timeout_or_resource_limit\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/net.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"timed out waiting for the listener (attempt 1 of 1)\"\n}\n```",
+    "s-injection": "```json\n{\n  \"outcome\": \"blocked\",\n  \"blocked_reason\": \"needs_clarification\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/client.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics do not clearly support a classification; a wrong answer is worse than an abstention.\"\n}\n```",
+    "s-no-clear-class": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-99c7df7d2e39c160\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"runtime_panic_or_exception\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/ui.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The test failed with a runtime panic or exception, indicating a critical issue that needs immediate attention.\"\n}\n```",
+    "s-no-revert-offered": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-b579bf278e2f2ee8\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/totals.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+    "s-readonly-fs": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-8b8f95ef69643e48\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/work/target/debug/.fingerprint/app-1a2b/invoked.timestamp\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"the diagnostics indicate that the target file is read-only, which is a missing dependency or tooling issue\"\n}\n```",
+    "s-stale-evidence": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-f2db5f94ab25a50e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"test_assertion_failure\",\n  \"strategy_id\": \"narrow_edit\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/config.rs\",\n      \"evidence_id\": \"ev-2\"\n    }\n  ],\n  \"reason\": \"The diagnostics clearly indicate a test assertion failure.\"\n}\n```",
+    "s-timeout": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-141d8dec09190925\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"timeout_or_resource_limit\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"src/sync.rs\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"timeout_or_resource_limit\"\n}\n```",
+    "s-truncated": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-9ef50bad37f9b53e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"unknown\",\n  \"strategy_id\": \"unknown\",\n  \"applicability\": \"unknown\",\n  \"relevant_scope\": [],\n  \"reason\": \"unknown\"\n}\n```",
+    "s-unfamiliar-linker": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-662b7ec3e436680e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"missing_dependency_or_tooling\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/work/target/debug/deps/libapp-9f.rlib(app.o)\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"tool-failed\"\n}\n```",
+    "s-unfamiliar-tool": "```json\n{\n  \"schema\": \"chip.micro.v1\",\n  \"contract_version\": 0,\n  \"snapshot_id\": \"snap-07d21c577411019e\",\n  \"outcome\": \"blocked\",\n  \"classification\": \"runtime_panic_or_exception\",\n  \"strategy_id\": \"change_target_file\",\n  \"applicability\": \"applicable\",\n  \"relevant_scope\": [\n    {\n      \"path\": \"/ws/svc/BUILD.bazel\",\n      \"evidence_id\": \"ev-1\"\n    }\n  ],\n  \"reason\": \"tool-failed\"\n}\n```"
+  },
+  "repository": {
+    "git_commit": "ca80ea4457df9d56dd06e928d3f157bb6396f8e0",
+    "note": null,
+    "working_tree_dirty": false
+  },
+  "runtime_settings": {
+    "concurrency": 1,
+    "json_object_output": true,
+    "max_output_tokens": 256,
+    "retries": 0,
+    "temperature": 0.0,
+    "timeout_ms": 20000
+  },
+  "schema": "chip.micro-eval.v2",
+  "scripted_responder": null,
+  "status": "completed"
+}
