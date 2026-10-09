@@ -82,18 +82,30 @@ local-model crates are experiments. A test keeps that document in step with the 
 What `chip work` can and cannot do today, capability by capability, with the gaps and who should own
 them, is in [`docs/product/capabilities.md`](docs/product/capabilities.md). Where project
 structure belongs (PAX observes; Chip decides; FX reasons) is a design contract in
-[`docs/product/project-observation-boundary.md`](docs/product/project-observation-boundary.md); it
-is not implemented.
+[`docs/product/project-observation-boundary.md`](docs/product/project-observation-boundary.md). Its
+first consumer, the `project.observe` capability (Rust structure through PAX 0.4.1 or later), is
+implemented; the wider contract (the "Decision Frontier", FX reasoning over observations) is not.
 
 How far Chip gets as a coding agent on a real project, what it recovers from, when it escalates and
 what a person still has to decide is measured end to end in
 [`docs/product/coding-agent-evaluation.md`](docs/product/coding-agent-evaluation.md)
 (`cargo test -p chip-cli --test coding_agent`). Its judgment is scripted; its reality is not.
 
-An experiment on using the native FeltDB as isolated session working memory (result: no-go on
-memory, with the measurements and the conditions that would change it) is in
-[`docs/product/session-memory-experiment.md`](docs/product/session-memory-experiment.md). The
-crate is a leaf (`chip-session-memory`); nothing depends on it.
+What ships, what is linked, what is test-only and what is experimental is mapped, with the commands
+that show it, in [`docs/product/production-boundary.md`](docs/product/production-boundary.md); what
+remains before Chip is a production coding agent is the prioritized backlog
+[`docs/product/coding-agent-production-roadmap.md`](docs/product/coding-agent-production-roadmap.md),
+and known limitations and TODO-like findings are classified in
+[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md).
+
+Experiments on durable session storage are **not part of the product**: native FeltDB as session
+memory ([`session-memory-experiment.md`](docs/product/session-memory-experiment.md); no-go) and a
+comparison of FeltDB, SQLite, redb and a `durability`-crate journal against one recovery contract
+([`session-store-comparison.md`](docs/product/session-store-comparison.md); decision: no durable
+session store until a concrete resume requirement exists). They live in the leaf crate
+`chip-session-memory`, which nothing depends on and which the shipped `chip` binary does not link.
+The same comparison led to a production fix: `chip serve` now bounds the finished work it retains
+(see *Retention of finished work*).
 
 Performance is a product concern too: Chip should add minimal, bounded overhead around the model and
 the computer. [`docs/product/performance.md`](docs/product/performance.md) records the measured baseline
@@ -412,4 +424,5 @@ smallest possible transport: **`exec(argv, env)`** with captured output and no s
 Another program embeds Rust Chip by implementing `EnvironmentProvider` (acquire / release /
 isolation capacity) and calling `chip_cli::service::serve_in` with its `Environments`. Rust Chip
 never depends on that program. The first such provider, over Compute sessions, lives in the Compute
-repository (`crates/compute-rust-chip`, `docs/rust-chip.md`).
+repository (`crates/compute-rust-chip` and `docs/rust-chip.md` there; neither path exists in this
+repository).

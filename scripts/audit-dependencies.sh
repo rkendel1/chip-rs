@@ -28,6 +28,26 @@ else
   echo "ok   Rust FX: independent of the npm stack"
 fi
 
+# Experiments and benchmarked storage candidates must stay out of the production path. The session
+# memory/store comparison (crates/chip-session-memory) depends on FeltDB, SQLite, redb and the
+# `durability` crate; none of them, and not the experiment crate itself, may be reachable from a
+# product crate (docs/product/production-boundary.md).
+storage='(chip-session-memory|rusqlite|libsqlite3-sys|redb|durability|feltdb) v[0-9]'
+for crate in chip-core chip-remote-env fx-core fx-provider-http chip-project chip-pax chip-cli; do
+  if cargo tree -p "$crate" -e normal,build --locked 2>/dev/null | grep -E "$storage"; then
+    echo "FAIL: $crate reaches an experimental storage engine" >&2
+    fail=1
+  else
+    echo "ok   $crate: no experimental storage engine"
+  fi
+done
+if [ "$(cargo tree --workspace -e normal,build,dev --locked -i chip-session-memory 2>/dev/null | wc -l)" -gt 1 ]; then
+  echo "FAIL: a workspace crate depends on chip-session-memory" >&2
+  fail=1
+else
+  echo "ok   nothing in the workspace depends on chip-session-memory"
+fi
+
 echo "chip-cli's only edge to an environment provider (demo/benchmark path):"
 cargo tree -p chip-cli -e normal --locked --depth 1 | grep -i compute || echo "  (none)"
 exit $fail

@@ -211,8 +211,10 @@ later: Chip requests a scoped observation -> PAX returns structured facts -> FX 
 The hypothesis is that scoped deterministic observation reduces model calls, executions and context
 spent rediscovering repository structure, without changing what Chip lets the model make real. What
 would falsify it, what must not change, and what is measured are in
-[`observe-benchmark.md`](observe-benchmark.md), together with the results of the first matched
-baseline-versus-treatment run. Those results, not the existence of the facts, decide whether
+`docs/product/observe-benchmark.md`, together with the results of the first matched
+baseline-versus-treatment run. **That file and its script are not in this branch**: they exist only on
+`origin/pax-observe-consumer` (commit `fb3d733`), so this tree contains no recorded result of the
+gate (technical-debt register D-23; roadmap P1-V5). Those results, not the existence of the facts, decide whether
 `project.observe` stays, narrows or goes.
 
 What must not change, and is pinned by tests: the capability authority boundary (the model supplies one

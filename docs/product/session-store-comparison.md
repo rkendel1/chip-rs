@@ -6,6 +6,16 @@ as the platform's durable-state authority is untouched. Everything lives in the 
 crate `crates/chip-session-memory`. Nothing here claims anything about model quality, task
 completion or agent intelligence.
 
+**Read this document as an experiment record, not as product documentation.** Dated 2026-10;
+sandbox VM, one synthetic workload, process-kill (not power-loss) testing. Labels: **measured** = a
+test or benchmark in this repository produced it (raw data in `docs/product/*.json`); **read** = from
+reading code or vendor documentation, not exercised; **inferred** = reasoning from measurements;
+**proposed** = a recommendation, not behaviour; **unverified** = stated but not tested. Section 2
+(retention) describes a *production* defect and its production fix in `chip serve`; everything else
+is experimental. The decision (no durable session store now) is also recorded in
+[`coding-agent-production-roadmap.md`](coding-agent-production-roadmap.md) as P3-01, and the
+production boundary in [`production-boundary.md`](production-boundary.md).
+
 ## 1. What problem is real today
 
 Two different things were being discussed as one:

@@ -172,7 +172,7 @@ fn run_scenario(
 
     // Warm up with a few items so one-time allocations are not charged to retention.
     let mut ids: Vec<String> = Vec::new();
-    let mut run_wave = |count: usize, ids: &mut Vec<String>| {
+    let run_wave = |count: usize, ids: &mut Vec<String>| {
         let mut wave = Vec::new();
         for _ in 0..count {
             loop {

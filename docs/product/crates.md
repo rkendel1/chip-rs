@@ -11,7 +11,10 @@ workspace.
 > product. Everything else is labelled honestly. Compiling is not validation.
 
 For the capability-level view (what the product can do, its gaps and their owners), see
-[`capabilities.md`](capabilities.md).
+[`capabilities.md`](capabilities.md). For a short, command-backed map of what ships and what is
+experimental, see [`production-boundary.md`](production-boundary.md); the outstanding work is the
+backlog in [`coding-agent-production-roadmap.md`](coding-agent-production-roadmap.md) and known
+limitations are classified in [`technical-debt-register.md`](technical-debt-register.md).
 
 ## 1. Product definition
 
@@ -255,6 +258,16 @@ workflow is manual only. It stays because the PR36-39 experiments depend on it.
 None of these is used by `chip work`, `chip serve` or `chip verify`. Several are linked into the
 shipped `chip` binary only because `chip-cli` also hosts their commands (section 8).
 
+* **`chip-session-memory`** (EXPERIMENT, FROZEN, L2): *the durable-session-store evaluation.* A leaf
+  crate: no workspace crate depends on it (its only workspace dependency, `chip-core`, is a
+  dev-dependency for a benchmark baseline), and the shipped `chip` binary does not link it or any of
+  its storage dependencies (FeltDB, `rusqlite`/bundled SQLite, `redb`, `durability`;
+  `scripts/audit-dependencies.sh` enforces this). It holds one shared adapter contract over four
+  candidate stores, 110 tests (a per-candidate contract suite with real SIGKILL tests), and two
+  harnesses (`benches/session_memory.rs`, `benches/service_retention.rs`). Decision, recorded in
+  [`session-store-comparison.md`](session-store-comparison.md): no durable session store until a
+  resume-after-restart requirement exists. `benches/service_retention.rs` also verifies the
+  production retention fix in `chip serve`; keep it if the crate is ever removed.
 * **`chip-local-decision`, `chip-local-decision-train`** (EXPERIMENT, REJECTED): *the tiny-ML negative
   experiment.* A 129-parameter linear classifier over a canonical decision state, with its trainer
   and shipped parameter files. **Explored whether a tiny local model could improve deterministic
@@ -319,7 +332,9 @@ Implemented and tested: `POST /v1/work` (goal only; every other field is rejecte
 `GET /health`; a FIFO queue with a concurrency limit and a queue bound (429 when full); one
 environment acquired per work and released at the end; panic containment per work. Behaviour to
 know: events are available only when a work ends; cancelling running work is advisory (the in-flight
-call is not interrupted); work state is in memory only and a restart forgets it; no authentication,
+call is not interrupted); work state is in memory only and a restart forgets it; finished work is
+bounded (`--max-retained-work`, default 256: the oldest finished is evicted and later lookups answer
+410 `work_expired`; queued, running and escalated work is never evicted; metrics stay cumulative); no authentication,
 no CORS, loopback by default, so it is not for remote or multi-user use; the local machine is one
 mutable directory, so the standalone service runs one work at a time. Isolation between concurrent
 works exists only for providers that supply isolated environments; none is provided in this
@@ -356,6 +371,11 @@ its contract": capability declaration, `validate_inputs`, and `ModelDecisionBoun
 experiments only measure model robustness against that mechanism.
 
 ## 7. Validation baseline
+
+> **Historical (dated before the 2026-10 changes).** These counts describe an earlier tree and are
+> kept for the reasoning they record; they are not current. The current verification run is recorded in
+> the pull request that last changed this file and in
+> [`technical-debt-register.md`](technical-debt-register.md) section 5.
 
 * `cargo test --workspace`: **882 passed, 0 failed, 1 ignored** before this change (887 with the five inventory tests added here), run with PAX 0.3.0
   (built from the commit CI pins, `3bf88b8`) on `PATH` and the `wasm32-unknown-unknown` target

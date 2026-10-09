@@ -1096,9 +1096,7 @@ mod tests {
     use super::{Agent, Turn};
     use std::sync::Arc;
 
-    use fx_core::{
-        FxError, Message, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage,
-    };
+    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
     #[derive(Default)]
     struct TestProvider;

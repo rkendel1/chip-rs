@@ -61,7 +61,7 @@ file.
 | --- | --- | --- |
 | **Pre-existing defect**: an attempt answered with a `Retry-After` is refunded from the budget, so a server that keeps sending the header gets unbounded attempts | `exec/attempt.rs` and its call in `exec/executor.rs`. One existing test, `retry_after_responses_spend_the_attempt_budget`, fails at the baseline and does not say why | the test states the expectation, not the cause |
 | **Second-order failure**: a new setting silently reverts to its default for any request on a route | `routes/settings.rs` builds route settings with `..ExecSettings::default()` instead of inheriting from the client. Unit tests of the new code pass; an integration test that crosses config, routes and executor fails | the cause is in a module the feature never touches |
-| **Convention conflict**: "reject invalid configuration" versus "unknown keys are warnings" | ADR-004 (lenient) and ADR-009 (fail closed) in `docs/architecture.md`; `tests/config_lenient.rs` enforces ADR-004 for every section in the schema table, so it fails the moment `[retry]` is made strict | tests cannot arbitrate: either reading is defensible and passing the suite means picking one |
+| **Convention conflict**: "reject invalid configuration" versus "unknown keys are warnings" | ADR-004 (lenient) and ADR-009 (fail closed) in the fixture project's own `docs/architecture.md` (`crates/chip-cli/tests/fixtures/courier/docs/architecture.md`, not a document of this repository); `tests/config_lenient.rs` enforces ADR-004 for every section in the schema table, so it fails the moment `[retry]` is made strict | tests cannot arbitrate: either reading is defensible and passing the suite means picking one |
 
 ## 3. The run
 
