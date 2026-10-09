@@ -1,0 +1,20 @@
+{
+ "name": "o1-http429",
+ "goal": "Fix the failing tests in this project",
+ "kind": null,
+ "exit": 3,
+ "wall_s": 0.0,
+ "model_requests": 1,
+ "request_bytes": [
+  4893
+ ],
+ "stderr_tail": "error: the selected model did not answer (openai-compatible audit-adversary at http://127.0.0.1:35515): model escalation failed: provider error: provider error: endpoint returned 429 Too Many Requests: no error detail. No other provider or model was tried.\n",
+ "stdout_raw": "",
+ "changed_files": [],
+ "acceptance": {
+  "visible_pass": false,
+  "visible_tail": "80597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\n\nfailures:\n    parses_single_digit_fraction\n    refuses_overdraft\n\ntest result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s\n\n   Compiling ledger v0.1.0 (/tmp/accept-bi33udfi)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s\n     Running tests/visible.rs (/tmp/claude-0/aud/shared-target/debug/deps/visible-1c798cd7daf6801d)\nerror: test failed, to rerun pass `--test visible`\n",
+  "hidden_pass": true,
+  "hidden_tail": "\nrunning 3 tests\ntest hidden_existing_behaviour_kept ... ok\ntest hidden_overdraft_is_exact ... ok\ntest hidden_single_digit_fractions_in_general ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n    Blocking waiting for file lock on build directory\n   Compiling ledger v0.1.0 (/tmp/accept-bi33udfi)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s\n     Running tests/hidden.rs (/tmp/claude-0/aud/shared-target/debug/deps/hidden-b049f159d3138761)\n"
+ }
+}

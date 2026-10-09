@@ -1,0 +1,67 @@
+{
+ "unbudgeted": {
+  "exit": 1,
+  "terminal_state": "blocked",
+  "verified": false,
+  "outcome_reason": "completion refused: no authoritative observation satisfies the goal",
+  "model_requests": 9,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.03,
+  "stderr": "",
+  "stdout_raw": "",
+  "request_bytes": [
+   4893,
+   38898,
+   72777,
+   106552,
+   140223,
+   173790,
+   207251,
+   240608,
+   273861
+  ],
+  "context_summary": {
+   "max_request_bytes": 267414,
+   "total_request_bytes": 1228220,
+   "omitted_observations": 0,
+   "observations": {
+    "changed_reality": 0,
+    "new": 1,
+    "new_from_same_capability": 7,
+    "repeated_and_retained": 0,
+    "repeated_identical": 0,
+    "retained_repeat_bytes_sent": 0
+   }
+  }
+ },
+ "budget-8000": {
+  "exit": 1,
+  "terminal_state": "limit_reached",
+  "verified": false,
+  "outcome_reason": "context limit reached",
+  "model_requests": 1,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.0,
+  "stderr": "",
+  "stdout_raw": "",
+  "request_bytes": [
+   4893
+  ]
+ },
+ "budget-3000": {
+  "exit": 1,
+  "terminal_state": "limit_reached",
+  "verified": false,
+  "outcome_reason": "context limit reached",
+  "model_requests": 0,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.0,
+  "stderr": "",
+  "stdout_raw": ""
+ },
+ "first_request_bytes": 4893,
+ "first_request_text_head": "Goal: Fix the failing tests in this project Inspect and change the project only with project.list, project.search, project.read and project.write (project-relative paths such as src/lib.rs; \".\" is the project root). The repository's state can be observed, never changed, with project.git.status, project.git.diff, project.git.diff_stat and project.git.log; the working tree may already hold changes that are not yours, and they must be preserved. Chip decides completion: the work is complete only when pax.test passes after your last change that altered a file, as pax.test itself establishes.\nState: turn 1 of 12; executions 0 of 8\nEvidence:\nPrior decisions:\nRuled out:\nQuestion: Decide the next step. Reply with exactly one JSON object and nothing else; it is read as data and never run. Every object carries \"schema\":\"chip.work-decision.v1\" (optional) and one of: a request for one capability, in the exact form its entry below gives, {\"decision\":\"complete\",\"summary\":\"<text>\"}, {\"decision\":\"escalate\",\"reason\":\"<text>\"} or {\"decision\":\"block\",\"reason\":\"<text>\"}. How to request each capability, exactly: project.list takes inputs (path optional): {\"decision\":\"request_capability\",\"capability\":\"project.list\",\"inputs\":{\"path\":<string|integer|boolean>}}; with no inputs to give, omit the \"inputs\" field; project.search takes inputs (query required, path optional): {\"decision\":\"request_capability\",\"capability\":\"project.search\",\"inputs\":{\"query\":<string|integer|boolean>,\"path\":<string|integer|boo"
+}

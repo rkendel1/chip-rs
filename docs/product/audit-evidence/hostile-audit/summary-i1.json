@@ -1,0 +1,19 @@
+{
+ "processes_while_running": {
+  "pax": 1,
+  "cargo": 1,
+  "slow_test": 1
+ },
+ "processes_2s_after_SIGKILL_of_chip": {
+  "pax": 1,
+  "cargo": 1,
+  "slow_test": 1
+ },
+ "processes_42s_after": {
+  "pax": 0,
+  "cargo": 0,
+  "slow_test": 0
+ },
+ "tmp_files_left": [],
+ "chip_exit": -9
+}

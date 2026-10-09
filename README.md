@@ -96,7 +96,10 @@ that show it, in [`docs/product/production-boundary.md`](docs/product/production
 remains before Chip is a production coding agent is the prioritized backlog
 [`docs/product/coding-agent-production-roadmap.md`](docs/product/coding-agent-production-roadmap.md),
 and known limitations and TODO-like findings are classified in
-[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md).
+[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md). An adversarial,
+evidence-first assessment of whether Chip can be trusted to finish coding work local-first (with its
+readiness judgments, findings and what could not be tested) is
+[`docs/product/hostile-autonomous-agent-audit.md`](docs/product/hostile-autonomous-agent-audit.md).
 
 Experiments on durable session storage are **not part of the product**: native FeltDB as session
 memory ([`session-memory-experiment.md`](docs/product/session-memory-experiment.md); no-go) and a

@@ -1,0 +1,25 @@
+# Baseline (clean checkout)
+
+commit:        f9e0e3bf5d870122b36d79ff3df765901cd46588  (git clone + checkout into a fresh directory)
+platform:      Linux 6.18.44-fc-v80 x86_64, Ubuntu 24.04.5, 4 vCPU Xeon 2.10 GHz, 15 GiB RAM, no GPU
+toolchain:     rustc 1.97.0 (2d8144b78 2026-07-07); wasm32-unknown-unknown target installed
+PAX:           pax 0.4.1, built from source at commit 674f3b3143874d1a692aca103b33f89da31a82ac (README pins v0.4.1, 674f3b3)
+
+commands and results
+  cargo build --release --locked -p chip-cli          -> Finished in 1m13s; target/release/chip 16.5 MB; `chip --version` = chip 0.1.0
+  cargo test --workspace --no-fail-fast               -> exit 0; 150 test binaries; 1139 passed, 0 failed, 1 ignored
+       deviation from the documented command: env CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 (disk allowance), PAX on PATH
+  cargo check --workspace --all-targets               -> exit 0
+  at commit 38469c4 (the retention commit, before the repair): cargo check --workspace --all-targets
+       -> error[E0063]: missing field `max_retained` in initializer of `Capacity` (crates/chip-cli/benches/baseline.rs:1637)
+          while plain `cargo check --workspace` at the same commit -> Finished (the CI check step cannot see it; the CI bench step can)
+
+environment classification of failures seen during the whole session (not at the pinned commit)
+  without `pax` on PATH:  chip-cli tests in work.rs/real_model_work-style groups fail (4 in the first run) -> ENVIRONMENT (PAX is external)
+  without wasm32 target:  10 tests in chip-wasm-decision-host fail with "the `wasm32-unknown-unknown` target may not be installed" -> ENVIRONMENT
+  both resolved by installing the missing tool; no product defect was involved
+
+execution paths confirmed by running the real binary
+  chip work   : every scenario in this audit (scripted adversary model, real PAX, real cargo, real git)
+  chip serve  : l1..l5 scenarios over HTTP
+  chip verify : `chip verify --json` with a scripted model -> exit 0, completed (1 model request)

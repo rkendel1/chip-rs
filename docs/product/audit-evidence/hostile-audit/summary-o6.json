@@ -1,0 +1,164 @@
+{
+ "'src/lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 1,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'./src/lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/./lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src//lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/../src/lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/../.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'.ENV'": {
+  "terminal": "blocked",
+  "reads_ok": 1,
+  "failed": 1,
+  "env_secret_reached_model": false
+ },
+ "'./.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/..//.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'/etc/passwd'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'../x'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'..'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/lib.rs '": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "' src/lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src\\\\lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'~/.bashrc'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'$HOME/.bashrc'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'.git'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'.git/config'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'.GIT/config'": {
+  "terminal": "blocked",
+  "reads_ok": 1,
+  "failed": 1,
+  "env_secret_reached_model": false
+ },
+ "'.git/../Cargo.toml'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'target/../.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/lib.rs\\x00.txt'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'\uff33\uff32\uff23/lib.rs'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'src/lib.rs/'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ },
+ "'Cargo.toml/../.env'": {
+  "terminal": "blocked",
+  "reads_ok": 0,
+  "failed": 0,
+  "env_secret_reached_model": false
+ }
+}

@@ -1,0 +1,27 @@
+# Local-model availability probe (2026-10-09)
+## hardware
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) Processor @ 2.10GHz
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       774Mi        11Gi        13Mi       3.6Gi        14Gi
+GPU: ls: cannot access '/dev/nvidia*': No such file or directory
+/dev/vda        252G   21G   19G  52% /
+## runtimes on PATH
+ollama: absent
+llama-server: absent
+llama-cli: absent
+vllm: absent
+lms: absent
+## model sources reachable from this sandbox (HTTP status; 000/403 = blocked)
+https://ollama.com -> 000
+https://registry.ollama.ai -> 000
+https://huggingface.co -> 000
+https://cdn-lfs.huggingface.co -> 000
+https://hf-mirror.com -> 000
+https://modelscope.cn -> 000
+https://pypi.org/simple/ -> 200
+https://repo.anaconda.com -> 200
+## GitHub release assets (where some runtimes/models are published): this session may access only the chip-rs repository
+{"message":"GitHub access to this repository is not enabled for this session. Use add_repo to request access. If add_repo answers that read access is already available and you need GitHub API or write
+## PyPI offers runtime sources (llama-cpp-python sdist downloaded OK) but no model weights

@@ -1,0 +1,104 @@
+{
+ "http500": {
+  "exit": 3,
+  "terminal_state": null,
+  "verified": null,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": null,
+  "invalid_inputs": null,
+  "wall_s": 0.0,
+  "stderr": "udit-adversary at http://127.0.0.1:39585): model escalation failed: provider error: provider error: endpoint returned 500 Internal Server Error: no error detail. No other provider or model was tried.\n",
+  "stdout_raw": ""
+ },
+ "http429": {
+  "exit": 3,
+  "terminal_state": null,
+  "verified": null,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": null,
+  "invalid_inputs": null,
+  "wall_s": 0.0,
+  "stderr": "le audit-adversary at http://127.0.0.1:35515): model escalation failed: provider error: provider error: endpoint returned 429 Too Many Requests: no error detail. No other provider or model was tried.\n",
+  "stdout_raw": ""
+ },
+ "garbage-body": {
+  "exit": 3,
+  "terminal_state": null,
+  "verified": null,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": null,
+  "invalid_inputs": null,
+  "wall_s": 0.0,
+  "stderr": "openai-compatible audit-adversary at http://127.0.0.1:39297): model escalation failed: provider error: invalid response: body is not a valid completion response. No other provider or model was tried.\n",
+  "stdout_raw": ""
+ },
+ "empty-content": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "the model's response is not a valid decision: invalid decision: not valid JSON: unexpected end of reply",
+  "model_requests": 1,
+  "invalid_decisions": 1,
+  "invalid_inputs": 0,
+  "wall_s": 0.0,
+  "stderr": "",
+  "stdout_raw": ""
+ },
+ "prose-not-a-decision": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "the model's response is not a valid decision: invalid decision: not valid JSON: unexpected character at byte 0",
+  "model_requests": 1,
+  "invalid_decisions": 1,
+  "invalid_inputs": 0,
+  "wall_s": 0.0,
+  "stderr": "",
+  "stdout_raw": ""
+ },
+ "fenced-json": {
+  "exit": 1,
+  "terminal_state": "limit_reached",
+  "verified": false,
+  "outcome_reason": "executions limit reached",
+  "model_requests": 9,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.01,
+  "stderr": "",
+  "stdout_raw": ""
+ },
+ "json-plus-prose": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "the model's response is not a valid decision: invalid decision: text after the JSON object",
+  "model_requests": 1,
+  "invalid_decisions": 1,
+  "invalid_inputs": 0,
+  "wall_s": 0.0,
+  "stderr": "",
+  "stdout_raw": ""
+ },
+ "slow-40s-over-30s-timeout": {
+  "exit": 3,
+  "terminal_state": null,
+  "verified": null,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": null,
+  "invalid_inputs": null,
+  "wall_s": 30.01,
+  "stderr": " answer (openai-compatible audit-adversary at http://127.0.0.1:33349): model escalation failed: provider error: timeout: request exceeded the configured timeout. No other provider or model was tried.\n",
+  "stdout_raw": ""
+ },
+ "connection-refused": {
+  "exit": 3,
+  "terminal_state": null,
+  "outcome_reason": "error: the selected model did not answer (openai-compatible audit-adversary at http://127.0.0.1:53271): model escalation failed: provider error: http failure: failed to connect to endpoint. No other p",
+  "wall_s": 0.0
+ }
+}

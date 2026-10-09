@@ -1,0 +1,28 @@
+{
+ "build-rs": {
+  "exit": 0,
+  "terminal_state": "completed",
+  "verified": true,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.69,
+  "stderr": "",
+  "stdout_raw": "",
+  "marker_created_outside_project": true
+ },
+ "cargo-config-rustc-wrapper": {
+  "exit": 0,
+  "terminal_state": "completed",
+  "verified": true,
+  "outcome_reason": "",
+  "model_requests": 1,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.68,
+  "stderr": "",
+  "stdout_raw": "",
+  "marker_created_outside_project": true
+ }
+}

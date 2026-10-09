@@ -1,0 +1,67 @@
+{
+ "exit0-empty-stdout": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "execution failed: pax did not produce a valid pax.execution-result.v1: stdout is empty",
+  "model_requests": 3,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.01,
+  "stderr": "",
+  "stdout_raw": "",
+  "independently_accepted": true
+ },
+ "wrong-schema-json": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "execution failed: pax did not produce a valid pax.execution-result.v1: field `schema` is missing",
+  "model_requests": 3,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.02,
+  "stderr": "",
+  "stdout_raw": "",
+  "independently_accepted": true
+ },
+ "garbage-stdout-exit0": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "execution failed: pax did not produce a valid pax.execution-result.v1: stdout is not exactly one JSON document: expected value at line 1 column 1",
+  "model_requests": 3,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.01,
+  "stderr": "",
+  "stdout_raw": "",
+  "independently_accepted": true
+ },
+ "crash-exit-139": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "execution failed: pax did not produce a valid pax.execution-result.v1: stdout is empty",
+  "model_requests": 3,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 0.01,
+  "stderr": "",
+  "stdout_raw": "",
+  "independently_accepted": true
+ },
+ "hang": {
+  "exit": 4,
+  "terminal_state": "failed",
+  "verified": false,
+  "outcome_reason": "execution failed: pax did not finish within the time limit",
+  "model_requests": 3,
+  "invalid_decisions": 0,
+  "invalid_inputs": 0,
+  "wall_s": 300.02,
+  "stderr": "",
+  "stdout_raw": "",
+  "orphan_processes_after": "0"
+ }
+}

@@ -1,0 +1,18 @@
+{
+ "name": "e-limit-ceiling-51-turns",
+ "goal": "Fix the failing tests in this project",
+ "kind": null,
+ "exit": 2,
+ "wall_s": 0.0,
+ "model_requests": 0,
+ "request_bytes": [],
+ "stderr_tail": "_BYTES): the most bytes of message content one model request may carry; a request over it is not sent\n       --kind: change (default) edits files until the tests pass; verify establishes that the project passes its tests unchanged; inspect observes and answers, citing the files it observed. Chip, not the model, decides completion for every kind\n       works on the project in the current directory\n",
+ "stdout_raw": "",
+ "changed_files": [],
+ "acceptance": {
+  "visible_pass": false,
+  "visible_tail": "80597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\n\nfailures:\n    parses_single_digit_fraction\n    refuses_overdraft\n\ntest result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s\n\n   Compiling ledger v0.1.0 (/tmp/accept-zt7bsze3)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s\n     Running tests/visible.rs (/tmp/claude-0/aud/shared-target/debug/deps/visible-1c798cd7daf6801d)\nerror: test failed, to rerun pass `--test visible`\n",
+  "hidden_pass": false,
+  "hidden_tail": "9a9efae3f533d3/library/core/src/ops/function.rs:250:5\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\n\n\nfailures:\n    hidden_overdraft_is_exact\n    hidden_single_digit_fractions_in_general\n\ntest result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s\n\n   Compiling ledger v0.1.0 (/tmp/accept-zt7bsze3)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s\n     Running tests/hidden.rs (/tmp/claude-0/aud/shared-target/debug/deps/hidden-b049f159d3138761)\nerror: test failed, to rerun pass `--test hidden`\n"
+ }
+}

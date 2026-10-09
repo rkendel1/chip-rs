@@ -1,0 +1,14 @@
+{
+ "both_started_without_exclusion": true,
+ "A": {
+  "terminal": "blocked",
+  "exit": 1
+ },
+ "B": {
+  "terminal": "completed",
+  "verified": true,
+  "exit": 0
+ },
+ "final_account_rs_written_by": "A",
+ "B_reported_verified_but_its_write_is_gone": true
+}
