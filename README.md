@@ -96,7 +96,10 @@ that show it, in [`docs/product/production-boundary.md`](docs/product/production
 remains before Chip is a production coding agent is the prioritized backlog
 [`docs/product/coding-agent-production-roadmap.md`](docs/product/coding-agent-production-roadmap.md),
 and known limitations and TODO-like findings are classified in
-[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md). An adversarial,
+[`docs/product/technical-debt-register.md`](docs/product/technical-debt-register.md). The normative **design** (not implemented) for how Chip should turn limited model intelligence into independently
+verified work is the Work Contract, Evidence Ledger, Blockage Classifier and Micro-step Proposal Gate documents under
+`docs/product/` (start at [`work-contract.md`](docs/product/work-contract.md)); the tickets are RIC-01 to RIC-07 in the
+roadmap. An adversarial,
 evidence-first assessment of whether Chip can be trusted to finish coding work local-first (with its
 readiness judgments, findings and what could not be tested) is
 [`docs/product/hostile-autonomous-agent-audit.md`](docs/product/hostile-autonomous-agent-audit.md).
@@ -192,6 +195,19 @@ navigation, editing and test running are *capabilities* it offers the model, not
 agent. The model supplies judgment; Chip validates every request, performs every operation itself,
 observes the result and decides from those observations whether the goal is met. Every model gets
 the same boundary: nothing about the provider or model identity grants authority.
+
+### Shadow-mode micro-model (optional, observation only)
+
+```sh
+CHIP_MICRO_PROVIDER=ollama CHIP_MICRO_MODEL=<tiny-model> chip work --micro-shadow --json "<goal>"
+```
+
+After the work is final, a separately configured small model may be asked to classify the last failure and
+nominate one repair strategy. The reply is validated against `chip.micro.v1`, recorded under `micro_shadow`
+beside the runtime's own decision, and **has no authority**: it cannot execute, repair, escalate, complete or
+change the exit status. Without `--micro-shadow` nothing changes. It never falls back to the work model. See
+[`docs/product/micro-model-shadow.md`](docs/product/micro-model-shadow.md); the evaluation harness is
+`cargo bench -p chip-cli --bench micro_eval` (blocked, exit 3, without a model; never a pass).
 
 ### Selecting the model
 

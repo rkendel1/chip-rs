@@ -35,6 +35,7 @@ const CLI_PRODUCT_MODULES: &[&str] = &[
     "service.rs",
     "local_environment.rs",
     "provider_selection.rs",
+    "micro.rs",
 ];
 
 fn crates_dir() -> PathBuf {
@@ -175,6 +176,7 @@ const PRODUCT_MODULES: &[&str] = &[
     "service",
     "local_environment",
     "provider_selection",
+    "micro",
 ];
 
 /// Known remaining couplings from the product path to a proof module, listed so they cannot grow:

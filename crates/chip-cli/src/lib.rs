@@ -13,6 +13,8 @@ pub mod laya_eval;
 pub mod live_benchmark;
 pub mod local_environment;
 pub mod local_model_bench;
+pub mod micro;
+pub mod micro_eval;
 pub mod native;
 pub mod pax_work;
 pub mod provider_selection;

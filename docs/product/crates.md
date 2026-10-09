@@ -203,7 +203,7 @@ surface, audited:*
 **`chip-cli`** (PRODUCT, L3). *Problem:* the one executable, `chip`, and the library an embedder
 uses (`service::serve_in`). The product surface is `chip work`, `chip serve`, `chip verify`,
 `chip capability-exec` and `chip --version`, implemented in `software_work.rs`, `service.rs`,
-`verify.rs`, `local_environment.rs` and `provider_selection.rs`. *Ships:* yes. *Deps:* see
+`verify.rs`, `local_environment.rs`, `provider_selection.rs` and `micro.rs` (shadow-mode nominations, observation only: [`micro-model-shadow.md`](micro-model-shadow.md); its evaluation module `micro_eval.rs` is not on the product path). *Ships:* yes. *Deps:* see
 section 5.1. *Tests:* 302, including black-box runs of the real `chip` binary against a mock model
 endpoint, real PAX, real `git` and the real filesystem, and a packaged smoke test in CI.
 *Not product, same binary:* every other subcommand and module (section 5.1).

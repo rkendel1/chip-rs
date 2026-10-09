@@ -1171,10 +1171,27 @@ pub async fn work(args: &[String]) -> i32 {
     let mut kind = GoalKind::Change;
     let (mut max_turns, mut max_executions) = (DEFAULT_MAX_TURNS, DEFAULT_MAX_EXECUTIONS);
     let mut context_budget: Option<usize> = None;
+    // Shadow mode is off unless asked for; it has its own selection and never reuses the work model's.
+    let mut micro_shadow = false;
+    let mut micro_selection = crate::provider_selection::Selection::default();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--json" => json = true,
+            "--micro-shadow" => micro_shadow = true,
+            "--micro-provider" | "--micro-model" | "--micro-endpoint" => {
+                let flag = args[i].clone();
+                i += 1;
+                let given = match value(args, i, &flag) {
+                    Ok(v) => v,
+                    Err(code) => return code,
+                };
+                match flag.as_str() {
+                    "--micro-provider" => micro_selection.provider = Some(given),
+                    "--micro-model" => micro_selection.model = Some(given),
+                    _ => micro_selection.endpoint = Some(given),
+                }
+            }
             "--print-reply" => print_reply = true,
             "--provider" | "--model" | "--endpoint" => {
                 let flag = args[i].clone();
@@ -1261,6 +1278,23 @@ pub async fn work(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     };
+    // An explicitly requested shadow model is checked before anything runs, like the work model.
+    let shadow = if micro_shadow {
+        match crate::micro::ShadowModel::prepare(&micro_selection) {
+            Ok(shadow) => Some(shadow),
+            Err(why) => {
+                eprintln!("error: {why}; nothing was run");
+                return EXIT_UNAVAILABLE;
+            }
+        }
+    } else if micro_selection != crate::provider_selection::Selection::default() {
+        eprintln!(
+            "error: --micro-provider, --micro-model and --micro-endpoint need --micro-shadow"
+        );
+        return usage();
+    } else {
+        None
+    };
     // The local machine is the environment: one project directory, owned by this one work.
     let provider = match LocalEnvironmentProvider::prepare(&root).await {
         Ok(provider) => provider,
@@ -1319,11 +1353,26 @@ pub async fn work(args: &[String]) -> i32 {
             return EXIT_UNAVAILABLE;
         }
     }
-    if json {
-        println!("{}", render_json(&result, &resolved));
-    } else {
-        print!("{}", render_human(&result, &resolved));
+    // Shadow mode: asked only now, about the final work, by shared reference. Whatever it says is
+    // appended to the report as a recorded fact; the outcome and the exit status are already fixed.
+    let exit = result.exit_status();
+    let record = match &shadow {
+        Some(shadow) => Some(shadow.record(&result).await),
+        None => None,
+    };
+    match (json, &record) {
+        (true, None) => println!("{}", render_json(&result, &resolved)),
+        (true, Some(record)) => println!(
+            "{}",
+            crate::micro::attach_to_report(&render_json(&result, &resolved), record)
+        ),
+        (false, None) => print!("{}", render_human(&result, &resolved)),
+        (false, Some(record)) => {
+            print!("{}", render_human(&result, &resolved));
+            print!("{}", record.render_human());
+        }
     }
+    debug_assert_eq!(exit, result.exit_status());
     if print_reply {
         for reply in replies.iter() {
             eprintln!("Model reply:\n{reply}");

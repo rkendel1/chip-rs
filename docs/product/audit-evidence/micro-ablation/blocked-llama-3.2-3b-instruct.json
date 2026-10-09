@@ -1,0 +1,148 @@
+{
+  "authority_granted": "none",
+  "blocked_reason": "candidate \"llama-3.2-3b-instruct\" is not available: the configured model (none) is not one of its accepted names; no substitution",
+  "candidate": {
+    "configured_model": null,
+    "configured_model_is_this_candidate": false,
+    "declared": {
+      "artifact_revision": "unreported",
+      "context_limit_tokens": "unreported",
+      "hardware": "unreported",
+      "inference_runtime": "unreported",
+      "quantization": "unreported"
+    },
+    "display": "Llama 3.2 3B Instruct",
+    "key": "llama-3.2-3b-instruct",
+    "sampling": {
+      "max_output_tokens": 256,
+      "temperature": 0.0
+    }
+  },
+  "contract": {
+    "schema": "chip.micro.v1",
+    "schema_sha256": "sha256:01b4d618700bdb69ad3969cdd9ace562717fe018f155530344d88d0b0792776c",
+    "version": 0,
+    "version_basis": "interim: no Work Contract exists yet"
+  },
+  "evidence_about_a_model": false,
+  "fixture": {
+    "cases": 50,
+    "checks": [
+      {
+        "check": "case ids are unique",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "both splits are non-empty",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "label sources are independent of any model",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "every label is marked for human review",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "acceptable strategies are offered candidates",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "abstention cases accept only the unknown class",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "executed and unexecuted cases are distinguished",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "enough executed cases per split to compute an interval",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "stale evidence appears in the fixture",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: familiar",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: unfamiliar",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: ambiguous",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: stale_evidence",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: invalid_strategy_offered",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "category present: adversarial",
+        "detail": "ok",
+        "passed": true
+      },
+      {
+        "check": "held-out set matches its freeze",
+        "detail": "ok",
+        "passed": true
+      }
+    ],
+    "executed_cases": 38,
+    "heldout_sha256": "sha256:ba46899df4357f682a9a413de949e9c7783d686883a31dc6c34668692153ad4e",
+    "label_verification": {
+      "executed_reproduced_and_verified": 38,
+      "human_review_pending": 50,
+      "independently_human_reviewed": 0,
+      "unexecuted_synthetic": 12
+    },
+    "sha256": "sha256:2b7c94e78e37049b6fd207978a2fcff0d80c46eef8b74b9890f16a1f44e9e8b2",
+    "unexecuted_cases": 12,
+    "version": "micro-eval-2"
+  },
+  "heldout_frozen_intact": true,
+  "metrics": null,
+  "model": null,
+  "new_inference": false,
+  "predictions": null,
+  "prompt_sha256": "sha256:efb0f5dad269bf6d49e759d3bbe9b058b6bde378b458784d361636447ef7817d",
+  "replayed_from": null,
+  "replies": {},
+  "repository": {
+    "git_commit": "621b1ae7c183bfcf1d5a5cef4aa94c4b42a090e9",
+    "note": null,
+    "working_tree_dirty": true
+  },
+  "runtime_settings": {
+    "concurrency": 1,
+    "json_object_output": true,
+    "max_output_tokens": 256,
+    "retries": 0,
+    "temperature": 0.0,
+    "timeout_ms": 20000
+  },
+  "schema": "chip.micro-eval.v2",
+  "scripted_responder": null,
+  "status": "blocked"
+}
