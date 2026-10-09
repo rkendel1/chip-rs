@@ -100,5 +100,32 @@ next touched).
 
 ## 5. Verification snapshot (2026-10-09, Linux x86_64, sandbox VM)
 
-See the end of this file once filled by the change author; it is recorded in the pull request
-description with the exact commands.
+Environment notes that affect what these results mean: PAX v0.4.1 built from source and placed on
+`PATH` (without it, 4 `chip-cli` tests and the baseline bench's process section fail, and many tests
+return early); the `wasm32-unknown-unknown` target was **not** installed at the start, so the first
+full run had 10 failures, all in `chip-wasm-decision-host` (`cargo test` there reports "target may not
+be installed"); after `rustup target add wasm32-unknown-unknown` the same tests passed. No real
+model, no real `compute` binary and no network service were used, so everything that needs one was
+not run.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Formatting | `cargo fmt --all -- --check` | pass |
+| Compilation incl. benches and tests | `cargo check --workspace --all-targets` | pass (it **failed** before this change set: the baseline bench did not compile after `Capacity` gained a field; fixed, D-28) |
+| Lint | `cargo clippy --workspace --all-targets` | 0 errors, about 50 style warnings, none suppressed (D-31) |
+| Wasm builds (as CI) | `cargo check -p chip-core --target wasm32-unknown-unknown`; `cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision` | pass |
+| Workspace tests | `cargo test --workspace --no-fail-fast` (PAX on `PATH`, wasm target installed) | **1139 passed, 0 failed, 1 ignored**. Tests that print `SKIPPED` (real `compute`, live model) count as passed |
+| Dependency and boundary audit | `scripts/audit-dependencies.sh` | pass, including the new storage-engine checks |
+| Crate inventory vs workspace | `cargo test -p chip-cli --test inventory` | pass |
+| CI extras | `cargo run -p chip-cli -- --test`; `cargo run -p chip-decision-corpus --bin chip-decision-corpus -- verify`; `cargo bench -p chip-cli --bench baseline -- --quick` | pass |
+| Packaging | `scripts/package-release.sh`, `scripts/smoke-test.sh` on the produced archive | pass ("SMOKE PASSED") |
+| Placeholder search | the pattern in section 1 | no unclassified finding |
+| Doc paths and links | script checking every repository path named in `README.md`, `AGENTS.md`, `docs/**` | the only unresolved paths are the other-repository references that the text now labels as such |
+
+Not run, and why: manual live workflows (`live-compute.yml`, `live-model.yml`, `laya.yml`,
+`local-ml.yml`) need a real `compute`, a real model or local model weights; the opt-in real-model
+tests (`CHIP_TEST_REAL_MODEL=1`); the session-store benchmarks (unchanged by this change; their
+recorded results are dated in their documents); the Windows/macOS builds (never run here).
+Remaining uncertainty: effectiveness with any real model (roadmap P2-05), behaviour of the packaged
+binary on any other platform, and whether the cleaned documentation matches what an external
+embedder sees.
