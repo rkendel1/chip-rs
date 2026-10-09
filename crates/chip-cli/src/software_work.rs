@@ -21,11 +21,12 @@ use std::sync::{Arc, Mutex};
 
 use chip_core::{
     Agent, AnswerPredicate, CapabilityId, ContextReport, DeduplicatedEscalationContext,
-    EnvironmentDescription, Environments, ExecutionObserver, LocalWorkPolicy,
-    ModelDecisionBoundary, NoLocalPolicy, Observation, ObservationInvariant, ObservationPredicate,
-    SafetyAudit, WorkDecision, WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits,
-    WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
-    context_report, measure_utility, verify_trajectory,
+    EnvironmentDescription, Environments, EscalationContext, EscalationContextPolicy,
+    ExecutionObserver, LocalWorkPolicy, ModelDecisionBoundary, NoLocalPolicy, Observation,
+    ObservationClass, ObservationInvariant, ObservationPredicate, SafetyAudit, WorkDecision,
+    WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
+    WorkState, WorkTrajectory, WorkUtilityMeasurement, WorkView, audit_safety,
+    classify_observations, context_report, measure_utility, verify_trajectory,
 };
 #[cfg(test)]
 use chip_pax::PaxExecutor;
@@ -111,7 +112,7 @@ impl GoalKind {
                 "This goal asks about the project as it is, so do not change any file. Chip decides completion: the work is complete only when pax.test passes and this work has changed no file, as pax.test itself establishes."
             }
             Self::Inspect => {
-                "This goal asks only for observation, so do not change any file. When you can answer, reply with the complete decision and put your answer in its summary, citing the project-relative paths of the files you observed with project.list, project.search or project.read. Chip decides completion: it accepts the answer only if it cites at least one such file and this work has changed no file."
+                "This goal asks only for read-only inspection: do not modify any file. Treat successful observations as facts only for what they directly show; distinguish those facts from reasonable inferences, and do not state unsupported claims. Before requesting another capability, assess what relevant facts successful observations establish, which project-relative files have actually been read, what concrete improvement those observations support, what specific unresolved question prevents a conclusion, and whether another operation can answer it or would merely repeat exploration. Choose one next step: conclude with one concrete improvement supported by evidence, why it matters, and a rationale; investigate one missing fact with one targeted request_capability; or, if no justified investigation remains, report insufficient evidence with escalate or block, not complete. For a conclusion, identify the relevant observed file or files, reference the number of each successful observation shown in the inspection progress, state the specific returned fact supporting the claim, and explain why that evidence justifies the recommendation. Failed operations are not successful evidence. A path citation alone does not prove a claim. Improvements may concern implementation, documentation, testing, or maintainability when the evidence supports them. Investigation is not a new decision type. Use targeted searches to locate relevant implementation details, and read relevant source files before drawing conclusions. Emit exactly one JSON object, with no Markdown, code fence, wrapper, or extra fields. Use only these existing decision shapes: {\"decision\":\"complete\",\"summary\":\"<one concrete improvement; observation number and returned fact; why it justifies the recommendation; cite observed project-relative file(s)>\"}; {\"decision\":\"request_capability\",\"capability\":\"project.read\",\"inputs\":{\"path\":\"src/lib.rs\"}}; {\"decision\":\"escalate\",\"reason\":\"<why a person is needed>\"}; {\"decision\":\"block\",\"reason\":\"<why work cannot proceed>\"}. Only the request_capability shape may contain a nested object, and its inputs must match declared capability inputs. Chip currently accepts completion when the summary cites a project-relative path observed through a successful project operation and this work has changed no file; this grounding check does not evaluate whether a claim is true. Inspect only enough project structure to identify a relevant area, using project.list when needed. Adapt to existing evidence; do not repeat searches or list the same project structure without a clear informational purpose. Acknowledge uncertainty when observations do not support a conclusion."
             }
         }
     }
@@ -189,6 +190,215 @@ fn changed_a_file(observations: &[Observation]) -> bool {
         .any(|o| write_summary(o).is_some_and(|(_, changed)| changed))
 }
 
+/// A compact account of the project evidence already available to an inspection. It reports
+/// locations and operation metadata only; observation messages themselves remain intact.
+fn inspection_progress(trajectory: &WorkTrajectory<'_>) -> String {
+    let observations = trajectory.observations;
+    let origins = trajectory.origins;
+    let classes = classify_observations(origins, observations);
+    let mut reads = std::collections::BTreeSet::new();
+    let mut search_results = std::collections::BTreeSet::new();
+    let mut listings = Vec::new();
+    let mut failures = Vec::new();
+    let mut operations = Vec::new();
+    let (mut empty_searches, mut truncated_searches) = (0usize, 0usize);
+    let mut repeated = Vec::new();
+
+    for (i, (origin, observation)) in origins.iter().zip(observations).enumerate() {
+        let capability = origin.capability.as_str();
+        if ![PROJECT_LIST, PROJECT_SEARCH, PROJECT_READ].contains(&capability) {
+            continue;
+        }
+        let header = observation_header(observation);
+        let successful = observation.kind == chip_core::ObservationKind::ExecutionCompleted
+            && observation.status == chip_core::ExecutionStatus::Success;
+        let result = match observation.status {
+            chip_core::ExecutionStatus::Success => "succeeded",
+            chip_core::ExecutionStatus::Failure => "failed",
+            chip_core::ExecutionStatus::Cancelled => "was cancelled",
+        };
+        let path = header.as_ref().and_then(|header| header["path"].as_str());
+        operations.push(format!(
+            "Observation {}: {capability} {result}{}",
+            i + 1,
+            path.map(|path| format!(" for {path}")).unwrap_or_default()
+        ));
+
+        if classes.get(i) == Some(&ObservationClass::RepeatedIdentical) {
+            let prior = (0..i)
+                .rev()
+                .find(|j| origins[*j].invocation == origin.invocation);
+            if let Some(prior) = prior {
+                repeated.push(format!(
+                    "observation {} repeats the same {} result as observation {}; this does not establish that the filesystem is unchanged",
+                    i + 1,
+                    capability,
+                    prior + 1
+                ));
+            }
+        }
+
+        if !successful {
+            let category = header
+                .as_ref()
+                .and_then(|header| header["error"].as_str())
+                .unwrap_or("operation_failed");
+            failures.push(format!(
+                "observation {}: {capability} failed ({category})",
+                i + 1
+            ));
+            continue;
+        }
+
+        match capability {
+            PROJECT_READ => {
+                if let Some(path) = header.as_ref().and_then(|header| header["path"].as_str()) {
+                    reads.insert(path.to_string());
+                }
+            }
+            PROJECT_SEARCH => {
+                let count = header
+                    .as_ref()
+                    .and_then(|header| header["matches"].as_u64())
+                    .unwrap_or(0);
+                if count == 0 {
+                    empty_searches += 1;
+                }
+                if header
+                    .as_ref()
+                    .and_then(|header| header["truncated"].as_bool())
+                    == Some(true)
+                {
+                    truncated_searches += 1;
+                }
+                for row in observation
+                    .output
+                    .as_deref()
+                    .unwrap_or_default()
+                    .split("--- matches ---\n")
+                    .nth(1)
+                    .unwrap_or("")
+                    .lines()
+                {
+                    if let Some((path, rest)) = row.split_once(':') {
+                        if let Some((line, _)) = rest.split_once(':') {
+                            search_results.insert(format!("{path}:{line}"));
+                        }
+                    }
+                }
+            }
+            PROJECT_LIST => {
+                let path = header
+                    .as_ref()
+                    .and_then(|header| header["path"].as_str())
+                    .unwrap_or(".");
+                let count = header
+                    .as_ref()
+                    .and_then(|header| header["entries"].as_u64())
+                    .unwrap_or(0);
+                listings.push(format!("{path} ({count} entries)"));
+            }
+            _ => {}
+        }
+    }
+
+    let compact_set = |items: &std::collections::BTreeSet<String>| {
+        if items.is_empty() {
+            "none".to_string()
+        } else {
+            let mut shown: Vec<String> = items.iter().take(8).cloned().collect();
+            if items.len() > shown.len() {
+                shown.push(format!("{} more", items.len() - shown.len()));
+            }
+            shown.join(", ")
+        }
+    };
+    let mut summary = String::from(
+        "Inspection progress, derived from recorded observations (the numbered observations remain available in chronological order):",
+    );
+    summary.push_str(&format!(
+        "\n- Operation references: {}.",
+        if operations.is_empty() {
+            "none".to_string()
+        } else {
+            operations.join("; ")
+        }
+    ));
+    summary.push_str(
+        "\n- Observation numbers refer to the chronological observation messages and final report. Cite the number of a successful observation (for example, Observation 2) and state the specific returned fact supporting the finding; failed observations are not successful evidence.",
+    );
+    summary.push_str(&format!("\n- Source files read: {}.", compact_set(&reads)));
+    summary.push_str(&format!(
+        "\n- Search result locations: {}.",
+        compact_set(&search_results)
+    ));
+    if empty_searches > 0 {
+        summary.push_str(&format!(
+            "\n- Successful searches with no matches: {empty_searches}."
+        ));
+    }
+    if truncated_searches > 0 {
+        summary.push_str(&format!(
+            "\n- Search results were truncated in {truncated_searches} operation(s); relevant matches may be omitted."
+        ));
+    }
+    if !listings.is_empty() {
+        summary.push_str(&format!(
+            "\n- Project structure listed: {}.",
+            listings.join(", ")
+        ));
+    }
+    summary.push_str(&format!(
+        "\n- Failed observations: {}.",
+        if failures.is_empty() {
+            "none".to_string()
+        } else {
+            failures.join("; ")
+        }
+    ));
+    summary.push_str(&format!(
+        "\n- Repeated results: {}.",
+        if repeated.is_empty() {
+            "none identified".to_string()
+        } else {
+            repeated.join("; ")
+        }
+    ));
+    if reads.is_empty() && !search_results.is_empty() {
+        summary.push_str(
+            "\n- Information gap: search locations identify matches but do not establish their implementation; read a relevant source file before drawing a conclusion.",
+        );
+    } else if reads.is_empty() && search_results.is_empty() {
+        summary.push_str(
+            "\n- Information gap: no successful source read or matching search location is available yet.",
+        );
+    }
+    summary.push_str(
+        "\nDecision point before another capability: what relevant facts have successful observations established? Which project-relative files were actually read? What concrete improvement, if any, is supported? What specific unresolved question prevents a conclusion? Would one targeted operation answer it, or merely repeat exploration?",
+    );
+    summary.push_str(
+        "\nSeparate directly observed facts from reasonable inferences; do not assert unsupported claims. A conclusion must state one evidence-supported improvement, its observed file(s), the number of the specific successful observation supporting it, the returned fact, and why that evidence justifies the recommendation. A path citation alone is not proof, and an improvement may concern documentation, testing, or maintainability when supported. Grounding checks the cited path, not the truth of the claim. Use one of the exact JSON shapes in the goal instructions: no Markdown, wrappers, or extra fields; only request_capability may contain declared inputs, and investigate maps to request_capability. Otherwise use one justified targeted operation or report insufficient evidence with escalate/block. Avoid repeating an identical search without a specific reason to expect new information. Repeated results do not prove the filesystem is unchanged. Do not modify files.",
+    );
+    summary
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct InspectProgressContext;
+
+impl EscalationContextPolicy for InspectProgressContext {
+    fn id(&self) -> &'static str {
+        "inspect-progress-v1"
+    }
+
+    fn build(&self, state: &WorkState<'_>, trajectory: &WorkTrajectory<'_>) -> EscalationContext {
+        let mut context = DeduplicatedEscalationContext.build(state, trajectory);
+        context
+            .relevant_evidence
+            .push(inspection_progress(trajectory));
+        context
+    }
+}
+
 /// The first line of a successful observation as JSON: the shape every project observation has.
 fn project_line(observation: &Observation) -> Option<serde_json::Value> {
     if observation.kind != chip_core::ObservationKind::ExecutionCompleted
@@ -196,6 +406,13 @@ fn project_line(observation: &Observation) -> Option<serde_json::Value> {
     {
         return None;
     }
+    observation_header(observation)
+}
+
+/// The result header is retained for successful and failed executions. Failure headers may
+/// provide a safe project-relative path and category without treating the failed operation as
+/// evidence of file contents.
+fn observation_header(observation: &Observation) -> Option<serde_json::Value> {
     serde_json::from_str(observation.output.as_deref()?.lines().next()?).ok()
 }
 
@@ -650,13 +867,12 @@ pub async fn run_software_work_kind(
     if let Some(bytes) = context_budget_bytes {
         spec = spec.with_context_budget_bytes(bytes);
     }
+    let context_policy: &dyn EscalationContextPolicy = match kind {
+        GoalKind::Inspect => &InspectProgressContext,
+        GoalKind::Change | GoalKind::Verify => &DeduplicatedEscalationContext,
+    };
     let report = agent
-        .run_work_with_context_policy(
-            &spec,
-            policy,
-            &ModelDecisionBoundary,
-            &DeduplicatedEscalationContext,
-        )
+        .run_work_with_context_policy(&spec, policy, &ModelDecisionBoundary, context_policy)
         .await;
     let context = context_report(&report, &spec);
     let audit = audit_safety(&report, &spec, &declared());
@@ -733,6 +949,59 @@ fn by_capability(work: &SoftwareWork) -> String {
     }
 }
 
+/// A report-time view of the existing observation trajectory. The work report remains the sole
+/// observation store; the numbered entries let a free-form Inspect finding point back to it.
+fn inspection_evidence(w: &SoftwareWork) -> serde_json::Value {
+    let observations: Vec<serde_json::Value> = w
+        .report
+        .origins
+        .iter()
+        .zip(&w.report.observations)
+        .enumerate()
+        .map(|(i, (origin, observation))| {
+            let successful = observation.kind == chip_core::ObservationKind::ExecutionCompleted
+                && observation.status == chip_core::ExecutionStatus::Success;
+            let status = match observation.status {
+                chip_core::ExecutionStatus::Success => "success",
+                chip_core::ExecutionStatus::Failure => "failure",
+                chip_core::ExecutionStatus::Cancelled => "cancelled",
+            };
+            let path = observation_header(observation)
+                .and_then(|header| header["path"].as_str().map(str::to_string));
+            serde_json::json!({
+                "number": i + 1,
+                "capability": origin.capability.as_str(),
+                "kind": observation.kind.as_str(),
+                "status": status,
+                "successful": successful,
+                "execution_id": format!("{:?}", observation.execution_id),
+                "path": path,
+                "result": observation.output.as_deref(),
+            })
+        })
+        .collect();
+    let independent_checks: Vec<usize> = w
+        .report
+        .origins
+        .iter()
+        .enumerate()
+        .filter_map(|(i, origin)| {
+            (origin.capability.as_str() == PAX_TEST_CAPABILITY).then_some(i + 1)
+        })
+        .collect();
+    serde_json::json!({
+        "model_interpretation": match &w.report.outcome {
+            WorkOutcome::Completed { summary } => Some(summary.as_str()),
+            _ => None,
+        },
+        "observations": observations,
+        "independent_checks": independent_checks,
+        "semantic_claims_independently_checked": false,
+        "grounded": w.grounded,
+        "verified": w.verified,
+    })
+}
+
 pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
     let m = w.report.measurement();
     let u = &w.utility;
@@ -786,7 +1055,60 @@ pub fn render_human(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
     ));
     line(format!("Goal kind: {}", w.kind.name()));
     if let (GoalKind::Inspect, WorkOutcome::Completed { summary }) = (w.kind, &w.report.outcome) {
-        line(format!("Answer: {summary}"));
+        line(format!("Model interpretation (finding): {summary}"));
+    }
+    if w.kind == GoalKind::Inspect {
+        line(
+            "Observed operations (chronological; these are results, not model claims):".to_string(),
+        );
+        for (i, (origin, observation)) in w
+            .report
+            .origins
+            .iter()
+            .zip(&w.report.observations)
+            .enumerate()
+        {
+            let successful = observation.kind == chip_core::ObservationKind::ExecutionCompleted
+                && observation.status == chip_core::ExecutionStatus::Success;
+            let status = match observation.status {
+                chip_core::ExecutionStatus::Success => "success",
+                chip_core::ExecutionStatus::Failure => "failure",
+                chip_core::ExecutionStatus::Cancelled => "cancelled",
+            };
+            let path = observation_header(observation)
+                .and_then(|header| header["path"].as_str().map(str::to_string));
+            line(format!(
+                "  Observation {}: {} ({status}{})",
+                i + 1,
+                origin.capability,
+                path.map(|path| format!(", path: {path}"))
+                    .unwrap_or_default()
+            ));
+            if let Some(result) = &observation.output {
+                line(format!("    Result: {result}"));
+            }
+            if !successful {
+                line("    Not successful evidence.".to_string());
+            }
+        }
+        let checks: Vec<String> = w
+            .report
+            .origins
+            .iter()
+            .enumerate()
+            .filter_map(|(i, origin)| {
+                (origin.capability.as_str() == PAX_TEST_CAPABILITY)
+                    .then(|| format!("Observation {}", i + 1))
+            })
+            .collect();
+        line(format!(
+            "Independent checks performed: {}. No independent semantic check of the finding is performed.",
+            if checks.is_empty() {
+                "none".to_string()
+            } else {
+                checks.join(", ")
+            }
+        ));
     }
     if let Some(reason) = outcome_reason(&w.report.outcome) {
         line(format!("Outcome: {reason}"));
@@ -902,6 +1224,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         "endpoint": id.map(|i| i.endpoint.as_str()),
         "goal": w.goal,
         "goal_kind": w.kind.name(),
+        "inspection_evidence": (w.kind == GoalKind::Inspect).then(|| inspection_evidence(w)),
         "answer": match (w.kind, &w.report.outcome) {
             (GoalKind::Inspect, WorkOutcome::Completed { summary }) => Some(summary.as_str()),
             _ => None,
@@ -1786,6 +2109,552 @@ mod tests {
         );
         // The model's second context carried the failure as an observation, not a repaired fact.
         assert!(script.seen.lock().unwrap()[1].contains("not_found"));
+    }
+
+    #[test]
+    fn inspection_instructions_define_a_bounded_read_only_strategy() {
+        let instructions = goal_text_for(GoalKind::Inspect, "Inspect the project.");
+        assert!(instructions.contains("project.list when needed"));
+        assert!(instructions.contains("targeted searches"));
+        assert!(instructions.contains("read relevant source files"));
+        assert!(instructions.contains("do not repeat searches"));
+        assert!(
+            instructions
+                .contains("list the same project structure without a clear informational purpose")
+        );
+        assert!(instructions.contains("one concrete improvement"));
+        assert!(instructions.contains("why it matters"));
+        assert!(
+            instructions.contains(
+                "Treat successful observations as facts only for what they directly show"
+            )
+        );
+        assert!(instructions.contains("distinguish those facts from reasonable inferences"));
+        assert!(instructions.contains("do not state unsupported claims"));
+        assert!(instructions.contains("specific returned fact supporting the claim"));
+        assert!(instructions.contains("reference the number of each successful observation"));
+        assert!(instructions.contains("Failed operations are not successful evidence"));
+        assert!(instructions.contains("A path citation alone does not prove a claim"));
+        assert!(instructions.contains("documentation, testing, or maintainability"));
+        assert!(instructions.contains("grounding check does not evaluate whether a claim is true"));
+        assert!(instructions.contains("Before requesting another capability, assess"));
+        assert!(instructions.contains("which project-relative files have actually been read"));
+        assert!(instructions.contains("what specific unresolved question prevents a conclusion"));
+        assert!(instructions.contains("one targeted request_capability"));
+        assert!(instructions.contains("report insufficient evidence with escalate or block"));
+        assert!(instructions.contains("not complete"));
+        assert!(instructions.contains("Investigation is not a new decision type"));
+        assert!(instructions.contains("exactly one JSON object"));
+        assert!(
+            instructions.contains("Only the request_capability shape may contain a nested object")
+        );
+        assert!(!instructions.contains("\"decision\":\"investigate\""));
+        for shape in [
+            r#"{"decision":"complete","summary":"<one concrete improvement; observation number and returned fact; why it justifies the recommendation; cite observed project-relative file(s)>"}"#,
+            r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":"src/lib.rs"}}"#,
+            r#"{"decision":"escalate","reason":"<why a person is needed>"}"#,
+            r#"{"decision":"block","reason":"<why work cannot proceed>"}"#,
+        ] {
+            assert!(
+                instructions.contains(shape),
+                "Inspect should show the accepted schema shape: {shape}"
+            );
+        }
+        assert!(instructions.contains("no Markdown, code fence, wrapper, or extra fields"));
+        assert!(
+            instructions.contains("Only the request_capability shape may contain a nested object")
+        );
+        assert!(
+            instructions
+                .contains("project-relative path observed through a successful project operation")
+        );
+        assert!(instructions.contains("Acknowledge uncertainty"));
+        assert!(instructions.contains("do not modify any file"));
+        assert!(instructions.contains("summary cites a project-relative path observed"));
+        assert!(instructions.contains("this work has changed no file"));
+        assert!(!instructions.contains("thefiles"));
+        assert!(!instructions.contains("acceptsthe"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_concludes_when_read_evidence_supports_a_finding() {
+        let fx = fixture("inspect");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            read("src/lib.rs"),
+            r#"{"decision":"complete","summary":"Improvement: document that payload_len reports UTF-8 byte length so callers do not mistake it for a character count. Observation 1: src/lib.rs implements it with payload.len(). That operation measures the string's byte length, so the documentation recommendation follows from the implementation. See src/lib.rs."}"#.into(),
+        ]);
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&fx.root),
+            &fx.root,
+            pax,
+            EnvironmentDescription::default(),
+        );
+        let w = run_software_work_kind(
+            GoalKind::Inspect,
+            WorkId::new("inspect"),
+            script.clone(),
+            "scripted".into(),
+            &env,
+            "Describe how payload_len determines its result.",
+            LIMITS,
+            GoalKind::Inspect.policy(),
+            None,
+        )
+        .await;
+
+        tidy(&w);
+        assert!(completed(&w), "{:?}", w.report.outcome);
+        assert_eq!(w.goal_satisfied, Some(true));
+        assert!(w.grounded, "the accepted answer must cite an observed file");
+        assert!(!w.verified, "grounded does not mean independently verified");
+        let WorkOutcome::Completed { summary } = &w.report.outcome else {
+            panic!("expected an accepted inspection answer");
+        };
+        assert!(summary.contains("src/lib.rs"));
+        assert!(observed_files(&w.report.observations).contains("src/lib.rs"));
+        let calls = script.seen.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(
+            calls[1].contains("Source files read: src/lib.rs")
+                && calls[1].contains("Decision point before another capability"),
+            "the completion decision must receive current read evidence"
+        );
+        assert!(
+            calls[1].contains("payload.len()"),
+            "the supporting observation must be present in the model context"
+        );
+        assert!(calls[1].contains("Observation 1: project.read succeeded for src/lib.rs"));
+        drop(calls);
+        let json: serde_json::Value =
+            serde_json::from_str(&render_json(&w, &resolved_pax())).unwrap();
+        assert_eq!(json["inspection_evidence"]["observations"][0]["number"], 1);
+        assert_eq!(
+            json["inspection_evidence"]["observations"][0]["capability"],
+            PROJECT_READ
+        );
+        assert_eq!(
+            json["inspection_evidence"]["observations"][0]["status"],
+            "success"
+        );
+        assert_eq!(
+            json["inspection_evidence"]["observations"][0]["path"],
+            "src/lib.rs"
+        );
+        assert!(
+            json["inspection_evidence"]["observations"][0]["result"]
+                .as_str()
+                .unwrap()
+                .contains("payload.len()")
+        );
+        assert_eq!(
+            json["inspection_evidence"]["observations"][0]["result"].as_str(),
+            w.report.observations[0].output.as_deref()
+        );
+        assert_eq!(
+            json["inspection_evidence"]["model_interpretation"].as_str(),
+            Some(summary.as_str())
+        );
+        assert_eq!(
+            json["inspection_evidence"]["independent_checks"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            json["inspection_evidence"]["semantic_claims_independently_checked"],
+            false
+        );
+        let human = render_human(&w, &resolved_pax());
+        assert!(human.contains("Model interpretation (finding):"));
+        assert!(human.contains("Observed operations (chronological"));
+        assert!(human.contains("Observation 1: project.read (success, path: src/lib.rs)"));
+        assert!(human.contains("Independent checks performed: none"));
+        assert_eq!((w.writes, w.changed_writes), (0, 0));
+        assert_eq!(snapshot(&fx.root), before, "inspection changed the project");
+        assert_eq!(script.replies.lock().unwrap().len(), 0);
+        let _ = fx.base;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_grounding_does_not_validate_claim_truth() {
+        let fx = fixture("inspect_unsupported_claim");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            read("tests/fingerprint.rs"),
+            r#"{"decision":"complete","summary":"Improvement: add the project's first tests. Observation 1: tests/fingerprint.rs contains no tests, so there is no existing test coverage to preserve. See tests/fingerprint.rs."}"#.into(),
+        ]);
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&fx.root),
+            &fx.root,
+            pax,
+            EnvironmentDescription::default(),
+        );
+        let w = run_software_work_kind(
+            GoalKind::Inspect,
+            WorkId::new("inspect-unsupported-claim"),
+            script.clone(),
+            "scripted".into(),
+            &env,
+            "Inspect the project's tests and identify one concrete improvement.",
+            LIMITS,
+            GoalKind::Inspect.policy(),
+            None,
+        )
+        .await;
+
+        tidy(&w);
+        assert!(completed(&w), "{:?}", w.report.outcome);
+        assert!(
+            w.grounded,
+            "the existing predicate checks the cited observed path"
+        );
+        assert!(
+            !w.verified,
+            "a path-grounded natural-language claim is not independently verified"
+        );
+        let WorkOutcome::Completed { summary } = &w.report.outcome else {
+            panic!("expected the path-grounding limitation to remain visible");
+        };
+        assert!(summary.contains("contains no tests"));
+        assert!(observed_files(&w.report.observations).contains("tests/fingerprint.rs"));
+        let calls = script.seen.lock().unwrap();
+        assert!(
+            calls[1].contains("pairs_are_sorted_and_joined"),
+            "the successful read actually showed a test, contradicting the answer"
+        );
+        drop(calls);
+        let human = render_human(&w, &resolved_pax());
+        assert!(human.contains("nothing independent establishes that it is true"));
+        let json: serde_json::Value =
+            serde_json::from_str(&render_json(&w, &resolved_pax())).unwrap();
+        assert_eq!(json["grounded"], true);
+        assert_eq!(json["verified"], false);
+        assert_eq!(
+            json["inspection_evidence"]["semantic_claims_independently_checked"],
+            false
+        );
+        assert_eq!((w.writes, w.changed_writes), (0, 0));
+        assert_eq!(snapshot(&fx.root), before);
+        assert_eq!(script.replies.lock().unwrap().len(), 0);
+        let _ = fx.base;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_escalates_when_observations_cannot_support_a_finding() {
+        let fx = fixture("inspect_insufficient_evidence");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            list_req(None),
+            r#"{"decision":"escalate","reason":"The listing establishes project structure only; I have not observed implementation evidence that supports a concrete improvement."}"#.into(),
+        ]);
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&fx.root),
+            &fx.root,
+            pax,
+            EnvironmentDescription::default(),
+        );
+        let w = run_software_work_kind(
+            GoalKind::Inspect,
+            WorkId::new("inspect-insufficient-evidence"),
+            script.clone(),
+            "scripted".into(),
+            &env,
+            "Inspect the project and identify one concrete improvement.",
+            LIMITS,
+            GoalKind::Inspect.policy(),
+            None,
+        )
+        .await;
+
+        tidy(&w);
+        assert!(
+            matches!(&w.report.outcome, WorkOutcome::Escalated { reason } if reason.contains("listing establishes project structure only")),
+            "insufficient evidence should be reported, not completed: {:?}",
+            w.report.outcome
+        );
+        assert!(!completed(&w));
+        assert!(!w.grounded);
+        assert!(!w.verified);
+        assert_eq!(w.lists(), 1);
+        assert_eq!((w.writes, w.changed_writes), (0, 0));
+        assert_eq!(snapshot(&fx.root), before);
+        assert_eq!(script.seen.lock().unwrap().len(), 2);
+        assert_eq!(script.replies.lock().unwrap().len(), 0);
+        let _ = fx.base;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_rejects_unsupported_extra_and_nested_decisions() {
+        for (tag, invalid_reply, expected_error) in [
+            (
+                "unsupported",
+                r#"{"decision":"investigate","reason":"read more"}"#,
+                "unknown decision",
+            ),
+            (
+                "extra",
+                r#"{"decision":"complete","summary":"Finding; see src/lib.rs.","extra":true}"#,
+                "unexpected field",
+            ),
+            (
+                "nested",
+                r#"{"decision":"request_capability","capability":"project.read","inputs":{"path":{"nested":"src/lib.rs"}}}"#,
+                "objects nested too deeply",
+            ),
+        ] {
+            let fx = fixture(&format!("inspect_invalid_{tag}"));
+            let Some(pax) = pax_for(&fx.root).await else {
+                return;
+            };
+            let before = snapshot(&fx.root);
+            let script = Script::new(&[read("src/lib.rs"), invalid_reply.into()]);
+            let env = crate::local_environment::LocalEnvironment::new(
+                crate::local_environment::opaque_id(&fx.root),
+                &fx.root,
+                pax,
+                EnvironmentDescription::default(),
+            );
+            let w = run_software_work_kind(
+                GoalKind::Inspect,
+                WorkId::new(format!("inspect-invalid-{tag}")),
+                script.clone(),
+                "scripted".into(),
+                &env,
+                "Inspect payload_len and identify one concrete improvement.",
+                LIMITS,
+                GoalKind::Inspect.policy(),
+                None,
+            )
+            .await;
+
+            tidy(&w);
+            assert!(
+                matches!(
+                    &w.report.outcome,
+                    WorkOutcome::Failed { reason } if reason.contains(expected_error)
+                ),
+                "{tag}: malformed decision must remain an explicit failure: {:?}",
+                w.report.outcome
+            );
+            assert!(!w.grounded, "{tag}: invalid output cannot ground an answer");
+            assert!(!w.verified);
+            assert_eq!(w.goal_satisfied, Some(true));
+            assert_eq!((w.writes, w.changed_writes), (0, 0));
+            assert_eq!(snapshot(&fx.root), before);
+            assert_eq!(w.reads(), 1);
+            assert_eq!(w.report.observations.len(), 1);
+            assert!(observed_files(&w.report.observations).contains("src/lib.rs"));
+            assert!(
+                !w.report
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, WorkEvent::WorkCompleted { .. }))
+            );
+            assert_eq!(script.replies.lock().unwrap().len(), 0);
+            assert_eq!(script.seen.lock().unwrap().len(), 2);
+            let _ = fx.base;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_uses_a_targeted_read_after_a_failed_search() {
+        let fx = fixture("inspect_failed_search");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            search_req("payload_len", Some("missing")),
+            read("src/lib.rs"),
+            r#"{"decision":"complete","summary":"Document that `payload_len` returns UTF-8 byte length, not a character count, so callers know how its result is measured. Observation 2: src/lib.rs implements it with payload.len(). See src/lib.rs."}"#.into(),
+        ]);
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&fx.root),
+            &fx.root,
+            pax,
+            EnvironmentDescription::default(),
+        );
+        let w = run_software_work_kind(
+            GoalKind::Inspect,
+            WorkId::new("inspect-failed-search"),
+            script.clone(),
+            "scripted".into(),
+            &env,
+            "Inspect payload_len and identify one concrete improvement.",
+            LIMITS,
+            GoalKind::Inspect.policy(),
+            None,
+        )
+        .await;
+
+        tidy(&w);
+        assert!(completed(&w), "{:?}", w.report.outcome);
+        assert!(w.grounded);
+        assert!(!w.verified, "grounded does not mean independently verified");
+        assert_eq!((w.writes, w.changed_writes), (0, 0));
+        assert_eq!(snapshot(&fx.root), before);
+        assert_eq!((w.searches(), w.reads()), (1, 1));
+        assert_eq!(
+            w.report
+                .decisions
+                .iter()
+                .filter(|record| matches!(
+                    &record.decision,
+                    WorkDecision::RequestCapability(request)
+                        if request.capability_id.as_str() == PROJECT_SEARCH
+                            || request.capability_id.as_str() == PROJECT_READ
+                ))
+                .count(),
+            2,
+            "valid request_capability decisions are accepted and executed"
+        );
+        assert_eq!(w.report.observations.len(), 2);
+        assert_eq!(w.report.origins.len(), w.report.observations.len());
+        let failed_search = &w.report.observations[0];
+        assert_eq!(
+            failed_search.kind,
+            chip_core::ObservationKind::ExecutionFailed
+        );
+        assert!(
+            failed_search
+                .output
+                .as_deref()
+                .is_some_and(|output| output.contains(r#""error":"not_found""#))
+        );
+        let evidence = inspection_evidence(&w);
+        assert_eq!(evidence["observations"][0]["number"], 1);
+        assert_eq!(evidence["observations"][0]["capability"], PROJECT_SEARCH);
+        assert_eq!(evidence["observations"][0]["successful"], false);
+        assert!(
+            evidence["observations"][0]["result"]
+                .as_str()
+                .unwrap()
+                .contains(r#""error":"not_found""#)
+        );
+        assert_eq!(evidence["observations"][1]["number"], 2);
+        assert_eq!(evidence["observations"][1]["capability"], PROJECT_READ);
+        assert_eq!(evidence["observations"][1]["successful"], true);
+        assert_eq!(evidence["observations"][1]["path"], "src/lib.rs");
+        assert!(
+            evidence["observations"][1]["result"]
+                .as_str()
+                .unwrap()
+                .contains("payload.len()")
+        );
+        let classes = classify_observations(&w.report.origins, &w.report.observations);
+        assert_eq!(classes, [ObservationClass::New, ObservationClass::New]);
+        assert_eq!(w.report.origins[1].capability.as_str(), PROJECT_READ);
+        assert!(observed_files(&w.report.observations).contains("src/lib.rs"));
+        let calls = script.seen.lock().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert!(
+            calls[1].contains("project.search failed (not_found)")
+                && calls[1].contains("Decision point before another capability"),
+            "the failed observation and decision guidance must be in the next model context"
+        );
+        assert!(
+            calls[2].contains("Source files read: src/lib.rs")
+                && calls[2].contains("project.search failed (not_found)"),
+            "the later context must preserve both the failure and successful read"
+        );
+        assert!(calls[2].contains("Observation 1: project.search failed"));
+        assert!(calls[2].contains("Observation 2: project.read succeeded for src/lib.rs"));
+        assert_eq!(script.replies.lock().unwrap().len(), 0);
+        let _ = fx.base;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inspection_context_summarizes_repeated_search_before_reading_and_answering() {
+        let fx = fixture("inspect_progress");
+        let Some(pax) = pax_for(&fx.root).await else {
+            return;
+        };
+        let before = snapshot(&fx.root);
+        let script = Script::new(&[
+            search_req("payload_len", None),
+            search_req("payload_len", None),
+            read("src/lib.rs"),
+            r#"{"decision":"complete","summary":"Document whether `payload_len` intentionally reports UTF-8 byte length, since callers may expect a character count. Observation 3: src/lib.rs implements it with payload.len(). This reports bytes, so the documentation recommendation follows from the implementation."}"#.into(),
+        ]);
+        let env = crate::local_environment::LocalEnvironment::new(
+            crate::local_environment::opaque_id(&fx.root),
+            &fx.root,
+            pax,
+            EnvironmentDescription::default(),
+        );
+        let w = run_software_work_kind(
+            GoalKind::Inspect,
+            WorkId::new("inspect-progress"),
+            script.clone(),
+            "scripted".into(),
+            &env,
+            "Identify one concrete improvement related to payload_len.",
+            LIMITS,
+            GoalKind::Inspect.policy(),
+            None,
+        )
+        .await;
+
+        tidy(&w);
+        assert!(completed(&w), "{:?}", w.report.outcome);
+        assert!(w.grounded);
+        assert!(!w.verified, "grounded does not mean independently verified");
+        assert_eq!((w.writes, w.changed_writes), (0, 0));
+        assert_eq!(snapshot(&fx.root), before);
+        assert_eq!(w.searches(), 2);
+        assert_eq!(w.reads(), 1);
+        assert_eq!(w.report.observations.len(), 3);
+        let classes = classify_observations(&w.report.origins, &w.report.observations);
+        assert_eq!(
+            classes,
+            [
+                ObservationClass::New,
+                ObservationClass::RepeatedIdentical,
+                ObservationClass::New
+            ]
+        );
+        let calls = script.seen.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        assert!(
+            calls[2].contains("Search result locations: src/lib.rs:1"),
+            "the context must carry locations returned by the successful search"
+        );
+        assert!(
+            calls[2]
+                .contains("observation 2 repeats the same project.search result as observation 1"),
+            "the context must identify the repeated result"
+        );
+        assert!(
+            calls[2].contains("does not establish that the filesystem is unchanged"),
+            "a repeated result must not be described as proof of unchanged reality"
+        );
+        assert!(
+            calls[2].contains("read a relevant source file"),
+            "search matches alone must not be presented as implementation evidence"
+        );
+        assert!(
+            calls[3].contains("Source files read: src/lib.rs"),
+            "the subsequent context must identify the successfully read file"
+        );
+        assert!(
+            calls[3]
+                .contains("one evidence-supported improvement, its observed file(s), the number of the specific successful observation supporting it")
+        );
+        let WorkOutcome::Completed { summary } = &w.report.outcome else {
+            panic!("expected an accepted inspection answer");
+        };
+        assert!(summary.contains("src/lib.rs"));
+        assert!(observed_files(&w.report.observations).contains("src/lib.rs"));
+        assert_eq!(script.replies.lock().unwrap().len(), 0);
+        let _ = fx.base;
     }
 
     #[tokio::test(flavor = "multi_thread")]
