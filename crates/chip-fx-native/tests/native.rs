@@ -16,7 +16,7 @@ use chip_core::{
     NoLocalPolicy, WorkGoal, WorkId, WorkOutcome, WorkSpec,
 };
 use chip_fx::{CancelSignal, OptionsPolicy};
-use chip_fx_native::{NativeModelProvider, NativeSettings};
+use chip_fx_native::{NativeModelProvider, NativeSettings, ProviderKind};
 use chip_inference::{Delivery, FxError, Message, MessageRole, ModelProvider, ModelRequest};
 use mock::{Reply, Server, reply};
 
@@ -24,10 +24,13 @@ const KEY: &str = "sk-chip-native-0123456789abcdef";
 
 fn settings(server: &Server, options: OptionsPolicy) -> NativeSettings {
     NativeSettings {
+        kind: ProviderKind::OpenAiCompatible,
         base_url: server.base_url.clone(),
-        api_key: KEY.to_owned(),
+        api_key: Some(KEY.to_owned()),
+        headers: vec![],
         options,
         budget: None,
+        default_max_tokens: None,
         id_seed: *b"chip-nat",
     }
 }
@@ -167,10 +170,13 @@ async fn cancelling_mid_stream_stops_the_attempt_and_keeps_the_partial_output() 
 #[test]
 fn settings_the_provider_refuses_are_configuration_errors_and_never_print_the_key() {
     let mut s = NativeSettings {
+        kind: ProviderKind::OpenAiCompatible,
         base_url: "http://api.example.test/v1".into(),
-        api_key: KEY.into(),
+        api_key: Some(KEY.into()),
+        headers: vec![],
         options: OptionsPolicy::DropUnsupported,
         budget: None,
+        default_max_tokens: None,
         id_seed: [0; 8],
     };
     assert!(matches!(

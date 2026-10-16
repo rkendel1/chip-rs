@@ -1050,7 +1050,7 @@ dependencies = [
 [[package]]
 name = "fx-core"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
+source = "git+https://github.com/rkendel1/fx?rev=69734271581440306dca4a0b33acbb0bb1f8118a#69734271581440306dca4a0b33acbb0bb1f8118a"
 dependencies = [
  "serde",
  "serde_json",
@@ -1059,7 +1059,7 @@ dependencies = [
 [[package]]
 name = "fx-native-provider"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
+source = "git+https://github.com/rkendel1/fx?rev=69734271581440306dca4a0b33acbb0bb1f8118a#69734271581440306dca4a0b33acbb0bb1f8118a"
 dependencies = [
  "fx-core",
  "fx-single-attempt",
@@ -1070,7 +1070,7 @@ dependencies = [
 [[package]]
 name = "fx-single-attempt"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
+source = "git+https://github.com/rkendel1/fx?rev=69734271581440306dca4a0b33acbb0bb1f8118a#69734271581440306dca4a0b33acbb0bb1f8118a"
 dependencies = [
  "fx-core",
 ]
@@ -1078,7 +1078,7 @@ dependencies = [
 [[package]]
 name = "fx-wasm-abi"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
+source = "git+https://github.com/rkendel1/fx?rev=69734271581440306dca4a0b33acbb0bb1f8118a#69734271581440306dca4a0b33acbb0bb1f8118a"
 
 [[package]]
 name = "gemm"

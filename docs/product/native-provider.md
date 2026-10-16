@@ -16,20 +16,48 @@ attempt and at most one HTTP request: no retry, no fallback, no model routing.
 ## Using it
 
 ```rust
-let provider = NativeModelProvider::new(NativeSettings {
-    base_url: "https://api.openai.com/v1".into(),
-    api_key,                      // supplied by the host; this crate reads no environment or file
-    options: OptionsPolicy::DropUnsupported,
-    budget: Some(Duration::from_secs(120)),
-    id_seed: *b"chip-cli",
-})?;
+// The user chose the provider, endpoint and model explicitly. Nothing here selects or falls back.
+let selection = NativeSelection::new(ProviderKind::Anthropic);        // ANTHROPIC_API_KEY
+let settings = NativeSettings::resolve(
+    &selection,
+    &EnvCredentials::process(),         // Chip's host layer reads the environment, once
+    OptionsPolicy::DropUnsupported,
+    *b"chip-cli",
+)?;                                      // missing key: a Configuration error, no request made
+let provider = NativeModelProvider::new(settings)?;
 let agent = Agent::new(Arc::new(provider)) /* ... */;
 ```
 
-Settings the native provider refuses (cleartext remote host, credentials in the URL, an empty key) are a
-`FxError::Configuration` and no connection is made. The key prints as redacted and is removed from provider
-messages. The blocking network call runs on Tokio's blocking pool, so the async work loop is not stalled; the
-embedder needs a Tokio runtime.
+## Credentials: Chip acquires, FX consumes
+
+```
+CredentialSource  ->  resolved credential  ->  NativeSettings (FX provider configuration)
+```
+
+Chip's host layer (`credentials.rs` in this crate) is the only place that reads the environment; a test enforces it.
+The native FX provider receives the one resolved key, or none, through its configuration and never inspects the
+environment or a credential file.
+
+| Provider | Variable | Notes |
+| --- | --- | --- |
+| Anthropic | `ANTHROPIC_API_KEY` | always required |
+| OpenAI-compatible | `OPENAI_API_KEY` | required unless the endpoint is a plain-`http` loopback address |
+| OpenRouter | a variable the user names (`key_env`, for example `OPENROUTER_API_KEY`) | uses the OpenAI-compatible provider; attribution headers via `headers` |
+| LM Studio | none | `http://localhost:1235/v1`: no key needed, and one is used if the variable is set |
+
+Rules: a named variable that is unset is an error, never a silent fall back to another variable (an
+`OPENAI_API_KEY` is not sent to OpenRouter because `OPENROUTER_API_KEY` is missing); blank values count as unset and
+values are trimmed; a variable name must look like one; the error names the variable to set and says no request was
+made. The key prints as `[redacted]` in `Debug`, is removed from provider messages, and is never part of an FX
+request, so it cannot reach a session log. Headers the adapter owns (authorization, `x-api-key`, content type,
+host, `anthropic-version`) are rejected when the provider is built.
+
+An interactive prompt or the Easy-LLM vault can implement `CredentialSource` later without touching provider
+execution. Neither exists today, deliberately: the vault would couple Rust Chip to its file format, encryption and
+master-password lifecycle. The Node-backed path keeps using the vault and Easy-LLM's router unchanged.
+
+The blocking network call runs on Tokio's blocking pool, so the async work loop is not stalled; the embedder needs a
+Tokio runtime.
 
 ## What is not covered, and why `chip-legacy-http` stays
 
@@ -38,12 +66,13 @@ The native path carries OpenAI-compatible text conversations only. The legacy ex
 
 | Capability | `chip-legacy-http` | `chip-fx-native` |
 | --- | --- | --- |
-| OpenAI-compatible chat | yes | yes (streaming) |
-| Anthropic, Ollama native formats, other adapters | yes | no (Ollama's `/v1` endpoint works) |
+| OpenAI-compatible chat (OpenAI, OpenRouter, LM Studio) | yes | yes (streaming) |
+| Anthropic | yes | yes (streaming) |
+| Ollama native format, other adapters | yes | no (Ollama's `/v1` endpoint works) |
 | `max_tokens`, `temperature` | sent | refused, or dropped under `OptionsPolicy::DropUnsupported` |
 | JSON object output (`json_object_output`) | sent | not carried (FX structured output is unsupported by the port) |
 | `enable_thinking` and other server fields | sent | no |
-| Anthropic workspace header | yes | no |
+| Anthropic workspace header | yes | yes, as an extra header |
 | Proxies, custom CA certificates | per `reqwest` | no (bundled public roots, no proxy) |
 | Retry or fallback | none | none |
 | Delivery certainty on errors | text | structured (`definitely_unsent`, `possibly_sent`, `confirmed_response`) |
@@ -55,7 +84,7 @@ growing.
 
 ## Evidence
 
-`crates/chip-fx-native/tests/native.rs` (9 cases) runs the real Chip work loop, the real FX executor and the
+`crates/chip-fx-native/tests/native.rs` (9 cases) and `tests/credentials.rs` (13 cases, with a fake environment and no real keys: resolution, missing keys, LM Studio without authentication, OpenRouter headers and key, redaction, rejected headers) runs the real Chip work loop, the real FX executor and the
 native provider against a loopback mock server: completion, HTTP error with status and `Retry-After`, no retry,
 credential redaction, option refusal before any connection, budget timeout, mid-stream cancel with partial
 output, a failed attempt ending the work with one provider call, and refused settings. The provider's own
