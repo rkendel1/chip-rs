@@ -41,7 +41,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check workspace
-        run: cargo check --workspace
+        run: cargo check --workspace --all-targets
 
       - name: Check chip-core for Wasm
         run: cargo check -p chip-core --target wasm32-unknown-unknown
