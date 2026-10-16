@@ -33,8 +33,10 @@ use super::{Noop, Opts, Report};
 /// The fixed goal. It names no project, path or secret; its id goes in the report, not its text.
 const PROMPT_ID: &str = "fxlive-prompt-v1";
 const GOAL: &str = "Reply with the completion decision now. Do not request any capability.";
-/// Output bound for every request.
-const MAX_TOKENS: u32 = 128;
+/// Output bound for every request. Large enough for a model that reasons before it answers: a
+/// 1,186-token completion was measured for this prompt, almost all of it reasoning, and a lower bound
+/// cut the reply off before the decision. The bound is recorded in the report, so a change is visible.
+const MAX_TOKENS: u32 = 4096;
 const TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_ITERATIONS: usize = 3;
 pub const MAX_ITERATIONS: usize = 50;
@@ -224,7 +226,11 @@ pub async fn fxlive(report: &mut Report, cfg: &LiveConfig) {
         let caps = Arc::new(Noop {
             executed: Default::default(),
         });
+        // The agent builds each request with its own output bound and ignores
+        // `ProviderConfig.max_tokens`, so the bound is set here as well; otherwise the report would
+        // record one value and the request carry another (the agent's small default).
         let agent = Agent::with_model(timed.clone(), cfg.model.clone())
+            .with_max_output_tokens(MAX_TOKENS)
             .with_capabilities(caps.clone())
             .with_executor(caps)
             .with_observer(Arc::new(ExecutionObserver));

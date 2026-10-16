@@ -412,7 +412,10 @@ message before any request is made.
   `max_executions: 0`, so at most one request per iteration whatever the model answers. No warm-up and
   no retry; a failed iteration is recorded in `errors` and the next still runs.
 * **Fixed prompt, bounded output:** the goal is one fixed sentence (recorded as `prompt_id`, not as
-  text), `max_tokens` 128, temperature 0, a 120 s timeout.
+  text), `max_tokens` 4096 (sent on the request, and recorded in the report's `config`; room for a model that
+  reasons before it answers, with output still bounded), temperature 0, a 120 s timeout. Until this was fixed the
+  runner recorded 128 while the agent actually sent its own small default (256), so earlier `fxlive` reports,
+  if any exist, recorded a bound that was not the one sent.
 * **Recorded:** `inference_total` (the model call, network included), `turn_total`, `chip_overhead`
   (turn minus model minus execution), token counts as the endpoint reported them (`null` on failure;
   the response type cannot distinguish "0" from "not supplied"), model id, endpoint scheme/host/port and type
