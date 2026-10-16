@@ -270,9 +270,59 @@ fn pax_said(report: &WorkReport) -> PaxExecutionResult {
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\nif [ \"$1\" = \"{FIXTURE_PROBE}\" ]; then exit 0; fi\n{body}\n"),
+    )
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_until_executable(&path);
     path
+}
+
+/// The argument every script fixture answers with an immediate success, so that
+/// [`wait_until_executable`] can try the file without running any fixture logic.
+#[cfg(unix)]
+const FIXTURE_PROBE: &str = "--chip-fixture-probe";
+
+/// Returns once the freshly written executable can be executed.
+///
+/// Linux refuses to execute a file while any process holds it open for writing (`ETXTBSY`).
+/// Rust opens files close-on-exec, but a descriptor is still inherited by a child between `fork`
+/// and `exec`. Tests run in one process, so another test's spawn can briefly carry this
+/// fixture's write descriptor even though this thread has already closed it, and an execution
+/// of the fixture in that window fails to start. The condition ends when that child reaches
+/// `exec`; descriptors cannot be inherited after the writer closed, so once one execution
+/// succeeds the file stays executable. This waits for exactly that condition, bounded, and
+/// treats any other error as a real failure. The code under test is never retried.
+#[cfg(unix)]
+fn wait_until_executable(path: &Path) {
+    use std::io::ErrorKind;
+    use std::process::{Command, Stdio};
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match Command::new(path)
+            .arg(FIXTURE_PROBE)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Ok(status) => {
+                assert!(status.success(), "{}: {status}", path.display());
+                return;
+            }
+            Err(e) if e.kind() == ErrorKind::ExecutableFileBusy => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{} stayed busy for ten seconds",
+                    path.display()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(e) => panic!("{} cannot be executed: {e}", path.display()),
+        }
+    }
 }
 
 /// A stand-in at the process boundary: answers `--version` as `pax <version>`; any other call is
@@ -700,6 +750,88 @@ async fn a_later_pax_is_accepted_and_its_result_consumed() {
         clean(&report, &spec);
         assert!(completed(&report), "{later}: {:?}", report.outcome);
         assert_eq!(s.calls().len(), 1, "{later}");
+    }
+}
+
+// ---- fixture determinism ---------------------------------------------------------------------------
+
+/// A file held open for writing cannot be executed; this is the condition that made executing a
+/// freshly written fixture fail intermittently when another test's `fork` carried its descriptor.
+#[cfg(unix)]
+#[test]
+fn a_file_held_open_for_writing_cannot_be_executed() {
+    use std::io::ErrorKind;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = unique("etxtbsy-busy");
+    let path = dir.join("held");
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let writer = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    let err = std::process::Command::new(&path).status().unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::ExecutableFileBusy, "{err}");
+    drop(writer);
+    // Closing is not enough on its own: a child forked while the descriptor was open may still
+    // carry it for an instant, which is what `wait_until_executable` waits out.
+    wait_until_executable(&path);
+}
+
+/// The fixture helper waits out a writer that is still open, then returns an executable that
+/// works, instead of handing the test a path whose first execution fails.
+#[cfg(unix)]
+#[test]
+fn a_fixture_is_executable_when_the_helper_returns_even_while_a_writer_holds_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = unique("etxtbsy-wait");
+    let path = dir.join("pax");
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\nif [ \"$1\" = \"{FIXTURE_PROBE}\" ]; then exit 0; fi\nexit 7\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let writer = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    let closer = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        drop(writer);
+    });
+    let started = std::time::Instant::now();
+    wait_until_executable(&path);
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(100),
+        "returned while the file was still held open"
+    );
+    closer.join().unwrap();
+    assert_eq!(
+        std::process::Command::new(&path).status().unwrap().code(),
+        Some(7)
+    );
+}
+
+/// Many threads writing and executing fixtures at once, as the tests in this binary do. Every
+/// one must start; before the helper this failed in a fraction of attempts on a loaded machine.
+#[cfg(unix)]
+#[test]
+fn concurrently_written_fixtures_all_start() {
+    let handles: Vec<_> = (0..8)
+        .map(|t| {
+            std::thread::spawn(move || {
+                for i in 0..40 {
+                    let dir = unique(&format!("etxtbsy-many-{t}-{i}"));
+                    let path = script(&dir, "pax", "exit 3");
+                    let code = std::process::Command::new(&path).status().unwrap().code();
+                    assert_eq!(code, Some(3));
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
     }
 }
 
