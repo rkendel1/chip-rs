@@ -21,7 +21,7 @@ let selection = NativeSelection::new(ProviderKind::Anthropic);        // ANTHROP
 let settings = NativeSettings::resolve(
     &selection,
     &EnvCredentials::process(),         // Chip's host layer reads the environment, once
-    OptionsPolicy::DropUnsupported,
+    OptionsPolicy::Carry,               // send the token cap and temperature; FX refuses what a port cannot carry
     *b"chip-cli",
 )?;                                      // missing key: a Configuration error, no request made
 let provider = NativeModelProvider::new(settings)?;
@@ -59,28 +59,61 @@ master-password lifecycle. The Node-backed path keeps using the vault and Easy-L
 The blocking network call runs on Tokio's blocking pool, so the async work loop is not stalled; the embedder needs a
 Tokio runtime.
 
-## What is not covered, and why `chip-legacy-http` stays
+## Selecting the executor in `chip`
 
-The native path carries OpenAI-compatible text conversations only. The legacy executor does more, so the native
-`chip` binary has **not** been moved off `chip-legacy-http`:
+`chip` can run a model on either executor. The choice is explicit and never a fallback:
 
-| Capability | `chip-legacy-http` | `chip-fx-native` |
+```
+chip work "<goal>" --provider anthropic --model <model> --executor fx
+CHIP_EXECUTOR=fx chip "<prompt>"
+```
+
+`--executor legacy|fx`, else `CHIP_EXECUTOR`, else `legacy`. The default stays `legacy` until the gaps below are
+closed and a live check is recorded. With `fx`, the same `CHIP_PROVIDER`, `CHIP_MODEL` and `CHIP_ENDPOINT` select the
+provider; the endpoint must be the URL the legacy adapters post to (`.../v1/chat/completions` for OpenAI-compatible
+servers, `.../v1/messages` for Anthropic), from which the API root is derived. Keys come from `CHIP_API_KEY` if it
+is set, otherwise from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (see Credentials above). Anything the native path
+cannot carry is a configuration error that names it, before any request: the `ollama` provider's own API (its
+OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING`, and an endpoint that does not end in the expected
+path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor; the other consumers
+of `chip-legacy-http` (listed in `legacy-http-consumers.txt`) have not moved.
+
+## Parity with `chip-legacy-http`
+
+`crates/chip-cli/tests/executor_parity.rs` runs the same configuration and request through both executors against
+one loopback server that answers each in the format it asks for. It fails if the FX path drops the sampling options
+(checked by mutation). Compared and found **identical**:
+
+* the response text and token usage, for OpenAI-compatible and Anthropic;
+* the wire fields `model`, `messages` (including consecutive system messages merged into one), `max_tokens` and
+  `temperature` (a configured `0.0` is sent, not dropped), and Anthropic's top-level `system`;
+* authentication (`Bearer` key, `x-api-key`, `anthropic-version`) and the Anthropic workspace header;
+* the Anthropic fallback cap when nothing sets one (1024), and that Anthropic ignores the JSON-object flag;
+* failures for 401, 403, 429, 500 and 503: same coarse class, exactly one request (no retry), and the key never in
+  the error.
+
+Differences that are deliberate or known:
+
+| Area | Legacy | FX path |
 | --- | --- | --- |
-| OpenAI-compatible chat (OpenAI, OpenRouter, LM Studio) | yes | yes (streaming) |
-| Anthropic | yes | yes (streaming) |
-| Ollama native format, other adapters | yes | no (Ollama's `/v1` endpoint works) |
-| `max_tokens`, `temperature` | sent | refused, or dropped under `OptionsPolicy::DropUnsupported` |
-| JSON object output (`json_object_output`) | sent | not carried (FX structured output is unsupported by the port) |
-| `enable_thinking` and other server fields | sent | no |
-| Anthropic workspace header | yes | yes, as an extra header |
-| Proxies, custom CA certificates | per `reqwest` | no (bundled public roots, no proxy) |
-| Retry or fallback | none | none |
-| Delivery certainty on errors | text | structured (`definitely_unsent`, `possibly_sent`, `confirmed_response`) |
+| JSON-object output | `response_format: {"type":"json_object"}` | `response_format: json_schema` with `{"type":"object"}` (what the FX contract expresses; accepted by OpenAI and LM Studio, not verified on OpenRouter models) |
+| Transport | one non-streaming call | one streaming call; a stream cut mid-way is a failure with the partial text, never a completion |
+| Failure detail | message text | structured: kind, status, retry-after, partial output and delivery certainty (`definitely_unsent`, `possibly_sent`, `confirmed_response`) |
+| Endpoint | any URL, posted as given | must end in the provider path; plain `http` only for loopback or without a key |
+| Provider APIs | OpenAI-compatible, Anthropic, Ollama native | OpenAI-compatible and Anthropic |
+| `CHIP_ENABLE_THINKING` | sent | refused |
+| Proxies, custom CA certificates | per `reqwest` | not supported (bundled public roots, no proxy) |
 
-Retiring `chip-legacy-http` needs at least: the structured-output and sampling options in FX and the native port,
-the providers Chip is actually used with, a live-provider check, and moving each of the 14 consumers in
-`legacy-http-consumers.txt`. Until then the ratchet in `crates/chip-fx/tests/retirement.rs` keeps that list from
-growing.
+## What still blocks making `fx` the default and retiring `chip-legacy-http`
+
+* **A live check** against Anthropic, LM Studio and OpenRouter. Everything above is mocked transport; TLS has no test.
+* The **JSON-object mode** difference on real servers (above).
+* LM Studio on a **non-loopback `http`** address (a LAN host) is refused by the native path.
+* **Ollama's native API** and `CHIP_ENABLE_THINKING`.
+* The remaining consumers of the legacy executor: `work_demo`, `horizon`, `verify`, `pax_work`, `micro`,
+  `live_benchmark`, the `--benchmark-live-reasoner` command, and `chip-cli`'s own benches and tests.
+* `chip work` and `chip serve` need a real PAX binary, so their end-to-end run through `fx` was not exercised in the
+  environment this was built in.
 
 ## Evidence
 

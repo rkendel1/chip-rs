@@ -23,6 +23,10 @@ pub enum OptionsPolicy {
     /// own defaults apply. This is a documented difference from the legacy HTTP provider,
     /// which sent the values (see `docs/product/authoritative-fx.md`, D2).
     DropUnsupported,
+    /// Send both to FX: `max_tokens` as the output cap and `temperature` as thousandths. A port
+    /// that cannot carry them refuses the request before any provider call. A temperature
+    /// outside 0.0 to 2.0, or not a number, is an invalid request.
+    Carry,
 }
 
 /// Deterministic request ids: an 8-byte seed the host chooses, then a counter. Chip has no
@@ -90,6 +94,11 @@ pub fn to_fx_request(
         },
         budget: budget.map(AttemptBudget),
     };
+    if policy == OptionsPolicy::Carry {
+        fx_request.options.max_output_tokens = request.max_tokens;
+        fx_request.options.temperature_milli =
+            request.temperature.map(temperature_milli).transpose()?;
+    }
     if policy == OptionsPolicy::Refuse {
         if request.temperature.is_some() {
             return Err(FxError::InvalidRequest(
@@ -99,6 +108,19 @@ pub fn to_fx_request(
         fx_request.options.max_output_tokens = request.max_tokens;
     }
     Ok(fx_request)
+}
+
+/// A temperature in thousandths. Exact for the values Chip uses (`0.0` and `0.7` become 0 and 700).
+fn temperature_milli(temperature: f32) -> Result<u16, FxError> {
+    let milli = (f64::from(temperature) * 1000.0).round();
+    if !milli.is_finite()
+        || !(0.0..=f64::from(fx_core::GenerationOptions::MAX_TEMPERATURE_MILLI)).contains(&milli)
+    {
+        return Err(FxError::InvalidRequest(format!(
+            "temperature {temperature} is outside 0.0 to 2.0"
+        )));
+    }
+    Ok(milli as u16)
 }
 
 /// The stable label of an FX failure kind. Exhaustive on purpose: a new FX kind is a

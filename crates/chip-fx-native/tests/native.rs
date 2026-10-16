@@ -31,6 +31,7 @@ fn settings(server: &Server, options: OptionsPolicy) -> NativeSettings {
         options,
         budget: None,
         default_max_tokens: None,
+        json_object_output: false,
         id_seed: *b"chip-nat",
     }
 }
@@ -177,6 +178,7 @@ fn settings_the_provider_refuses_are_configuration_errors_and_never_print_the_ke
         options: OptionsPolicy::DropUnsupported,
         budget: None,
         default_max_tokens: None,
+        json_object_output: false,
         id_seed: [0; 8],
     };
     assert!(matches!(

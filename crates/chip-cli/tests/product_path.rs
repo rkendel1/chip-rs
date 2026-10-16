@@ -17,6 +17,9 @@ const PRODUCT_CRATES: &[&str] = &[
     "chip_remote_env",
     "chip_inference",
     "chip_legacy_http",
+    // The authoritative FX executor with a native provider: the other model executor.
+    "chip_fx",
+    "chip_fx_native",
 ];
 
 /// Types the product path must never name: reasoners, whether test doubles or experiments.

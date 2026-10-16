@@ -266,3 +266,40 @@ fn a_report_that_is_not_exactly_the_documented_shape_is_refused() {
         );
     }
 }
+
+#[test]
+fn carry_policy_sends_the_token_cap_and_the_temperature_in_thousandths() {
+    for (temperature, milli) in [
+        (0.0f32, 0u16),
+        (0.7, 700),
+        (1.0, 1000),
+        (2.0, 2000),
+        (0.0004, 0),
+    ] {
+        let mut r = request();
+        r.max_tokens = Some(256);
+        r.temperature = Some(temperature);
+        let fx = to_fx_request(&r, RequestId([9; 16]), OptionsPolicy::Carry, None).unwrap();
+        assert_eq!(fx.options.max_output_tokens, Some(256));
+        assert_eq!(fx.options.temperature_milli, Some(milli), "{temperature}");
+        fx_core::validate_request(&fx, &Limits::default()).expect("a carried request validates");
+    }
+    let mut r = request();
+    r.max_tokens = None;
+    r.temperature = None;
+    let fx = to_fx_request(&r, RequestId([9; 16]), OptionsPolicy::Carry, None).unwrap();
+    assert_eq!(
+        (fx.options.max_output_tokens, fx.options.temperature_milli),
+        (None, None)
+    );
+}
+
+#[test]
+fn carry_policy_rejects_a_temperature_outside_the_range_or_not_a_number() {
+    for bad in [-0.1f32, 2.1, f32::NAN, f32::INFINITY] {
+        let mut r = request();
+        r.temperature = Some(bad);
+        let error = to_fx_request(&r, RequestId([9; 16]), OptionsPolicy::Carry, None).unwrap_err();
+        assert!(matches!(error, FxError::InvalidRequest(_)), "{bad}");
+    }
+}

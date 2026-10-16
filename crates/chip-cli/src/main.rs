@@ -527,8 +527,12 @@ async fn run_configured(prompt: String) -> Result<(), String> {
     let config = config_from_env(|name| std::env::var(name).ok()).map_err(|e| e.to_string())?;
     let provider_name = config.provider.clone();
     let model = config.model.to_string();
-    let provider = HttpProvider::new(config).map_err(|e| e.to_string())?;
-    let agent = Agent::with_model(Arc::new(provider), model);
+    let env = |name: &str| std::env::var(name).ok();
+    let executor = chip_cli::provider_selection::ExecutorKind::choose(None, &env)
+        .map_err(|e| e.to_string())?;
+    let provider = chip_cli::provider_selection::build_model(config, executor, &env)
+        .map_err(|e| e.to_string())?;
+    let agent = Agent::with_model(provider, model);
     let result = agent
         .turn(Turn::new(prompt))
         .await
