@@ -58,6 +58,7 @@ fn base(args: &[&str], dir: &Path) -> Command {
 
 fn mock(url: &str, mut c: Command) -> Command {
     c.env("CHIP_PROVIDER", "openai-compatible")
+        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "mock-model")
         .env("CHIP_ENDPOINT", url)
         .env("CHIP_API_KEY", "sk-work-secret-never-printed");
@@ -416,6 +417,7 @@ async fn the_command_line_selection_is_the_only_model_called() {
             &d,
         )
         .env("CHIP_PROVIDER", "anthropic")
+        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "env-model")
         .env("CHIP_ENDPOINT", &decoy_url)
         .env("CHIP_API_KEY", "sk-select-secret-never-printed")
@@ -522,6 +524,7 @@ async fn an_unavailable_provider_fails_explicitly_with_no_fallback() {
             &d,
         )
         .env("CHIP_PROVIDER", "openai-compatible")
+        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "fallback-model")
         .env("CHIP_ENDPOINT", &url)
         .env("CHIP_OLLAMA_ENDPOINT", &url)

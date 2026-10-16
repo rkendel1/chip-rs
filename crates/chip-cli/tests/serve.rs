@@ -63,6 +63,7 @@ fn command(dir: &PathBuf, model_url: &str, shim: &PathBuf) -> Command {
     c.arg("serve")
         .current_dir(dir)
         .env("CHIP_PROVIDER", "openai-compatible")
+        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "mock-model")
         .env("CHIP_ENDPOINT", model_url)
         .env("CHIP_API_KEY", "sk-serve-secret-never-printed")
@@ -337,6 +338,7 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
             .current_dir(&d)
             .env_remove("PAX_BIN")
             .env("CHIP_PROVIDER", "openai-compatible")
+            .env("CHIP_EXECUTOR", "legacy")
             .env("CHIP_MODEL", "mock-model")
             .env("CHIP_ENDPOINT", &url)
             .env("CHIP_API_KEY", "sk-serve-secret-never-printed");

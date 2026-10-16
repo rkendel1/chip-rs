@@ -1295,7 +1295,7 @@ fn usage() -> i32 {
         "       provider/model/endpoint: command line, then CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, then the provider's default endpoint; a model is always required"
     );
     eprintln!(
-        "       --executor legacy|fx (or CHIP_EXECUTOR; default legacy): fx uses the authoritative FX executor with a native provider, with keys from ANTHROPIC_API_KEY, OPENAI_API_KEY or CHIP_API_KEY"
+        "       --executor legacy|fx (or CHIP_EXECUTOR; default fx): fx uses the authoritative FX executor with a native provider, with keys from ANTHROPIC_API_KEY, OPENAI_API_KEY or CHIP_API_KEY; legacy is the original HTTP adapters (needed for Ollama's own API)"
     );
     eprintln!(
         "       --context-budget-bytes N (or CHIP_CONTEXT_BUDGET_BYTES): the most bytes of message content one model request may carry; a request over it is not sent"
@@ -1683,7 +1683,7 @@ pub async fn work(args: &[String]) -> i32 {
     if calls.contains(&false) {
         let why = outcome_reason(&result.report.outcome).unwrap_or_default();
         eprintln!(
-            "error: the selected model did not answer ({} {} at {}): {why}. No other provider or model was tried.\n       executor: --executor, then CHIP_EXECUTOR, else legacy; `fx` uses the authoritative FX executor with a native provider (keys from ANTHROPIC_API_KEY / OPENAI_API_KEY or CHIP_API_KEY)",
+            "error: the selected model did not answer ({} {} at {}): {why}. No other provider or model was tried.\n       executor: --executor, then CHIP_EXECUTOR, else fx; `fx` uses the authoritative FX executor with a native provider (keys from ANTHROPIC_API_KEY / OPENAI_API_KEY or CHIP_API_KEY)",
             identity.provider, identity.model, identity.endpoint
         );
         if calls.first() == Some(&false) && result.utility.executions == 0 {

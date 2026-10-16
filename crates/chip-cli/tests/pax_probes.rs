@@ -207,6 +207,7 @@ async fn chip_work_args(
         .env_remove("PAX_BIN")
         .env("PATH", path)
         .env("CHIP_PROVIDER", "openai-compatible")
+        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "probe")
         .env("CHIP_ENDPOINT", url)
         .stdin(Stdio::null());

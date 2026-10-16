@@ -40,7 +40,7 @@ use fx_native_provider::{
 mod credentials;
 mod port;
 
-pub use credentials::{CredentialSource, EnvCredentials, NativeSelection};
+pub use credentials::{CredentialSource, EnvCredentials, LAN_HTTP_VARIABLE, NativeSelection};
 use port::NativePort;
 
 /// Which wire format the explicitly selected provider speaks.
@@ -82,6 +82,9 @@ pub struct NativeSettings {
     /// value. Anthropic has no equivalent, so setting it there is a configuration error rather
     /// than a silently dropped request.
     pub template_thinking: Option<bool>,
+    /// Allow plain `http` to a private-LAN IP address for a keyless OpenAI-compatible server.
+    /// Honored only with no credential and no extra headers; see [`LAN_HTTP_VARIABLE`].
+    pub allow_insecure_lan_http: bool,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -131,8 +134,18 @@ impl NativeModelProvider {
         let key = settings.api_key.map(Secret::new);
         let port = match settings.kind {
             ProviderKind::OpenAiCompatible => {
+                let lan_http = settings.allow_insecure_lan_http
+                    && credentials::is_plain_http_off_loopback(&settings.base_url);
+                if lan_http && key.is_some() {
+                    return Err(FxError::Configuration(
+                        "a credential is never sent over plain http to a non-loopback host".into(),
+                    ));
+                }
                 let mut config = match key {
                     Some(key) => OpenAiConfig::new(&settings.base_url, key),
+                    None if lan_http => {
+                        OpenAiConfig::without_key_on_private_lan(&settings.base_url)
+                    }
                     None => OpenAiConfig::without_key(&settings.base_url),
                 }
                 .map_err(bad)?;

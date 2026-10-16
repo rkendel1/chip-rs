@@ -68,14 +68,15 @@ chip work "<goal>" --provider anthropic --model <model> --executor fx
 CHIP_EXECUTOR=fx chip "<prompt>"
 ```
 
-`--executor legacy|fx`, else `CHIP_EXECUTOR`, else `legacy`. The default stays `legacy` until the gaps below are
-closed and a live check is recorded. With `fx`, the same `CHIP_PROVIDER`, `CHIP_MODEL` and `CHIP_ENDPOINT` select the
+`--executor legacy|fx`, else `CHIP_EXECUTOR`, else **`fx`**. `legacy` is never chosen implicitly and nothing falls back
+to it: it is an explicit escape hatch, and the only path that serves Ollama's own API (`CHIP_PROVIDER=ollama`, or use
+Ollama's OpenAI-compatible `/v1` endpoint with `fx`). With `fx`, the same `CHIP_PROVIDER`, `CHIP_MODEL` and `CHIP_ENDPOINT` select the
 provider; the endpoint must be the URL the legacy adapters post to (`.../v1/chat/completions` for OpenAI-compatible
 servers, `.../v1/messages` for Anthropic), from which the API root is derived. Keys come from `CHIP_API_KEY` if it
 is set, otherwise from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (see Credentials above). Anything the native path
 cannot carry is a configuration error that names it, before any request: the `ollama` provider's own API (its
 OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING` on the Anthropic provider (which has no such field; the legacy adapter ignored it there), and an endpoint that does not end in the expected
-path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor; the other consumers
+path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor (the default is `fx`); the other consumers
 of `chip-legacy-http` (listed in `legacy-http-consumers.txt`) have not moved.
 
 ## Parity with `chip-legacy-http`
@@ -102,13 +103,15 @@ Differences that are deliberate or known:
 | Endpoint | any URL, posted as given | must end in the provider path; plain `http` only for loopback or without a key |
 | Provider APIs | OpenAI-compatible, Anthropic, Ollama native | OpenAI-compatible and Anthropic |
 | `CHIP_ENABLE_THINKING` | sent as top-level `chat_template_kwargs.enable_thinking` (OpenAI-compatible only; ignored on Anthropic) | the same field on OpenAI-compatible endpoints, both `true` and `false`; refused by name on Anthropic |
+| Plain `http` to a LAN host | any URL | refused unless `CHIP_ALLOW_INSECURE_LAN_HTTP=1` and the host is a private IP literal (RFC 1918 or IPv6 unique-local); keyless OpenAI-compatible only, never with a key from any source, no extra headers, no hostnames, redirects not followed |
 | Proxies, custom CA certificates | per `reqwest` | not supported (bundled public roots, no proxy) |
 
-## What still blocks making `fx` the default and retiring `chip-legacy-http`
+## What remains before `chip-legacy-http` can be retired
 
-* **A live check** against Anthropic, LM Studio and OpenRouter. Everything above is mocked transport; TLS has no test.
+`fx` became the default with these still open (decision recorded in the default-flip PR):
+
+* **Live checks.** Anthropic and LM Studio were run by the owner and reported clean; the raw output and audit have not been added to the repository. **OpenRouter has not been run.** Everything else above is mocked transport; TLS has no test.
 * The **JSON-object mode** difference on real servers (above).
-* LM Studio on a **non-loopback `http`** address (a LAN host) is refused by the native path.
 * **Ollama's native API** (its OpenAI-compatible `/v1` endpoint works).
 * The remaining consumers of the legacy executor: `work_demo`, `horizon`, `verify`, `pax_work`, `micro`,
   `live_benchmark`, the `--benchmark-live-reasoner` command, and `chip-cli`'s own benches and tests.
