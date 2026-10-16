@@ -1,0 +1,18 @@
+# Files that still use chip-legacy-http (the second inference executor).
+# This list may only shrink. crates/chip-fx/tests/retirement.rs fails when a real
+# consumer is missing here (new use) or listed here without using it (stale entry).
+# Blocker for retiring chip-legacy-http: the native chip binary has no Easy-LLM host.
+crates/chip-cli/Cargo.toml
+crates/chip-cli/benches/micro_eval.rs
+crates/chip-cli/src/horizon.rs
+crates/chip-cli/src/lib.rs
+crates/chip-cli/src/live_benchmark.rs
+crates/chip-cli/src/main.rs
+crates/chip-cli/src/micro.rs
+crates/chip-cli/src/pax_work.rs
+crates/chip-cli/src/provider_selection.rs
+crates/chip-cli/src/software_work.rs
+crates/chip-cli/src/verify.rs
+crates/chip-cli/src/work_demo.rs
+crates/chip-cli/tests/coding_agent/main.rs
+crates/chip-cli/tests/http_provider_path.rs

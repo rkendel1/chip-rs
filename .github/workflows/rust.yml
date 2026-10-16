@@ -46,6 +46,26 @@ jobs:
       - name: Check chip-core for Wasm
         run: cargo check -p chip-core --target wasm32-unknown-unknown
 
+      - name: Build Chip's host-driven session for Wasm (no imports allowed)
+        run: |
+          cargo build -p chip-wasm-host --target wasm32-unknown-unknown --release --locked
+          python3 - <<'PY'
+          import sys
+          d = open('target/wasm32-unknown-unknown/release/chip_wasm_host.wasm', 'rb').read()
+          # Import section id is 2; a module with no imports has no such section.
+          i = 8
+          while i < len(d):
+              sec = d[i]; i += 1
+              n = 0; shift = 0
+              while True:
+                  b = d[i]; i += 1
+                  n |= (b & 0x7f) << shift; shift += 7
+                  if b < 0x80: break
+              if sec == 2: sys.exit('chip_wasm_host.wasm requests host imports')
+              i += n
+          print('no imports')
+          PY
+
       - name: Build the Wasm decision module
         run: cargo build -p chip-wasm-decision --target wasm32-unknown-unknown --profile wasm-decision
 

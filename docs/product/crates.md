@@ -139,7 +139,9 @@ member must appear exactly once.
 | `chip-cli` | PRODUCT | KEEP | L3 | - |
 | `chip-project` | PRODUCT | KEEP | L3 | - |
 | `chip-inference` | PRODUCT | KEEP | L2 | L4 |
-| `chip-legacy-http` | INTEGRATION | KEEP | L2 | L3 |
+| `chip-fx` | INTEGRATION | KEEP | L3 | - |
+| `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
+| `chip-legacy-http` | INTEGRATION | KEEP (retirement blocked, see authoritative-fx.md) | L2 | L3 |
 | `chip-pax` | INTEGRATION | KEEP | L3 | - |
 | `chip-remote-env` | INTEGRATION | KEEP | L3 | L4 |
 | `chip-compute` | INTEGRATION | FROZEN | L2 | L4 |
@@ -222,6 +224,16 @@ request/response, `Secret`, `FxError`). 7 tests. Independent of Chip (no depende
 workspace crate). Reported L4 means it was in the path of the live PR36-38 runs.
 
 ### Integration
+
+**`chip-fx`** (INTEGRATION, L3). The only bridge from Chip's model port (`chip-inference`) to the
+authoritative FX (`fx-core` + `fx-single-attempt` from `rkendel1/fx`). It maps a `ModelRequest` to one FX
+attempt and the FX report back to a `ModelResponse` or an `FxError::Inference` that keeps delivery
+certainty, status and retry hint. It never retries, falls back or routes. Architecture and retirement
+tests in `tests/`. Design: `docs/product/authoritative-fx.md`.
+
+**`chip-wasm-host`** (INTEGRATION, L3). Chip's work loop as a `wasm32-unknown-unknown` module with no
+imports, driven by a host over the shared `fx-wasm-abi` JSON session ABI. The host performs provider
+calls (through FX) and tool execution; the module never reaches the network or filesystem.
 
 **`chip-legacy-http`** (INTEGRATION, Rust FX). One HTTP provider with three wire adapters:
 `openai-compatible`, `anthropic`, `ollama`. 41 tests, all against a local mock HTTP server except
