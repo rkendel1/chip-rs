@@ -88,7 +88,7 @@ const HORIZON: &[&str] = &["--test-horizon-live", "--horizon", "1"];
 
 /// The horizon run needs real Compute before it asks a model, which this environment may not have,
 /// so what is checked here is that it builds its provider through the shared selection: an unknown
-/// executor and the fx executor's refusal of Ollama's own API both surface before anything is sent.
+/// executor and the refusal of Ollama's own API both surface before anything is sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_live_horizon_run_builds_its_provider_through_the_shared_selection() {
     let (out, bodies) = go(HORIZON, Some("both")).await;
@@ -110,7 +110,8 @@ async fn the_live_horizon_run_builds_its_provider_through_the_shared_selection()
     })
     .await
     .unwrap();
-    // fx is the default, and it names the one executor that does serve Ollama's own API.
-    assert!(text(&out).contains("--executor legacy"), "{}", text(&out));
+    // Ollama's own API is not supported by any executor; the error names the supported path.
+    assert!(text(&out).contains("no longer supported"), "{}", text(&out));
+    assert!(text(&out).contains("openai-compatible"), "{}", text(&out));
     assert_eq!(server.captured.lock().await.len(), 0);
 }

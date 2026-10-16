@@ -4,7 +4,9 @@
 use chip_inference::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
 use serde::{Deserialize, Serialize};
 
-use crate::{HttpProviderConfig, error_detail, transport_error};
+use chip_inference::ProviderConfig;
+
+use crate::{error_detail, transport_error};
 
 #[derive(Serialize)]
 struct WireRequest<'a> {
@@ -99,7 +101,7 @@ fn role(message: &Message) -> &'static str {
 
 pub(crate) async fn complete(
     client: &reqwest::Client,
-    config: &HttpProviderConfig,
+    config: &ProviderConfig,
     request: ModelRequest,
 ) -> Result<ModelResponse, FxError> {
     if request.messages.is_empty() {

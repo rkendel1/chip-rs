@@ -259,7 +259,7 @@ imports, driven by a host over the shared `fx-wasm-abi` JSON session ABI. The ho
 calls (through FX) and tool execution; the module never reaches the network or filesystem.
 
 **`chip-legacy-http`** (INTEGRATION, Rust FX). One HTTP provider with three wire adapters:
-`openai-compatible`, `anthropic`, `ollama`. 41 tests, all against a local mock HTTP server except
+`openai-compatible`, `anthropic` (the `ollama` adapter was removed; Ollama is reached through its OpenAI-compatible endpoint). 41 tests, all against a local mock HTTP server except
 `live_provider.rs`, which runs only when `FX_PROVIDER_*` variables are set and otherwise returns.
 Provider matrix in section 5.3.
 
@@ -387,7 +387,7 @@ repository. Level L3 (real PAX, real binary over HTTP, mock model).
 | --- | --- | --- | --- |
 | `chip-legacy-http` / `openai-compatible` | supported provider | local mock server (headers, bodies, errors, usage, consecutive-system-message merging added for vLLM-style templates) | opt-in only; `AGENTS.md` reports live PR36-38 runs with one non-Anthropic model (Qwen), serving endpoint not recorded here |
 | `chip-legacy-http` / `anthropic` | supported provider | local mock server | `AGENTS.md` reports live PR36-38 runs with Haiku; not reproduced by CI |
-| `chip-legacy-http` / `ollama` | supported for local use | local mock server | none recorded |
+| `chip-legacy-http` / `ollama` | removed (use Ollama's OpenAI-compatible endpoint) | n/a | n/a |
 | vLLM | no adapter of its own: reached through `openai-compatible`; one commit adapted the wire format for it | mock server only | none recorded in the repository |
 | `chip-local-ml`, `chip-laya-reasoner` local models | experimental, not a chat provider | test doubles / random weights | none recorded |
 | in-memory test providers in `chip-core`, `chip-inference` | development / test | yes | not applicable |

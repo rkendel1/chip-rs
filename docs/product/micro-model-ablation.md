@@ -192,7 +192,7 @@ local-completion target remains a hypothesis to measure, not a result.
 
 ```sh
 # fixture evaluation (real model): blocked, exit 3, without CHIP_MICRO_*; refuses a non-matching candidate
-CHIP_MICRO_PROVIDER=ollama CHIP_MICRO_MODEL=qwen2.5-coder:1.5b-instruct \
+CHIP_MICRO_PROVIDER=openai-compatible CHIP_MICRO_ENDPOINT=http://127.0.0.1:11434/v1/chat/completions CHIP_MICRO_MODEL=qwen2.5-coder:1.5b-instruct \
   CHIP_MICRO_DECLARE_QUANTIZATION=Q4_K_M CHIP_MICRO_DECLARE_RUNTIME="ollama 0.x" \
   cargo bench -p chip-cli --bench micro_eval -- --candidate qwen2.5-coder-1.5b-instruct
 cargo bench -p chip-cli --bench micro_eval -- --replay target/micro-eval/record-<time>.json

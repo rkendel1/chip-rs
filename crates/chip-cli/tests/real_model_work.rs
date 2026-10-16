@@ -990,135 +990,36 @@ async fn choosing_the_wrong_capability_again_never_completes_and_stays_bounded()
     }
 }
 
-// ---- PR34: the same loop, powered by an Ollama server instead --------------------------------
+// ---- Ollama's own API is no longer supported; its OpenAI-compatible endpoint is ----------------
 
-fn ollama_reply(content: &str, usage: Option<(u32, u32)>) -> String {
-    let mut body = serde_json::json!({
-        "model": "mock-ollama-model",
-        "created_at": "2025-10-07T10:11:12.123456Z",
-        "message": {"role": "assistant", "content": content},
-        "done": true,
-    });
-    if let Some((p, c)) = usage {
-        body["prompt_eval_count"] = p.into();
-        body["eval_count"] = c.into();
-    }
-    body.to_string()
-}
-
-fn run_ollama(base_url: &str, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_chip"))
-        .arg("--test-real-model-work")
-        .args(extra)
-        .env("CHIP_PROVIDER", "ollama")
-        .env("CHIP_EXECUTOR", "legacy") // Ollama's own API is served only by the legacy executor
-        .env("CHIP_MODEL", "mock-ollama-model")
-        .env("CHIP_OLLAMA_ENDPOINT", base_url)
-        .env_remove("CHIP_ENDPOINT")
-        .env_remove("CHIP_API_KEY")
-        .output()
-        .unwrap()
-}
-
-async fn run_ollama_async(url: String, extra: &'static [&'static str]) -> Output {
-    let base = url.split("/v1/").next().unwrap().to_string();
-    tokio::task::spawn_blocking(move || run_ollama(&base, extra))
-        .await
-        .unwrap()
-}
-
+/// `CHIP_PROVIDER=ollama` (the /api/chat protocol) is refused before any request, with the supported
+/// replacement named. Nothing is sent and nothing falls back to another provider.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_ollama_decision_drives_the_same_loop_and_changes_nothing_else() {
-    let server = common::start(200, &ollama_reply(REQUEST, Some((229, 48))), Duration::ZERO).await;
-    let out = run_ollama_async(server.url.clone(), &["--deterministic-executor"]).await;
-    let t = text(&out);
-    assert!(out.status.success(), "{t}");
-    assert_eq!(field(&t, "Outcome:"), "Completed");
-    assert_eq!(field(&t, "Model calls:"), "1");
-    assert_eq!(field(&t, "Executions:"), "1");
-    assert_eq!(field(&t, "Observations:"), "1");
-    assert_eq!(field(&t, "Model tokens:"), "277");
-    assert_eq!(field(&t, "chosen:"), "compute.op_a");
-    assert_eq!(field(&t, "observed output:"), EXPECTED_DIGEST);
-
-    // No key, no bearer token; the chat endpoint.
-    let captured = server.captured.lock().await;
-    assert_eq!(captured.len(), 1);
-    assert!(captured[0].request_line.starts_with("POST /api/chat "));
-    assert!(captured[0].header("authorization").is_none());
-
-    // Same escalation prompt as the OpenAI-compatible path: the provider changes the wire format,
-    // not what the model is asked, so the context size is identical.
-    let other = common::start(200, &completion(REQUEST, None), Duration::ZERO).await;
-    let other_out = run_async(other.url.clone(), &["--deterministic-executor"]).await;
-    assert_eq!(
-        field(&t, "Context bytes:"),
-        field(&text(&other_out), "Context bytes:")
-    );
-    let ollama_body: serde_json::Value = serde_json::from_str(&captured[0].body).unwrap();
-    let openai_body: serde_json::Value =
-        serde_json::from_str(&other.captured.lock().await[0].body).unwrap();
-    assert_eq!(
-        ollama_body["messages"], openai_body["messages"],
-        "identical messages"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn ollama_replies_that_break_the_contract_execute_nothing() {
-    let replies = [
-        // The required case: a capability the model made up, and one that was never declared.
-        r#"{"decision":"request_capability","capability":"compute.fake"}"#,
-        r#"{"decision":"request_capability","capability":"shell.exec"}"#,
-        r#"{"decision":"request_capability","capability":"compute.hash"}"#,
-        "I would run compute.op_a to get the digest.",
-        "The SHA-256 digest is 5dc3ef3419c119833659d7288d246c87db93e4eeabb2b11126be581cb83c165f.",
-        r#"{"decision":"request_capability","capability":"compute.op_a","command":"sha256sum x"}"#,
-        r#"{"decision":"request_capability","capability":"compute.op_a","execution_id":"mine"}"#,
-        r#"{"decision":"request_capability","capability":"compute.op_a","status":"success","receipt":"r-1"}"#,
-        r#"{"schema":"chip.work-decision.v2","decision":"request_capability","capability":"compute.op_a"}"#,
-        r#"{"decision":"request_capability","capability":"compute.op_a"}{"decision":"complete","summary":"done"}"#,
-    ];
-    for reply in replies {
-        let server = common::start(200, &ollama_reply(reply, Some((10, 2))), Duration::ZERO).await;
-        let out = run_ollama_async(server.url.clone(), &["--deterministic-executor"]).await;
-        let t = text(&out);
-        assert!(!out.status.success(), "{reply}: {t}");
-        assert_eq!(field(&t, "Model calls:"), "1", "{reply}");
-        assert_eq!(field(&t, "Executions:"), "0", "{reply}");
-        assert_eq!(field(&t, "Observations:"), "0", "{reply}");
-        assert_eq!(field(&t, "Receipt:"), "none", "{reply}");
-        assert!(!t.contains("EvidenceRecorded"), "{reply}");
-        assert!(!t.contains("ExecutionStarted"), "{reply}");
-        assert_eq!(server.captured.lock().await.len(), 1, "{reply}: no retry");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn ollama_failures_execute_nothing_and_never_fall_back() {
-    // A model that is not pulled, and a server that is not there.
-    let server = common::start(
-        404,
-        r#"{"error":"model 'mock-ollama-model' not found, try pulling it first"}"#,
-        Duration::ZERO,
-    )
-    .await;
-    let out = run_ollama_async(server.url.clone(), &["--deterministic-executor"]).await;
-    let t = text(&out);
-    assert!(!out.status.success(), "{t}");
-    assert!(t.contains("not found, try pulling it first"), "{t}");
-    assert_eq!(field(&t, "Executions:"), "0");
-    assert_eq!(server.captured.lock().await.len(), 1, "no retry");
-
-    let out = tokio::task::spawn_blocking(|| {
-        run_ollama("http://127.0.0.1:1", &["--deterministic-executor"])
+async fn ollamas_own_api_is_refused_before_any_request_and_names_the_supported_path() {
+    let server = common::start(200, common::OK_BODY, Duration::ZERO).await;
+    let url = server.url.clone();
+    let out = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_chip"))
+            .arg("--test-real-model-work")
+            .arg("--deterministic-executor")
+            .env("CHIP_PROVIDER", "ollama")
+            .env("CHIP_MODEL", "m")
+            .env("CHIP_ENDPOINT", url)
+            .output()
+            .unwrap()
     })
     .await
     .unwrap();
-    let t = text(&out);
-    assert!(!out.status.success(), "{t}");
-    assert!(t.contains("Failed"), "{t}");
-    assert_eq!(field(&t, "Executions:"), "0");
+    let t = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        t.contains("no longer supported") && t.contains("openai-compatible"),
+        "{t}"
+    );
+    assert_eq!(server.captured.lock().await.len(), 0, "nothing was sent");
 }
 
 // ---- PR33: the same experiment with the ids dealt to operations in a different order ----------

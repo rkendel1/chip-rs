@@ -4,9 +4,10 @@
 use chip_inference::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
 use serde::{Deserialize, Serialize};
 
-use crate::{HttpProviderConfig, error_detail, transport_error};
+use chip_inference::ProviderConfig;
 
-pub(crate) const DEFAULT_ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
+use crate::{error_detail, transport_error};
+
 const API_VERSION: &str = "2023-06-01";
 /// The Messages API requires `max_tokens`; used only when neither the request nor the config sets it.
 const FALLBACK_MAX_TOKENS: u32 = 1024;
@@ -63,7 +64,7 @@ fn role(message: &Message) -> &'static str {
 
 pub(crate) async fn complete(
     client: &reqwest::Client,
-    config: &HttpProviderConfig,
+    config: &ProviderConfig,
     request: ModelRequest,
 ) -> Result<ModelResponse, FxError> {
     let system: Vec<&str> = request

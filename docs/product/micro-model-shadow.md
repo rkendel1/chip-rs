@@ -253,5 +253,5 @@ cargo bench -p chip-cli --bench micro_eval              # real model from CHIP_M
 cargo bench -p chip-cli --bench micro_eval -- --self-test adversarial
 cargo bench -p chip-cli --bench micro_eval -- --replay target/micro-eval/record-<time>.json
 python3 crates/chip-cli/tests/fixtures/micro/build.py   # regenerate the fixture (needs pax and cargo, offline)
-chip work --micro-shadow --micro-model <tiny-model> --micro-provider ollama --json "<goal>"
+chip work --micro-shadow --micro-model <tiny-model> --micro-provider openai-compatible --micro-endpoint http://127.0.0.1:11434/v1/chat/completions --json "<goal>"
 ```

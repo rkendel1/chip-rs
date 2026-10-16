@@ -69,13 +69,12 @@ CHIP_EXECUTOR=fx chip "<prompt>"
 ```
 
 `--executor legacy|fx`, else `CHIP_EXECUTOR`, else **`fx`**. `legacy` is never chosen implicitly and nothing falls back
-to it: it is an explicit escape hatch, and the only path that serves Ollama's own API (`CHIP_PROVIDER=ollama`, or use
-Ollama's OpenAI-compatible `/v1` endpoint with `fx`). With `fx`, the same `CHIP_PROVIDER`, `CHIP_MODEL` and `CHIP_ENDPOINT` select the
+to it: it is an explicit, temporary escape hatch for OpenAI-compatible and Anthropic endpoints and goes away with
+`chip-legacy-http`. Ollama is reached through its OpenAI-compatible `/v1` endpoint on either executor. With `fx`, the same `CHIP_PROVIDER`, `CHIP_MODEL` and `CHIP_ENDPOINT` select the
 provider; the endpoint must be the URL the legacy adapters post to (`.../v1/chat/completions` for OpenAI-compatible
 servers, `.../v1/messages` for Anthropic), from which the API root is derived. Keys come from `CHIP_API_KEY` if it
 is set, otherwise from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (see Credentials above). Anything the native path
-cannot carry is a configuration error that names it, before any request: the `ollama` provider's own API (its
-OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING` on the Anthropic provider (which has no such field; the legacy adapter ignored it there), and an endpoint that does not end in the expected
+cannot carry is a configuration error that names it, before any request: `CHIP_ENABLE_THINKING` on the Anthropic provider (which has no such field; the legacy adapter ignored it there), and an endpoint that does not end in the expected
 path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor (the default is `fx`); every other model-calling command
 (`verify`, `work_demo`, `horizon`, `pax_work`, the micro shadow, `--benchmark-live-reasoner`, the `micro_eval` bench) builds its
 provider through the same selection (`CHIP_EXECUTOR`, default `fx`). Only `provider_selection.rs` constructs the legacy
@@ -103,7 +102,7 @@ Differences that are deliberate or known:
 | Transport | one non-streaming call | one streaming call; a stream cut mid-way is a failure with the partial text, never a completion |
 | Failure detail | message text | structured: kind, status, retry-after, partial output and delivery certainty (`definitely_unsent`, `possibly_sent`, `confirmed_response`) |
 | Endpoint | any URL, posted as given | must end in the provider path; plain `http` only for loopback or without a key |
-| Provider APIs | OpenAI-compatible, Anthropic, Ollama native | OpenAI-compatible and Anthropic |
+| Provider APIs | OpenAI-compatible, Anthropic | OpenAI-compatible and Anthropic (Ollama's own API is unsupported on both; see Ollama below) |
 | `CHIP_ENABLE_THINKING` | sent as top-level `chat_template_kwargs.enable_thinking` (OpenAI-compatible only; ignored on Anthropic) | the same field on OpenAI-compatible endpoints, both `true` and `false`; refused by name on Anthropic |
 | Plain `http` to a LAN host | any URL | refused unless `CHIP_ALLOW_INSECURE_LAN_HTTP=1` and the host is a private IP literal (RFC 1918 or IPv6 unique-local); keyless OpenAI-compatible only, never with a key from any source, no extra headers, no hostnames, redirects not followed |
 | Proxies, custom CA certificates | per `reqwest` | not supported (bundled public roots, no proxy) |
@@ -114,11 +113,10 @@ Differences that are deliberate or known:
 
 * **Live checks.** Anthropic and LM Studio were run by the owner and reported clean; the raw output and audit have not been added to the repository. **OpenRouter has not been run.** Everything else above is mocked transport; TLS has no test.
 * The **JSON-object mode** difference on real servers (above).
-* **Ollama's native API** (its OpenAI-compatible `/v1` endpoint works).
 * The legacy executor is now only an explicit option. What still names `chip-legacy-http` is listed in
   `legacy-http-consumers.txt` (the shared config type, the explicit `legacy` constructor, one unit-test module and the
-  tests). Retiring the crate means moving `HttpProviderConfig` out and porting the Ollama-API tests, or dropping Ollama's
-  own API.
+  tests). `ProviderConfig` has moved to `chip-inference`, and Ollama's own API is dropped (below). Deleting the crate means
+  removing `--executor legacy` and porting or deleting the tests that still build a legacy provider.
 * The horizon live run needs real Compute before it asks a model; its model request was not exercised end to end here,
   only its provider selection.
 
@@ -130,3 +128,13 @@ credential redaction, option refusal before any connection, budget timeout, mid-
 output, a failed attempt ending the work with one provider call, and refused settings. The provider's own
 conformance suite and the Node-versus-native parity check live in `rkendel1/fx`. All of it is mocked transport:
 nothing here was run against a live provider or over TLS.
+
+## Ollama
+
+Decision (2026-10-16, repository owner's default preference): **Ollama's own `/api/chat` API is not a supported provider** and no native implementation is built. Ollama's OpenAI-compatible endpoint is the supported path:
+
+```
+chip work --provider openai-compatible --endpoint http://127.0.0.1:11434/v1/chat/completions --model <model> "<goal>"
+```
+
+`CHIP_PROVIDER=ollama` (and `--provider ollama`, `CHIP_MICRO_PROVIDER=ollama`) now fails before any request with a configuration error that names this replacement; nothing falls back. `CHIP_OLLAMA_ENDPOINT` is no longer read. Supporting `/v1/chat/completions` does not preserve native-API behavior: the native adapter sent `temperature` and `num_predict` and ignored `response_format`, and never set `num_ctx`. Anyone who needs those must say so; the way back is a native adapter behind the FX provider boundary, not the legacy executor.

@@ -4,7 +4,8 @@
 //! Run: cargo test -p chip-legacy-http --test live_provider -- --nocapture
 
 use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, Secret};
-use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
+use chip_legacy_http::HttpProvider;
 
 #[tokio::test]
 async fn live_provider_returns_output() {
@@ -19,8 +20,7 @@ async fn live_provider_returns_output() {
     let name = std::env::var("FX_PROVIDER_NAME")
         .unwrap_or_else(|_| PROVIDER_OPENAI_COMPATIBLE.to_string());
 
-    let config =
-        HttpProviderConfig::new(name, model.clone(), endpoint).with_api_key(Secret::new(key));
+    let config = ProviderConfig::new(name, model.clone(), endpoint).with_api_key(Secret::new(key));
     let provider = HttpProvider::new(config).expect("provider should construct");
     let request = ModelRequest::new(
         model,

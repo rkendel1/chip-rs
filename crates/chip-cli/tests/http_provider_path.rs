@@ -9,12 +9,13 @@ use std::time::Duration;
 
 use chip_core::{Agent, AgentError, AgentEvent, Turn};
 use chip_inference::Secret;
-use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
+use chip_legacy_http::HttpProvider;
 
 const FAKE_KEY: &str = "fake-key-for-tests";
 
 fn agent(url: &str) -> Agent {
-    let config = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "mock-model", url)
+    let config = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "mock-model", url)
         .with_api_key(Secret::new(FAKE_KEY));
     Agent::with_model(Arc::new(HttpProvider::new(config).unwrap()), "mock-model")
 }
