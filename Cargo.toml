@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/chip-inference", "crates/chip-legacy-http", "crates/chip-core", "crates/chip-fx", "crates/chip-session", "crates/chip-turns", "crates/chip-wasm-host", "crates/chip-compute", "crates/chip-pax",
+members = ["crates/chip-inference", "crates/chip-legacy-http", "crates/chip-core", "crates/chip-fx", "crates/chip-fx-native", "crates/chip-session", "crates/chip-turns", "crates/chip-wasm-host", "crates/chip-compute", "crates/chip-pax",
     "crates/chip-project", "crates/chip-wasm-reasoner", "crates/chip-wasm-decision", "crates/chip-wasm-decision-host", "crates/chip-local-decision", "crates/chip-local-decision-train", "crates/chip-decision-corpus", "crates/chip-reasoning-corpus", "crates/chip-local-ml", "crates/chip-laya-reasoner", "crates/chip-graph", "crates/chip-remote-env", "crates/chip-cli"]
 exclude = ["crates/chip-session-memory"]
 resolver = "2"

@@ -1,0 +1,22 @@
+[package]
+name = "chip-fx-native"
+version = "0.1.0"
+edition = "2024"
+description = "Chip's model port over the authoritative FX executor with a native Rust provider (no Node sidecar)"
+license = "MIT"
+
+[dependencies]
+chip-inference = { path = "../chip-inference" }
+chip-fx = { path = "../chip-fx" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt"] }
+# The authoritative FX and its native provider, pinned by one commit so every FX crate
+# in the build is the same copy.
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "9fedc8e9b3ebf8105140b81bda0355d60e98604b" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "9fedc8e9b3ebf8105140b81bda0355d60e98604b" }
+fx-native-provider = { git = "https://github.com/rkendel1/fx", rev = "9fedc8e9b3ebf8105140b81bda0355d60e98604b" }
+
+[dev-dependencies]
+chip-core = { path = "../chip-core" }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

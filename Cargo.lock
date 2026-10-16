@@ -326,6 +326,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "chip-fx-native"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "chip-fx",
+ "chip-inference",
+ "fx-core",
+ "fx-native-provider",
+ "fx-single-attempt",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "chip-graph"
 version = "0.1.0"
 dependencies = [
@@ -1035,16 +1050,27 @@ dependencies = [
 [[package]]
 name = "fx-core"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=547819ab37b90f7e9a782860a0ad6691e7d2ad4d#547819ab37b90f7e9a782860a0ad6691e7d2ad4d"
+source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "fx-native-provider"
+version = "0.1.0"
+source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
+dependencies = [
+ "fx-core",
+ "fx-single-attempt",
+ "serde_json",
+ "ureq 3.4.2",
+]
+
+[[package]]
 name = "fx-single-attempt"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=547819ab37b90f7e9a782860a0ad6691e7d2ad4d#547819ab37b90f7e9a782860a0ad6691e7d2ad4d"
+source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
 dependencies = [
  "fx-core",
 ]
@@ -1052,7 +1078,7 @@ dependencies = [
 [[package]]
 name = "fx-wasm-abi"
 version = "0.1.0"
-source = "git+https://github.com/rkendel1/fx?rev=547819ab37b90f7e9a782860a0ad6691e7d2ad4d#547819ab37b90f7e9a782860a0ad6691e7d2ad4d"
+source = "git+https://github.com/rkendel1/fx?rev=9fedc8e9b3ebf8105140b81bda0355d60e98604b#9fedc8e9b3ebf8105140b81bda0355d60e98604b"
 
 [[package]]
 name = "gemm"
@@ -3369,11 +3395,13 @@ dependencies = [
  "log",
  "native-tls",
  "percent-encoding",
+ "rustls",
  "rustls-pki-types",
  "socks",
  "ureq-proto",
  "utf8-zero",
  "webpki-root-certs",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
