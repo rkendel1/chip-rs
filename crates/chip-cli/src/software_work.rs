@@ -3409,7 +3409,11 @@ mod tests {
     // ---- Git observation ----------------------------------------------------------------------------
 
     fn git(root: &Path, args: &[&str]) {
+        // Newer git detaches `maintenance run --auto` after a commit; its `objects/maintenance.lock`
+        // can appear in or vanish from a snapshot of the repository taken right after, which made
+        // the "nothing changed" assertions race. A fixture repository does no background upkeep.
         let out = std::process::Command::new("git")
+            .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
             .args(args)
             .current_dir(root)
             .env("GIT_AUTHOR_NAME", "t")
