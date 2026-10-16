@@ -1,0 +1,14 @@
+{
+  "scenario": "resumed_two_turns",
+  "binary": "0.0.4",
+  "session_id": "1792169198998-1792169198998601430-2b10a9d1cbdbe745",
+  "files": [
+    "authority.json",
+    "checkpoint.json",
+    "commit.4ef19b62f693fada0c643b3d2c99ad90.json",
+    "display.json",
+    "events.jsonl",
+    "session.json",
+    "usage-v2.json"
+  ]
+}
