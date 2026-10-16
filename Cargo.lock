@@ -277,6 +277,8 @@ dependencies = [
  "chip-wasm-decision",
  "chip-wasm-decision-host",
  "chip-wasm-reasoner",
+ "fx-core",
+ "fx-single-attempt",
  "serde_json",
  "sha2",
  "tokio",
