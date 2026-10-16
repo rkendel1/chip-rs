@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
-use fx_core::{Host, Limits, execute};
+use fx_core::{Host, Limits, ResponseFormat, execute};
 use fx_single_attempt::{ProviderPort, SingleAttemptCapability};
 
 use crate::mapping::{OptionsPolicy, RequestIds, from_outcome, to_fx_request};
@@ -57,6 +57,7 @@ pub struct FxModelProvider<P: ProviderPort> {
     budget: Option<Duration>,
     cancel: Arc<dyn CancelSignal>,
     limits: Limits,
+    response_format: Option<ResponseFormat>,
 }
 
 impl<P: ProviderPort> FxModelProvider<P> {
@@ -71,6 +72,7 @@ impl<P: ProviderPort> FxModelProvider<P> {
             budget: None,
             cancel: Arc::new(Never),
             limits: Limits::default(),
+            response_format: None,
         }
     }
 
@@ -85,6 +87,19 @@ impl<P: ProviderPort> FxModelProvider<P> {
     #[must_use]
     pub fn with_cancel(mut self, cancel: Arc<dyn CancelSignal>) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    /// Asks for one JSON object on every request, as Chip's work loop does. FX carries it as a
+    /// structured-output request (a schema of `{"type":"object"}`); a port that cannot carry
+    /// structured output refuses the request before any provider call.
+    #[must_use]
+    pub fn with_json_object_output(mut self) -> Self {
+        self.response_format = Some(ResponseFormat {
+            name: "chip_reply".to_owned(),
+            description: "One JSON object".to_owned(),
+            schema_json: r#"{"type":"object"}"#.to_owned(),
+        });
         self
     }
 
@@ -116,7 +131,8 @@ where
                 stats.options_dropped += 1;
             }
         }
-        let fx_request = to_fx_request(&request, id, self.policy, self.budget)?;
+        let mut fx_request = to_fx_request(&request, id, self.policy, self.budget)?;
+        fx_request.options.response_format = self.response_format.clone();
         let mut host = CancelHost(self.cancel.as_ref());
         let report = {
             let mut capability = self.capability.lock().expect("capability lock");

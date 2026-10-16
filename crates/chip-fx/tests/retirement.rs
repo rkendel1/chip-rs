@@ -51,7 +51,12 @@ fn legacy_http_consumers_equal_the_ratchet_list() {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        if rel.starts_with("crates/chip-legacy-http/") || rel.starts_with("crates/chip-fx/tests/") {
+        // The parity test compares the two executors; it is the evidence for retiring the legacy
+        // one and is deleted with it. It is not a consumer.
+        if rel.starts_with("crates/chip-legacy-http/")
+            || rel.starts_with("crates/chip-fx/tests/")
+            || rel == "crates/chip-cli/tests/executor_parity.rs"
+        {
             continue;
         }
         if uses_legacy(&fs::read_to_string(&f).unwrap()) {

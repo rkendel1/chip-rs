@@ -1289,10 +1289,13 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: chip work \"<goal>\" [--kind change|verify|inspect] [--provider P] [--model M] [--endpoint URL] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
+        "usage: chip work \"<goal>\" [--kind change|verify|inspect] [--provider P] [--model M] [--endpoint URL] [--executor legacy|fx] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
     );
     eprintln!(
         "       provider/model/endpoint: command line, then CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT, then the provider's default endpoint; a model is always required"
+    );
+    eprintln!(
+        "       --executor legacy|fx (or CHIP_EXECUTOR; default legacy): fx uses the authoritative FX executor with a native provider, with keys from ANTHROPIC_API_KEY, OPENAI_API_KEY or CHIP_API_KEY"
     );
     eprintln!(
         "       --context-budget-bytes N (or CHIP_CONTEXT_BUDGET_BYTES): the most bytes of message content one model request may carry; a request over it is not sent"
@@ -1421,10 +1424,14 @@ impl WorkRuntime {
             model: model_name.clone(),
             endpoint: crate::provider_selection::endpoint_identity(&config.endpoint),
         };
-        let provider = chip_legacy_http::HttpProvider::new(config)
+        let env = |name: &str| std::env::var(name).ok();
+        let executor =
+            crate::provider_selection::ExecutorKind::choose(selection.executor.as_deref(), &env)
+                .map_err(|e| format!("no model is selected ({e}); nothing was run"))?;
+        let provider = crate::provider_selection::build_model(config, executor, &env)
             .map_err(|e| format!("the model provider is unusable ({e}); nothing was run"))?;
         Ok(Self {
-            model: Arc::new(provider),
+            model: provider,
             model_name,
             identity,
             context_budget,
@@ -1527,6 +1534,13 @@ pub async fn work(args: &[String]) -> i32 {
                     "--provider" => selection.provider = Some(given),
                     "--model" => selection.model = Some(given),
                     _ => selection.endpoint = Some(given),
+                }
+            }
+            "--executor" => {
+                i += 1;
+                match value(args, i, "--executor") {
+                    Ok(v) => selection.executor = Some(v),
+                    Err(code) => return code,
                 }
             }
             "--kind" => {
@@ -1669,7 +1683,7 @@ pub async fn work(args: &[String]) -> i32 {
     if calls.contains(&false) {
         let why = outcome_reason(&result.report.outcome).unwrap_or_default();
         eprintln!(
-            "error: the selected model did not answer ({} {} at {}): {why}. No other provider or model was tried.",
+            "error: the selected model did not answer ({} {} at {}): {why}. No other provider or model was tried.\n       executor: --executor, then CHIP_EXECUTOR, else legacy; `fx` uses the authoritative FX executor with a native provider (keys from ANTHROPIC_API_KEY / OPENAI_API_KEY or CHIP_API_KEY)",
             identity.provider, identity.model, identity.endpoint
         );
         if calls.first() == Some(&false) && result.utility.executions == 0 {

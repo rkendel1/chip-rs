@@ -99,6 +99,8 @@ pub struct NativeSelection {
     pub budget: Option<Duration>,
     /// Anthropic only: `max_tokens` when a request carries none.
     pub default_max_tokens: Option<u32>,
+    /// Ask for one JSON object on every request (OpenAI-compatible endpoints only).
+    pub json_object_output: bool,
 }
 
 impl NativeSelection {
@@ -111,6 +113,7 @@ impl NativeSelection {
             headers: Vec::new(),
             budget: None,
             default_max_tokens: None,
+            json_object_output: false,
         }
     }
 }
@@ -179,6 +182,7 @@ impl NativeSettings {
             options,
             budget: selection.budget,
             default_max_tokens: selection.default_max_tokens,
+            json_object_output: selection.json_object_output,
             id_seed,
         })
     }

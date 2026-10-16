@@ -75,6 +75,9 @@ pub struct NativeSettings {
     pub budget: Option<Duration>,
     /// Anthropic only: the `max_tokens` used when a request carries none (the API requires one).
     pub default_max_tokens: Option<u32>,
+    /// Ask for one JSON object on every request (OpenAI-compatible endpoints only; Anthropic has
+    /// no equivalent and the request is refused before dispatch if this is set).
+    pub json_object_output: bool,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -149,6 +152,9 @@ impl NativeModelProvider {
             }
         };
         let mut provider = FxModelProvider::new(port, ids, settings.options);
+        if settings.json_object_output {
+            provider = provider.with_json_object_output();
+        }
         if let Some(budget) = settings.budget {
             provider = provider.with_budget(budget);
         }
