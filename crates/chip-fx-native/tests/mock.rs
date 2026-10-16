@@ -42,10 +42,10 @@ impl Server {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         c.fetch_add(1, Ordering::SeqCst);
-                        if let Some(reply) = script.next() {
-                            if let Some(kept) = serve(stream, reply, &r) {
-                                held.push(kept);
-                            }
+                        if let Some(reply) = script.next()
+                            && let Some(kept) = serve(stream, reply, &r)
+                        {
+                            held.push(kept);
                         }
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(2)),
@@ -189,4 +189,32 @@ pub fn done() -> Vec<u8> {
 
 pub fn reply(text: &str) -> Reply {
     Reply::Sse(vec![delta(text), finish(), usage(11, 4), done()])
+}
+
+// ---- Anthropic Messages API stream -----------------------------------------------------------
+
+fn aevent(name: &str, json: &str) -> Vec<u8> {
+    format!("event: {name}\ndata: {json}\n\n").into_bytes()
+}
+
+/// A complete Anthropic reply: start, one text delta, stop reason with usage, stop.
+pub fn anthropic_reply(text: &str) -> Reply {
+    Reply::Sse(vec![
+        aevent(
+            "message_start",
+            r#"{"type":"message_start","message":{"model":"claude-mock","usage":{"input_tokens":9}}}"#,
+        ),
+        aevent(
+            "content_block_delta",
+            &format!(
+                r#"{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":{}}}}}"#,
+                serde_json::to_string(text).unwrap()
+            ),
+        ),
+        aevent(
+            "message_delta",
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}"#,
+        ),
+        aevent("message_stop", r#"{"type":"message_stop"}"#),
+    ])
 }

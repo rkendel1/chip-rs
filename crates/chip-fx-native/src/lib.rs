@@ -8,9 +8,11 @@
 //!
 //! This crate is a thin composition and holds no policy:
 //!
-//! - [`NativeSettings`] is the host's explicit configuration: an OpenAI-compatible base URL, an
-//!   API key it passes in (this crate reads no environment and no file), and an optional
-//!   per-attempt budget.
+//! - [`NativeSettings`] is the host's resolved configuration for one explicitly selected
+//!   provider (Anthropic, or an OpenAI-compatible endpoint such as OpenAI, OpenRouter or LM
+//!   Studio). [`NativeSettings::resolve`] builds it from a [`NativeSelection`] and a
+//!   [`CredentialSource`]; credentials are acquired here, in Chip's host layer, never in FX or in the
+//!   native provider.
 //! - [`NativeModelProvider`] is the [`chip_inference::ModelProvider`]. One `complete` call is
 //!   one FX attempt: no retry, no fallback, no model routing, no second provider call.
 //!
@@ -31,21 +33,48 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chip_fx::{CancelSignal, FxModelProvider, OptionsPolicy, RequestIds};
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
-use fx_native_provider::{OpenAiCompatible, OpenAiConfig, Secret};
+use fx_native_provider::{
+    Anthropic, AnthropicConfig, ConfigError, OpenAiCompatible, OpenAiConfig, Secret,
+};
 
-/// The host's explicit settings for one OpenAI-compatible endpoint.
+mod credentials;
+mod port;
+
+pub use credentials::{CredentialSource, EnvCredentials, NativeSelection};
+use port::NativePort;
+
+/// Which wire format the explicitly selected provider speaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderKind {
+    /// An OpenAI-style chat-completions endpoint: OpenAI, OpenRouter, LM Studio and others.
+    OpenAiCompatible,
+    /// The Anthropic Messages API.
+    Anthropic,
+}
+
+/// The host's resolved settings for one provider. Build it with [`NativeSettings::resolve`]
+/// (credentials from a [`CredentialSource`]) or fill it in directly when the host already holds
+/// the credential.
 #[derive(Clone)]
 pub struct NativeSettings {
+    /// The wire format.
+    pub kind: ProviderKind,
     /// API root, for example `https://api.openai.com/v1`. Plain `http` is accepted only for a
     /// loopback host.
     pub base_url: String,
-    /// The credential. It is passed to the provider's authorization header and nowhere else.
-    pub api_key: String,
+    /// The credential, or `None` for a keyless local server. It is passed to the provider's
+    /// authentication header and nowhere else.
+    pub api_key: Option<String>,
+    /// Extra request headers, for example OpenRouter's `HTTP-Referer` and `X-Title`. Headers the
+    /// adapter owns are refused.
+    pub headers: Vec<(String, String)>,
     /// What happens to sampling options FX cannot carry. There is no default.
     pub options: OptionsPolicy,
     /// Per-attempt budget handed to FX. Without one, the native provider's default deadline
     /// applies.
     pub budget: Option<Duration>,
+    /// Anthropic only: the `max_tokens` used when a request carries none (the API requires one).
+    pub default_max_tokens: Option<u32>,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -53,8 +82,13 @@ pub struct NativeSettings {
 impl std::fmt::Debug for NativeSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeSettings")
+            .field("kind", &self.kind)
             .field("base_url", &self.base_url)
-            .field("api_key", &"[redacted]")
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field(
+                "header_names",
+                &self.headers.iter().map(|(n, _)| n).collect::<Vec<_>>(),
+            )
             .field("options", &self.options)
             .field("budget", &self.budget)
             .finish_non_exhaustive()
@@ -63,7 +97,7 @@ impl std::fmt::Debug for NativeSettings {
 
 /// Chip's model port over the authoritative FX executor and the native OpenAI-compatible provider.
 pub struct NativeModelProvider {
-    inner: Arc<FxModelProvider<OpenAiCompatible>>,
+    inner: Arc<FxModelProvider<NativePort>>,
 }
 
 impl NativeModelProvider {
@@ -85,13 +119,36 @@ impl NativeModelProvider {
         settings: NativeSettings,
         cancel: Option<Arc<dyn CancelSignal>>,
     ) -> Result<Self, FxError> {
-        let config = OpenAiConfig::new(&settings.base_url, Secret::new(settings.api_key))
-            .map_err(|error| FxError::Configuration(error.to_string()))?;
-        let mut provider = FxModelProvider::new(
-            OpenAiCompatible::new(config),
-            RequestIds::new(settings.id_seed),
-            settings.options,
-        );
+        let ids = RequestIds::new(settings.id_seed);
+        let bad = |error: ConfigError| FxError::Configuration(error.to_string());
+        let key = settings.api_key.map(Secret::new);
+        let port = match settings.kind {
+            ProviderKind::OpenAiCompatible => {
+                let mut config = match key {
+                    Some(key) => OpenAiConfig::new(&settings.base_url, key),
+                    None => OpenAiConfig::without_key(&settings.base_url),
+                }
+                .map_err(bad)?;
+                for (name, value) in &settings.headers {
+                    config = config.with_header(name, value).map_err(bad)?;
+                }
+                NativePort::OpenAi(OpenAiCompatible::new(config))
+            }
+            ProviderKind::Anthropic => {
+                let key = key.ok_or_else(|| {
+                    FxError::Configuration("the Anthropic provider needs an API key".into())
+                })?;
+                let mut config = AnthropicConfig::new(&settings.base_url, key).map_err(bad)?;
+                if let Some(tokens) = settings.default_max_tokens {
+                    config = config.with_default_max_tokens(tokens);
+                }
+                for (name, value) in &settings.headers {
+                    config = config.with_header(name, value).map_err(bad)?;
+                }
+                NativePort::Anthropic(Anthropic::new(config))
+            }
+        };
+        let mut provider = FxModelProvider::new(port, ids, settings.options);
         if let Some(budget) = settings.budget {
             provider = provider.with_budget(budget);
         }
