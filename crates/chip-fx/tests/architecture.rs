@@ -33,7 +33,13 @@ fn dependency_names(manifest: &str) -> Vec<String> {
     names
 }
 
-const FX_CRATES: [&str; 4] = ["fx-core", "fx-single-attempt", "fx-wasm-abi", "fx-host"];
+const FX_CRATES: [&str; 5] = [
+    "fx-core",
+    "fx-single-attempt",
+    "fx-wasm-abi",
+    "fx-host",
+    "fx-native-provider",
+];
 
 fn all_crates() -> Vec<String> {
     let mut v: Vec<String> = fs::read_dir(crates_dir())
@@ -67,7 +73,7 @@ fn only_the_adapter_crates_reference_fx() {
     for name in all_crates() {
         let deps = dependency_names(&manifest(&name));
         let uses_fx = FX_CRATES.iter().any(|f| deps.contains(&f.to_string()));
-        let allowed = name == "chip-fx" || name == "chip-wasm-host";
+        let allowed = name == "chip-fx" || name == "chip-wasm-host" || name == "chip-fx-native";
         assert!(
             !uses_fx || allowed,
             "{name} references FX but is not an adapter crate"
@@ -86,6 +92,47 @@ fn chip_fx_reaches_providers_only_through_fx() {
     }
     assert!(deps.contains(&"fx-core".to_string()));
     assert!(deps.contains(&"chip-inference".to_string()));
+}
+
+/// The native transport (ureq, rustls) links only into the native adapter crate, so the crates
+/// that compile for `wasm32` never see it.
+#[test]
+fn the_native_provider_is_reached_only_through_chip_fx_native() {
+    for name in all_crates() {
+        let deps = dependency_names(&manifest(&name));
+        if deps.contains(&"fx-native-provider".to_string()) {
+            assert_eq!(
+                name, "chip-fx-native",
+                "{name} must not link the native provider"
+            );
+        }
+        if deps.contains(&"chip-fx-native".to_string()) {
+            assert!(
+                !["chip-core", "chip-inference", "chip-fx", "chip-wasm-host"]
+                    .contains(&name.as_str()),
+                "{name} compiles for wasm32 and must not depend on chip-fx-native"
+            );
+        }
+    }
+}
+
+#[test]
+fn chip_fx_native_adds_no_second_executor_or_http_client_of_its_own() {
+    let deps = dependency_names(&manifest("chip-fx-native"));
+    for forbidden in ["reqwest", "hyper", "ureq", "chip-legacy-http", "chip-cli"] {
+        assert!(
+            !deps.contains(&forbidden.to_string()),
+            "chip-fx-native must not depend on {forbidden}"
+        );
+    }
+    for required in [
+        "chip-fx",
+        "fx-core",
+        "fx-single-attempt",
+        "fx-native-provider",
+    ] {
+        assert!(deps.contains(&required.to_string()), "missing {required}");
+    }
 }
 
 #[test]

@@ -140,6 +140,7 @@ member must appear exactly once.
 | `chip-project` | PRODUCT | KEEP | L3 | - |
 | `chip-inference` | PRODUCT | KEEP | L2 | L4 |
 | `chip-fx` | INTEGRATION | KEEP | L3 | - |
+| `chip-fx-native` | INTEGRATION | KEEP | L3 | - |
 | `chip-session` | INTEGRATION | KEEP | L3 | - |
 | `chip-turns` | INTEGRATION | KEEP | L3 | - |
 | `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
@@ -232,6 +233,11 @@ authoritative FX (`fx-core` + `fx-single-attempt` from `rkendel1/fx`). It maps a
 attempt and the FX report back to a `ModelResponse` or an `FxError::Inference` that keeps delivery
 certainty, status and retry hint. It never retries, falls back or routes. Architecture and retirement
 tests in `tests/`. Design: `docs/product/authoritative-fx.md`.
+
+**`chip-fx-native`** (INTEGRATION, L3). `chip-fx` served by the native Rust provider `fx-native-provider`
+(OpenAI-compatible, text only) instead of a host-supplied port: no Node process, no second executor. The only crate
+that links the native HTTP transport, so `chip-fx` and the `wasm32` crates stay free of it. It is not used by the
+native `chip` binary yet. Design and gaps: `docs/product/native-provider.md`.
 
 **`chip-session`** (INTEGRATION, L3). Reads the durable session store the Zig `fx` owns
 (`event_log_v1` under `~/.fx/sessions/<id>`): exact-key frames, the committed watermark, contiguous
