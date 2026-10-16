@@ -102,13 +102,13 @@ Differences that are deliberate or known:
 | Endpoint | any URL, posted as given | must end in the provider path; plain `http` only for loopback or without a key |
 | Provider APIs | OpenAI-compatible, Anthropic, Ollama native | OpenAI-compatible and Anthropic |
 | `CHIP_ENABLE_THINKING` | sent as top-level `chat_template_kwargs.enable_thinking` (OpenAI-compatible only; ignored on Anthropic) | the same field on OpenAI-compatible endpoints, both `true` and `false`; refused by name on Anthropic |
+| Plain `http` to a LAN host | any URL | refused unless `CHIP_ALLOW_INSECURE_LAN_HTTP=1` and the host is a private IP literal (RFC 1918 or IPv6 unique-local); keyless OpenAI-compatible only, never with a key from any source, no extra headers, no hostnames, redirects not followed |
 | Proxies, custom CA certificates | per `reqwest` | not supported (bundled public roots, no proxy) |
 
 ## What still blocks making `fx` the default and retiring `chip-legacy-http`
 
 * **A live check** against Anthropic, LM Studio and OpenRouter. Everything above is mocked transport; TLS has no test.
 * The **JSON-object mode** difference on real servers (above).
-* LM Studio on a **non-loopback `http`** address (a LAN host) is refused by the native path.
 * **Ollama's native API** (its OpenAI-compatible `/v1` endpoint works).
 * The remaining consumers of the legacy executor: `work_demo`, `horizon`, `verify`, `pax_work`, `micro`,
   `live_benchmark`, the `--benchmark-live-reasoner` command, and `chip-cli`'s own benches and tests.

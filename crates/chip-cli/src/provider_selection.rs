@@ -14,7 +14,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chip_fx::OptionsPolicy;
 use chip_fx_native::{
-    EnvCredentials, NativeModelProvider, NativeSelection, NativeSettings, ProviderKind,
+    EnvCredentials, LAN_HTTP_VARIABLE, NativeModelProvider, NativeSelection, NativeSettings,
+    ProviderKind,
 };
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_legacy_http::{
@@ -149,6 +150,7 @@ fn fx_model(
     // Carried as the same `chat_template_kwargs.enable_thinking` field the legacy adapter sends. On
     // Anthropic the legacy adapter ignored it silently; the fx executor refuses it by name instead.
     selection.template_thinking = config.enable_thinking;
+    selection.allow_insecure_lan_http = lan_http_opt_in(env)?;
     // The key Chip already resolved from CHIP_API_KEY wins; otherwise the provider's own variable.
     let chip_key = config.api_key.as_ref().map(|k| k.expose().to_string());
     if chip_key.is_some() {
@@ -169,6 +171,18 @@ fn fx_model(
         max_tokens: config.max_tokens,
         temperature: config.temperature,
     }))
+}
+
+/// `CHIP_ALLOW_INSECURE_LAN_HTTP`: `1` opts in, unset or `0` does not, anything else is an error
+/// (an ambiguous security switch must not be guessed at).
+fn lan_http_opt_in(env: &dyn Fn(&str) -> Option<String>) -> Result<bool, FxError> {
+    match env(LAN_HTTP_VARIABLE).as_deref().map(str::trim) {
+        None | Some("") | Some("0") => Ok(false),
+        Some("1") => Ok(true),
+        Some(_) => Err(FxError::Configuration(format!(
+            "{LAN_HTTP_VARIABLE} must be `1` or `0`"
+        ))),
+    }
 }
 
 /// Applies the configured `max_tokens` and `temperature` to a request that carries none, as the

@@ -562,3 +562,68 @@ async fn the_thinking_switch_on_anthropic_is_refused_by_the_fx_executor_before_a
     assert!(error.contains("CHIP_ENABLE_THINKING"), "{error}");
     assert_eq!(server.connections(), before, "nothing was sent");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lan_http_is_refused_by_default_and_the_opt_in_is_strict_about_its_value_and_keys() {
+    let lan = HttpProviderConfig::new(
+        PROVIDER_OPENAI_COMPATIBLE,
+        "m",
+        "http://192.168.1.20:1234/v1/chat/completions",
+    );
+    let build = |env: &[(&str, &str)]| {
+        build_model(lan.clone(), ExecutorKind::Fx, &env_of(env))
+            .err()
+            .map(|e| e.to_string())
+    };
+    assert!(build(&[]).unwrap().contains("CHIP_ALLOW_INSECURE_LAN_HTTP"));
+    assert!(
+        build(&[("CHIP_ALLOW_INSECURE_LAN_HTTP", "0")])
+            .unwrap()
+            .contains("plain http")
+    );
+    assert!(
+        build(&[("CHIP_ALLOW_INSECURE_LAN_HTTP", "yes")])
+            .unwrap()
+            .contains("`1` or `0`")
+    );
+    // Keyless with the opt-in builds.
+    assert!(build(&[("CHIP_ALLOW_INSECURE_LAN_HTTP", "1")]).is_none());
+    // Any key, from the provider variable or from CHIP_API_KEY, makes the opt-in inapplicable.
+    let with_key = build(&[
+        ("CHIP_ALLOW_INSECURE_LAN_HTTP", "1"),
+        ("OPENAI_API_KEY", "sk-x"),
+    ]);
+    assert!(with_key.unwrap().contains("refusing to send a credential"));
+    let chip_key = HttpProviderConfig::new(
+        PROVIDER_OPENAI_COMPATIBLE,
+        "m",
+        "http://192.168.1.20:1234/v1/chat/completions",
+    )
+    .with_api_key(chip_inference::Secret::new("sk-chip".to_owned()));
+    let text = build_model(
+        chip_key,
+        ExecutorKind::Fx,
+        &env_of(&[("CHIP_ALLOW_INSECURE_LAN_HTTP", "1")]),
+    )
+    .err()
+    .map(|e| e.to_string())
+    .unwrap();
+    assert!(
+        text.contains("refusing to send a credential") && !text.contains("sk-chip"),
+        "{text}"
+    );
+    // A public address passes resolution but the provider refuses to be built.
+    let public = HttpProviderConfig::new(
+        PROVIDER_OPENAI_COMPATIBLE,
+        "m",
+        "http://8.8.8.8:1234/v1/chat/completions",
+    );
+    let refused = build_model(
+        public,
+        ExecutorKind::Fx,
+        &env_of(&[("CHIP_ALLOW_INSECURE_LAN_HTTP", "1")]),
+    )
+    .err()
+    .map(|e| e.to_string());
+    assert!(refused.unwrap().contains("loopback"));
+}

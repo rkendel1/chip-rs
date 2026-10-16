@@ -104,6 +104,10 @@ pub struct NativeSelection {
     /// OpenAI-compatible endpoints only: send `chat_template_kwargs.enable_thinking` with this
     /// value (what `CHIP_ENABLE_THINKING` means). `None` sends nothing.
     pub template_thinking: Option<bool>,
+    /// The explicit opt-in (`CHIP_ALLOW_INSECURE_LAN_HTTP=1`) for a plain-`http` endpoint on a
+    /// private LAN address, for keyless OpenAI-compatible inference such as LM Studio on another
+    /// machine. Off by default, and refused whenever any credential or extra header is present.
+    pub allow_insecure_lan_http: bool,
 }
 
 impl NativeSelection {
@@ -118,6 +122,7 @@ impl NativeSelection {
             default_max_tokens: None,
             json_object_output: false,
             template_thinking: None,
+            allow_insecure_lan_http: false,
         }
     }
 }
@@ -131,8 +136,19 @@ fn is_loopback(endpoint: &str) -> bool {
     } else {
         rest.split(['/', ':']).next().unwrap_or_default()
     };
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
+
+/// Plain `http` to anything but loopback: the case the LAN opt-in exists for.
+pub(crate) fn is_plain_http_off_loopback(endpoint: &str) -> bool {
+    endpoint.trim().starts_with("http://") && !is_loopback(endpoint)
+}
+
+/// The environment variable that opts in to the private-LAN plain-`http` exception.
+pub const LAN_HTTP_VARIABLE: &str = "CHIP_ALLOW_INSECURE_LAN_HTTP";
 
 fn valid_variable(name: &str) -> bool {
     !name.is_empty()
@@ -170,7 +186,40 @@ impl NativeSettings {
             )));
         }
         let key = source.credential(variable);
-        let keyless_ok = selection.kind == ProviderKind::OpenAiCompatible && is_loopback(&endpoint);
+        let lan_http = is_plain_http_off_loopback(&endpoint);
+        if lan_http {
+            // Decided here, from the resolved credential state, before any request is built.
+            if !selection.allow_insecure_lan_http {
+                return Err(FxError::Configuration(format!(
+                    "plain http to a non-loopback host is refused. For a keyless LM Studio-style \
+                     server on your own network set {LAN_HTTP_VARIABLE}=1 (a private IP address, \
+                     never with a key); otherwise use https (no request was made)"
+                )));
+            }
+            if selection.kind != ProviderKind::OpenAiCompatible {
+                return Err(FxError::Configuration(format!(
+                    "{LAN_HTTP_VARIABLE} applies to keyless OpenAI-compatible servers only, not \
+                     the {} provider (no request was made)",
+                    selection.kind.label()
+                )));
+            }
+            if key.is_some() {
+                return Err(FxError::Configuration(format!(
+                    "refusing to send a credential over plain http to a non-loopback host: \
+                     {variable} resolves to a key. Unset it for this keyless server, or use https \
+                     ({LAN_HTTP_VARIABLE} never applies to a request that carries a credential; \
+                     no request was made)"
+                )));
+            }
+            if !selection.headers.is_empty() {
+                return Err(FxError::Configuration(format!(
+                    "refusing to add request headers to a plain-http non-loopback endpoint \
+                     ({LAN_HTTP_VARIABLE}); no request was made"
+                )));
+            }
+        }
+        let keyless_ok = selection.kind == ProviderKind::OpenAiCompatible
+            && (is_loopback(&endpoint) || lan_http);
         if key.is_none() && !keyless_ok {
             return Err(FxError::Configuration(format!(
                 "the {} provider needs an API key and {variable} is not set; export it, or select \
@@ -188,6 +237,7 @@ impl NativeSettings {
             default_max_tokens: selection.default_max_tokens,
             json_object_output: selection.json_object_output,
             template_thinking: selection.template_thinking,
+            allow_insecure_lan_http: selection.allow_insecure_lan_http,
             id_seed,
         })
     }

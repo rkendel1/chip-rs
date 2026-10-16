@@ -293,3 +293,135 @@ async fn a_provider_error_that_echoes_the_key_never_reaches_the_chip_error() {
     );
     assert_eq!(server.connections(), 1);
 }
+
+// ---- plain http on a private LAN: explicit, keyless opt-in only -------------------------------
+
+const LAN: &str = "http://192.168.1.20:1234/v1";
+
+fn lan_selection(endpoint: &str, allow: bool) -> NativeSelection {
+    NativeSelection {
+        allow_insecure_lan_http: allow,
+        ..selection(ProviderKind::OpenAiCompatible, endpoint)
+    }
+}
+
+fn message<T>(result: Result<T, FxError>) -> String {
+    match result {
+        Err(FxError::Configuration(text)) => text,
+        Err(other) => panic!("expected a configuration error, got {other}"),
+        Ok(_) => panic!("expected a configuration error, got success"),
+    }
+}
+
+#[test]
+fn plain_http_to_a_lan_host_is_refused_by_default_and_the_error_names_the_opt_in() {
+    let text = message(resolve(&lan_selection(LAN, false), &[]));
+    assert!(text.contains("CHIP_ALLOW_INSECURE_LAN_HTTP"), "{text}");
+    assert!(text.contains("no request was made"), "{text}");
+}
+
+#[test]
+fn the_opt_in_resolves_a_keyless_private_lan_endpoint_and_builds_a_provider() {
+    let settings = resolve(&lan_selection(LAN, true), &[]).unwrap();
+    assert_eq!(settings.api_key, None);
+    assert!(settings.allow_insecure_lan_http);
+    NativeModelProvider::new(settings).expect("a private LAN address is accepted");
+    // Ipv6 unique-local and the other private ranges.
+    for url in [
+        "http://10.0.0.5:1234/v1",
+        "http://172.20.1.1:1234/v1",
+        "http://[fd12:3456::1]:1234/v1",
+    ] {
+        let settings = resolve(&lan_selection(url, true), &[]).unwrap();
+        NativeModelProvider::new(settings).unwrap_or_else(|e| panic!("{url}: {e}"));
+    }
+}
+
+#[test]
+fn the_opt_in_does_not_admit_public_addresses_or_hostnames() {
+    for url in [
+        "http://8.8.8.8:1234/v1",
+        "http://203.0.113.9/v1",
+        "http://lmstudio.local:1234/v1",
+        "http://example.com/v1",
+    ] {
+        // Resolution is keyless-eligible, but the provider refuses to be built.
+        let settings = resolve(&lan_selection(url, true), &[]).unwrap();
+        let text = message(NativeModelProvider::new(settings));
+        assert!(text.contains("loopback"), "{url}: {text}");
+    }
+}
+
+#[test]
+fn a_credential_from_any_source_is_refused_even_with_the_opt_in() {
+    // The provider's own variable, an alternative variable, and the host-resolved CHIP_API_KEY
+    // name all go through the same credential source.
+    for (variable, selection) in [
+        ("OPENAI_API_KEY", lan_selection(LAN, true)),
+        (
+            "OPENROUTER_API_KEY",
+            NativeSelection {
+                key_env: Some("OPENROUTER_API_KEY".to_owned()),
+                ..lan_selection(LAN, true)
+            },
+        ),
+        (
+            "CHIP_API_KEY",
+            NativeSelection {
+                key_env: Some("CHIP_API_KEY".to_owned()),
+                ..lan_selection(LAN, true)
+            },
+        ),
+    ] {
+        let text = message(resolve(&selection, &[(variable, OPENAI_KEY)]));
+        assert!(text.contains("refusing to send a credential"), "{text}");
+        assert!(!text.contains(OPENAI_KEY), "the key is never echoed");
+    }
+}
+
+#[test]
+fn building_a_provider_directly_with_a_key_and_the_opt_in_is_refused_too() {
+    let mut settings = resolve(&lan_selection(LAN, true), &[]).unwrap();
+    settings.api_key = Some(OPENAI_KEY.to_owned());
+    let text = message(NativeModelProvider::new(settings));
+    assert!(text.contains("never sent over plain http"), "{text}");
+    assert!(!text.contains(OPENAI_KEY));
+}
+
+#[test]
+fn extra_headers_are_refused_on_a_plain_http_lan_endpoint() {
+    let mut selection = lan_selection(LAN, true);
+    selection
+        .headers
+        .push(("X-Api-Key".into(), "secret".into()));
+    let text = message(resolve(&selection, &[]));
+    assert!(text.contains("refusing to add request headers"), "{text}");
+    assert!(!text.contains("secret"));
+}
+
+#[test]
+fn the_opt_in_never_applies_to_anthropic() {
+    let selection = NativeSelection {
+        allow_insecure_lan_http: true,
+        ..selection(ProviderKind::Anthropic, "http://192.168.1.20:1234/v1")
+    };
+    let text = message(resolve(&selection, &[("ANTHROPIC_API_KEY", ANTHROPIC_KEY)]));
+    assert!(text.contains("OpenAI-compatible"), "{text}");
+    assert!(!text.contains(ANTHROPIC_KEY));
+}
+
+#[test]
+fn loopback_http_needs_no_opt_in_and_https_never_needed_one() {
+    for url in [
+        "http://127.0.0.1:1234/v1",
+        "http://localhost:1234/v1",
+        "http://127.0.0.2:1/v1",
+    ] {
+        resolve(&lan_selection(url, false), &[]).unwrap();
+    }
+    resolve(
+        &lan_selection("https://openrouter.ai/api/v1", false),
+        &[("OPENAI_API_KEY", OPENAI_KEY)],
+    )
+    .unwrap();
+}
