@@ -35,6 +35,7 @@ mkdir -p "$stage/$name"
 cp "$root/target/release/chip" "$stage/$name/chip"
 cp "$root/LICENSE" "$stage/$name/LICENSE"
 cp "$root/README.md" "$stage/$name/README.md"
+cp "$root/RELEASE_NOTES.md" "$stage/$name/RELEASE_NOTES.md"
 
 cargo metadata --format-version 1 --no-deps --locked | CHIP_COMMIT="$commit" CHIP_DIRTY="$dirty" CHIP_TARGET="$target" \
   CHIP_RUSTC="$(rustc --version)" python3 -I -c '

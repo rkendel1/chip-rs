@@ -22,6 +22,23 @@ observations as evidence, decides whether the goal was met, and recovers within 
 supplies judgment and nothing more: its words are never an execution, an observation, evidence, a
 receipt, success or completion. The environment supplies execution reality and nothing more.
 
+## Known limitations of the first Rust release
+
+> **RETRYING A TURN MAY REPEAT EXTERNAL EFFECTS.** Chip does not guarantee exactly-once side effects, does not
+> resume an interrupted model response, and does not automatically replay anything. If a `chip` process is
+> killed or a work is interrupted, a *new* run starts from the beginning and the model may ask for the same
+> capability again, which Chip will execute again. Persistence does not make a capability idempotent. Before
+> you retry interrupted work, account for effects that may already have happened (`git status`, `git diff`),
+> and do not wrap an automatic retry around work you cannot afford to change twice.
+
+Ten behaviors of the Zig `fx` agent are **unsupported** in this release (permission modes, parallel and
+provider-native tool calls, silent tool continuation, pause/continue at the step limit, images, subagents / MCP
+/ skills / memory / web tools, interactive approval, graceful cancellation between a tool and the next request,
+publish-failure handling after work ran, and any idempotence guard). A request that needs one is refused or
+fails closed; it is never ignored and never reported as a completion. The full contract is
+[`docs/product/release-limitations.md`](docs/product/release-limitations.md); release notes are in
+[`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
 ## Two agent stacks, kept apart
 
 The Compute-configured distribution already ships an npm agent. This repository is a different one:
