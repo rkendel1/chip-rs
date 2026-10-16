@@ -141,6 +141,7 @@ member must appear exactly once.
 | `chip-inference` | PRODUCT | KEEP | L2 | L4 |
 | `chip-fx` | INTEGRATION | KEEP | L3 | - |
 | `chip-session` | INTEGRATION | KEEP | L3 | - |
+| `chip-turns` | INTEGRATION | KEEP | L3 | - |
 | `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
 | `chip-legacy-http` | INTEGRATION | KEEP | L2 | L3 |
 | `chip-pax` | INTEGRATION | KEEP | L3 | - |
@@ -239,6 +240,13 @@ with the Zig commit protocol (`SessionWriter`: create, open with interrupted-wri
 rewrites only the truth files. It is not a second store and invents no format. Verified against sessions written by the
 real Zig binary (`tests/fixtures/zig`). Format: [`session-format.md`](session-format.md). No Chip, FX or
 provider dependency.
+
+**`chip-turns`** (INTEGRATION, L3). Runs a real Chip turn over a Zig-compatible session: opens it for
+writing (locking it for the whole turn), reconstructs context from the committed history, runs the
+unchanged work loop once, and appends the result as a `history_turn_committed` event through
+`SessionWriter`. The model and tools are never rerun because persistence failed; the outcome is reported
+as committed, not committed, or uncertain. It adds no provider path and no persistence authority
+(an architecture test pins its dependencies). Contract: [`session-format.md`](session-format.md).
 
 **`chip-wasm-host`** (INTEGRATION, L3). Chip's work loop as a `wasm32-unknown-unknown` module with no
 imports, driven by a host over the shared `fx-wasm-abi` JSON session ABI. The host performs provider

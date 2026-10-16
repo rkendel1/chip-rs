@@ -51,6 +51,9 @@ pub enum SessionError {
     AlreadyExists,
     /// An interrupted publication cannot be resolved to the prior or the proposed position.
     RecoveryFailed(String),
+    /// A well-formed event or turn of a kind this implementation does not interpret (for example
+    /// a compacted summary or a state replacement). Never guessed at, never skipped.
+    Unsupported(String),
     /// Test-only: a configured fault point stopped the writer as if the process had died there.
     SimulatedCrash(&'static str),
     Io(std::io::Error),
@@ -107,6 +110,7 @@ impl fmt::Display for SessionError {
             Self::RecoveryFailed(why) => {
                 write!(f, "interrupted publication cannot be resolved: {why}")
             }
+            Self::Unsupported(what) => write!(f, "unsupported: {what}"),
             Self::SimulatedCrash(at) => write!(f, "simulated crash at {at}"),
             Self::Io(error) => write!(f, "session i/o: {error}"),
         }

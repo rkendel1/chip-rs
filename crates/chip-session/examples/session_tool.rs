@@ -4,6 +4,7 @@
 //!   session_tool create <sessions_dir> <id>      # session_started payload JSON on stdin
 //!   session_tool append <session_dir> <effort>   # appends preferences_changed {"effort": <effort>}
 //!   session_tool read   <session_dir>            # prints a JSON summary of the committed log
+//!   session_tool append-raw <session_dir> <kind> # payload JSON on stdin, written as given (negative controls)
 
 use std::io::Read;
 use std::path::Path;
@@ -57,6 +58,26 @@ fn main() -> ExitCode {
                 p.through_seq, p.through_event_log_bytes
             )
         }),
+        Some("append-raw") if args.len() == 4 => {
+            let kind = match args[3].as_str() {
+                "history_turn_committed" => Kind::HistoryTurnCommitted,
+                "preferences_changed" => Kind::PreferencesChanged,
+                "state_replacement_started" => Kind::StateReplacementStarted,
+                "recovery_checkpoint_set" => Kind::RecoveryCheckpointSet,
+                other => {
+                    eprintln!("unsupported kind for append-raw: {other}");
+                    return ExitCode::from(2);
+                }
+            };
+            let mut payload = String::new();
+            std::io::stdin().read_to_string(&mut payload).unwrap();
+            NewEvent::new(kind, now_ms(), payload.trim())
+                .and_then(|event| {
+                    SessionWriter::open(Path::new(&args[2]), Box::new(OsIds), None)
+                        .and_then(|mut w| w.append(vec![event]))
+                })
+                .map(|p| format!("{{\"through_seq\":{}}}", p.through_seq))
+        }
         Some("read") if args.len() == 3 => read_session(Path::new(&args[2])).map(|log| {
             let kinds: Vec<String> = log
                 .frames
