@@ -99,6 +99,28 @@ pub fn build_model(
     }
 }
 
+/// The model provider for a command that has no `--executor` flag: the executor comes from
+/// `CHIP_EXECUTOR` (default `fx`) and keys from the process environment. There is no fallback
+/// between executors.
+pub fn build_model_from_process(
+    config: HttpProviderConfig,
+) -> Result<Arc<dyn ModelProvider>, FxError> {
+    let env = |name: &str| std::env::var(name).ok();
+    let executor = ExecutorKind::choose(None, &env)?;
+    build_model(config, executor, &env)
+}
+
+/// Like [`build_model_from_process`], for a secondary model (the micro shadow) that must never use
+/// the work model's credentials: the provider's own key variables (`ANTHROPIC_API_KEY`,
+/// `OPENAI_API_KEY`) are hidden, so the key is only what the caller put in `config`. The executor
+/// and the LAN opt-in still come from the process environment.
+pub fn build_model_isolated(config: HttpProviderConfig) -> Result<Arc<dyn ModelProvider>, FxError> {
+    let process = |name: &str| std::env::var(name).ok();
+    let executor = ExecutorKind::choose(None, &process)?;
+    let env = |name: &str| (name == LAN_HTTP_VARIABLE).then(|| process(name)).flatten();
+    build_model(config, executor, &env)
+}
+
 /// The API root a native provider appends its path to, from the full URL the legacy adapters post
 /// to (`.../v1/chat/completions`, `.../v1/messages`).
 fn api_root(endpoint: &str, kind: ProviderKind) -> Result<String, FxError> {

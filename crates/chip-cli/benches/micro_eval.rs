@@ -21,7 +21,6 @@
 //! calls or better verified completion: that needs the controlled ablation of RIC-07.
 
 use std::process::Command;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chip_cli::micro::{self, ShadowIdentity};
@@ -262,10 +261,10 @@ fn main() {
                     model: config.model.to_string(),
                     endpoint: chip_cli::provider_selection::endpoint_identity(&config.endpoint),
                 };
-                let provider = chip_legacy_http::HttpProvider::new(config)
+                let provider = chip_cli::provider_selection::build_model_isolated(config)
                     .unwrap_or_else(|e| usage(&format!("the shadow provider is unusable ({e})")));
                 let responder = ProviderResponder {
-                    provider: Arc::new(provider),
+                    provider,
                     model: identity.model.clone(),
                     timeout,
                 };

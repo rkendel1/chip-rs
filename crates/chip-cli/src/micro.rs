@@ -1287,10 +1287,10 @@ impl ShadowModel {
             })
             .transpose()?
             .unwrap_or(DEFAULT_TIMEOUT);
-        let provider = chip_legacy_http::HttpProvider::new(config)
+        let provider = crate::provider_selection::build_model_isolated(config)
             .map_err(|e| format!("the shadow model provider is unusable ({e})"))?;
         Ok(Self {
-            provider: std::sync::Arc::new(provider),
+            provider,
             identity,
             timeout,
         })

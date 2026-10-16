@@ -336,7 +336,7 @@ pub async fn verify(args: &[String]) -> i32 {
         }
     };
     let model_name = config.model.to_string();
-    let provider = match chip_legacy_http::HttpProvider::new(config) {
+    let provider = match crate::provider_selection::build_model_from_process(config) {
         Ok(provider) => provider,
         Err(e) => {
             eprintln!("error: the model provider is unusable ({e}); nothing was run");
@@ -362,7 +362,7 @@ pub async fn verify(args: &[String]) -> i32 {
 
     let replies = Arc::new(Mutex::new(Vec::new()));
     let model = Arc::new(Recording {
-        inner: provider,
+        inner: crate::software_work::Shared(provider),
         replies: replies.clone(),
     });
     let result = run_verification(model, model_name, pax, &ReactToObservation).await;

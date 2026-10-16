@@ -1011,6 +1011,7 @@ fn run_ollama(base_url: &str, extra: &[&str]) -> Output {
         .arg("--test-real-model-work")
         .args(extra)
         .env("CHIP_PROVIDER", "ollama")
+        .env("CHIP_EXECUTOR", "legacy") // Ollama's own API is served only by the legacy executor
         .env("CHIP_MODEL", "mock-ollama-model")
         .env("CHIP_OLLAMA_ENDPOINT", base_url)
         .env_remove("CHIP_ENDPOINT")

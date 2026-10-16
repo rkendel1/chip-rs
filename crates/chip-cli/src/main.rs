@@ -17,7 +17,6 @@ use chip_core::{
     LocalReasoningResult, ScriptedDecision, StateToken, TestExecutor, TestLocalReasoner, Turn,
 };
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
-use chip_legacy_http::HttpProvider;
 
 #[derive(Default)]
 struct TestModelProvider;
@@ -1004,14 +1003,14 @@ async fn main() {
             &config.endpoint,
         );
         let secret = config.api_key.as_ref().map(|k| k.expose().to_string());
-        let provider = match HttpProvider::new(config) {
+        let provider = match chip_cli::provider_selection::build_model_from_process(config) {
             Ok(provider) => provider,
             Err(error) => {
                 eprintln!("error: {error}");
                 std::process::exit(1);
             }
         };
-        let report = live_benchmark::run(Arc::new(provider), meta, count).await;
+        let report = live_benchmark::run(provider, meta, count).await;
         // Local reference, measured now so nothing is hard-coded.
         let local = benchmark::run(200)
             .await

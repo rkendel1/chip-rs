@@ -10,6 +10,9 @@
 
 #![cfg(unix)]
 
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+mod common;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -148,10 +151,20 @@ async fn model(script: fn(usize) -> &'static str) -> (String, Arc<AtomicUsize>) 
                 let payload = format!(
                     "{{\"id\":\"m\",\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{content}}}}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":1}}}}"
                 );
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
-                    payload.len()
-                );
+                let streamed = String::from_utf8_lossy(&buf).contains("\"stream\":true");
+                let response = match streamed
+                    .then(|| common::as_event_stream(&payload))
+                    .flatten()
+                {
+                    Some(events) => format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{events}",
+                        events.len()
+                    ),
+                    None => format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+                        payload.len()
+                    ),
+                };
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.shutdown().await;
             });
@@ -207,7 +220,6 @@ async fn chip_work_args(
         .env_remove("PAX_BIN")
         .env("PATH", path)
         .env("CHIP_PROVIDER", "openai-compatible")
-        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "probe")
         .env("CHIP_ENDPOINT", url)
         .stdin(Stdio::null());
