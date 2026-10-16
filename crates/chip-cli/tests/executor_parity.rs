@@ -428,10 +428,15 @@ async fn only_the_fx_failure_carries_delivery_certainty() {
 // ---- selection ---------------------------------------------------------------------------------
 
 #[test]
-fn the_executor_is_explicit_and_defaults_to_legacy() {
+fn the_executor_defaults_to_fx_and_legacy_is_only_ever_explicit() {
     let none = env_of(&[]);
+    assert_eq!(ExecutorKind::choose(None, &none).unwrap(), ExecutorKind::Fx);
     assert_eq!(
-        ExecutorKind::choose(None, &none).unwrap(),
+        ExecutorKind::choose(Some("legacy"), &none).unwrap(),
+        ExecutorKind::Legacy
+    );
+    assert_eq!(
+        ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", "legacy")])).unwrap(),
         ExecutorKind::Legacy
     );
     assert_eq!(
@@ -449,7 +454,7 @@ fn the_executor_is_explicit_and_defaults_to_legacy() {
     );
     assert_eq!(
         ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", "  ")])).unwrap(),
-        ExecutorKind::Legacy
+        ExecutorKind::Fx
     );
     assert!(matches!(
         ExecutorKind::choose(Some("both"), &none),
@@ -626,4 +631,23 @@ async fn lan_http_is_refused_by_default_and_the_opt_in_is_strict_about_its_value
     .err()
     .map(|e| e.to_string());
     assert!(refused.unwrap().contains("loopback"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_no_flag_and_no_environment_the_request_goes_through_the_fx_executor() {
+    let server = Server::start(Answer::Text("ok", 1, 1));
+    let executor = ExecutorKind::choose(None, &env_of(&[])).unwrap();
+    call(config(PROVIDER_OPENAI_COMPATIBLE, &server.base), executor)
+        .await
+        .unwrap();
+    // The fx wire format streams; the legacy adapter posts one non-streaming call.
+    assert_eq!(server.requests()[0].1["stream"], json!(true));
+    let legacy = Server::start(Answer::Text("ok", 1, 1));
+    call(
+        config(PROVIDER_OPENAI_COMPATIBLE, &legacy.base),
+        ExecutorKind::choose(Some("legacy"), &env_of(&[])).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(legacy.requests()[0].1.get("stream"), None);
 }

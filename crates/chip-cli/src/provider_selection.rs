@@ -51,16 +51,16 @@ pub fn resolve(
 /// Which inference executor serves the selected model. The choice is explicit; nothing is tried
 /// as a fallback for the other.
 ///
-/// * `legacy`: `chip-legacy-http`, the original per-provider HTTP adapters (the default until the
-///   parity gate in `docs/product/native-provider.md` is met).
-/// * `fx`: the authoritative FX executor with a native Rust provider (`chip-fx-native`). One
-///   attempt per call, structured delivery certainty, no Node process.
+/// * `fx` (the default): the authoritative FX executor with a native Rust provider
+///   (`chip-fx-native`). One attempt per call, structured delivery certainty, no Node process.
+/// * `legacy`: `chip-legacy-http`, the original per-provider HTTP adapters. Explicit only; it is
+///   what serves Ollama's own API until a native one exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutorKind {
-    /// `chip-legacy-http`.
-    #[default]
+    /// `chip-legacy-http`. Kept as an explicit choice while its remaining consumers move.
     Legacy,
     /// The authoritative FX executor with a native provider.
+    #[default]
     Fx,
 }
 
@@ -75,7 +75,8 @@ impl ExecutorKind {
             .or_else(|| env("CHIP_EXECUTOR"))
             .filter(|v| !v.trim().is_empty());
         match named.as_deref().map(str::trim) {
-            None | Some("legacy") => Ok(Self::Legacy),
+            None => Ok(Self::default()),
+            Some("legacy") => Ok(Self::Legacy),
             Some("fx") => Ok(Self::Fx),
             Some(other) => Err(FxError::Configuration(format!(
                 "unknown executor {other:?}: use `legacy` or `fx`"
