@@ -1,4 +1,4 @@
-//! Reader for the durable session store of the Zig `fx` (`event_log_v1`).
+//! Reader and writer for the durable session store of the Zig `fx` (`event_log_v1`).
 //!
 //! The session directory is owned by the format the Zig implementation defines. This crate does
 //! not invent a second source of truth: it reads the same files with the same strictness
@@ -13,12 +13,14 @@ mod frame;
 mod id;
 mod layout;
 mod store;
+mod writer;
 
 pub use error::SessionError;
 pub use frame::{EVENT_FRAME_MAX_BYTES, Frame, Kind, decode_frame, encode_frame};
-pub use id::Identifier;
+pub use id::{IdSource, Identifier, OsIds};
 pub use layout::{validate_session_id, watermark_file_name};
 pub use store::{
     Authority, AuthoritySource, CheckpointStatus, CommitPosition, CommittedLog, ManifestStatus,
     read_session,
 };
+pub use writer::{Boundary, NewEvent, SessionWriter, encode_authority, encode_watermark};

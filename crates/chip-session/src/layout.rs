@@ -27,3 +27,10 @@ pub(crate) const MANIFEST_FILE: &str = "session.json";
 pub(crate) const CHECKPOINT_FILE: &str = "checkpoint.json";
 pub(crate) const AUTHORITY_MAX_BYTES: u64 = 16 * 1024;
 pub(crate) const WATERMARK_MAX_BYTES: u64 = 16 * 1024;
+
+pub(crate) const SESSION_LOCK_FILE: &str = "session.lock";
+pub(crate) const COMMIT_LOCK_FILE: &str = "commit.lock";
+pub(crate) const PUBLICATION_INTENT_FILE: &str = "commit.pending.json";
+pub(crate) const AUTHORITY_INTENT_FILE: &str = "authority.pending.json";
+pub(crate) const INTENT_MAX_BYTES: u64 = 32 * 1024;
+pub(crate) const LOCK_DEADLINE_MS: u64 = 2000;

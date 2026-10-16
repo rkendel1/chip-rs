@@ -55,17 +55,42 @@ the watermark are an unfinished append: reported as an uncommitted tail, never a
 `authority.json`: exact keys `schema_version` (1), `session_id` (equals the directory name), `authority_id`
 (32 hex), `storage_format` (`event_log_v1`), `source` (`native_create` or `legacy_migration`).
 
+## Commit protocol (writing)
+
+Taken from `publishFrames` and `createNativeSession` in `session_log.zig`; `chip-session` follows it step for step.
+
+Append: (1) write the frames at the committed end (dropping any longer, unpublished tail first) and sync the log; (2) take `commit.lock`; check the watermark is still the prior position and no intent exists; (3) durably write `commit.pending.json` (`kind: watermark_advance`, `prior`, `proposed`, an operation id); (4) durably replace `commit.<generation>.json`; (5) read the watermark and appended bytes back; (6) remove the intent and sync the directory. "Durably" means temp file `.<name>.tmp.<hex>` created 0600, written, synced, renamed over the target, directory synced.
+
+A failure before the intent rolls the tail back (nothing published). A failure after it republishes the prior position. Never retried.
+
+Create: `mkdir` 0700; `events.jsonl` (exclusive, 0600) with the `session_started` frame at seq 1; sync; durable watermark; durable `authority.pending.json` (`session_create`); durable `authority.json`; remove the intent.
+
+Open for writing: require mode 0700 / 0600 and single hard links; take `session.lock` (flock, 2 s deadline, `Locked` on timeout); under `commit.lock` resolve an interrupted creation, then an interrupted publication:
+
+* watermark equals the proposed position and the log is valid there: roll forward;
+* watermark equals the proposed position but the log is not valid there: require the prior to be valid, truncate to it, republish it;
+* watermark equals the prior: require the prior to be valid and drop the unpublished tail;
+* anything else: `CommitIndeterminate`, refused.
+
+Then remove the intent. An unreadable or foreign intent is refused and left in place.
+
+Only the truth files are written. The projections are rebuilt by whoever resumes the session; the Zig binary does this on resume (verified, below).
+
 ## What `chip-session` does today
 
-Reads one session directory read-only and proves the committed range. A missing, stale or invalid
-projection is reported (`ManifestStatus`, `CheckpointStatus`), not repaired; the manifest's
-`checkpoint_sha256` is verified against `checkpoint.json`.
+* Reads one session directory read-only and proves the committed range. A missing, stale or invalid projection is reported (`ManifestStatus`, `CheckpointStatus`), not repaired.
+* `SessionWriter::{create, open, append}` with crash-injection points (`Boundary`) used by the tests to model a process dying at each step.
 
-## Not done yet (blockers for retiring the Zig store)
+## Evidence
 
-* Writing: create a session, append with the Zig commit protocol (append, sync, publication intent, watermark
-  rename, directory sync), locking, recovery of an interrupted publication, rollback of a failed tail.
-* Proof that the Zig binary reads a Rust-written session (resume).
-* Payload meaning: turns, usage, recovery checkpoints, state replacement and compaction.
-* Projection rebuild (`session.json`, `checkpoint.json`, `display.json`), `latest/` and the session index,
-  child (subagent) sessions, legacy migration.
+* `crates/chip-session/tests/zig_fixtures.rs` (16): Zig-written sessions read and verify; frames re-encode to exactly Zig's bytes; corruption is refused.
+* `crates/chip-session/tests/writer.rs` (15): the writer's watermark and authority bytes equal Zig's for Zig-written sessions; a crash at every append boundary resolves to the prior or proposed position and the session keeps working; torn tail over a published watermark rolls back; stale tail replaced; malformed or foreign intent refused; a crash during creation never yields a half session; second writer `Locked`; non-private modes refused.
+* Cross-implementation, with the real Zig binary: `docs/rebuild/tools/verify_rust_session_resume.py` in rkendel1/fx. Zig creates a session; Rust appends; Zig resumes and runs another turn; Rust reads a contiguous log with both writers' events. Rust creates a session; Zig resumes it. A negative control (Rust appends an event Zig rejects) shows the check can fail.
+  Run locally; it needs the Zig binary and is not yet a CI job.
+
+## Not done (blockers for retiring the Zig store)
+
+* Rebuilding the projections (`session.json`, `checkpoint.json`, `display.json`, `usage-v2.json`), `latest/` and the session index, child (subagent) sessions, legacy migration, log compaction and state replacement.
+* Payload meaning: turns, usage, recovery checkpoints. Callers pass payload JSON; the store does not interpret it.
+* The cross-implementation check is not in CI; macOS is untested (fsync semantics differ).
+* A concurrent Zig process and a Rust writer share the same advisory lock files (`flock`), which is why the second writer is refused, but that is covered only by the same-process test.
