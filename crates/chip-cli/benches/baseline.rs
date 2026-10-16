@@ -32,6 +32,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+mod common;
+
 use chip_cli::local_environment::{LocalEnvironment, LocalEnvironmentProvider, opaque_id};
 use chip_cli::provider_selection::Selection;
 use chip_cli::service::{Capacity, Service};
@@ -1144,10 +1147,22 @@ async fn mock_model(delay: Duration, script: fn(usize) -> &'static str) -> Mock 
                 let payload = format!(
                     "{{\"id\":\"m\",\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{content}}}}}],\"usage\":{{\"prompt_tokens\":100,\"completion_tokens\":20}}}}"
                 );
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
-                    payload.len()
-                );
+                // The default executor (FX) streams; the legacy one does not. One scripted reply
+                // serves whichever the run under measurement asked for.
+                let streamed = body.contains("\"stream\":true");
+                let response = match streamed
+                    .then(|| common::as_event_stream(&payload))
+                    .flatten()
+                {
+                    Some(events) => format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{events}",
+                        events.len()
+                    ),
+                    None => format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+                        payload.len()
+                    ),
+                };
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.shutdown().await;
             });
