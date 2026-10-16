@@ -9,8 +9,8 @@ license = "MIT"
 chip-inference = { path = "../chip-inference" }
 # The authoritative FX. One implementation of request validation, single-attempt
 # execution, normalization, delivery certainty and terminal outcomes. Pinned by commit.
-fx-core = { git = "https://github.com/rkendel1/fx", rev = "b5eb213ed7e7f588374f27ce392482404c381c75" }
-fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "b5eb213ed7e7f588374f27ce392482404c381c75" }
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "e0283cf26fe2e066abdc7c86494e56747c902355" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "e0283cf26fe2e066abdc7c86494e56747c902355" }
 async-trait = "0.1"
 serde_json = "1"
 

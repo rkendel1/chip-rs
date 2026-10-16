@@ -74,7 +74,7 @@ provider; the endpoint must be the URL the legacy adapters post to (`.../v1/chat
 servers, `.../v1/messages` for Anthropic), from which the API root is derived. Keys come from `CHIP_API_KEY` if it
 is set, otherwise from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (see Credentials above). Anything the native path
 cannot carry is a configuration error that names it, before any request: the `ollama` provider's own API (its
-OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING`, and an endpoint that does not end in the expected
+OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING` on the Anthropic provider (which has no such field; the legacy adapter ignored it there), and an endpoint that does not end in the expected
 path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor; the other consumers
 of `chip-legacy-http` (listed in `legacy-http-consumers.txt`) have not moved.
 
@@ -101,7 +101,7 @@ Differences that are deliberate or known:
 | Failure detail | message text | structured: kind, status, retry-after, partial output and delivery certainty (`definitely_unsent`, `possibly_sent`, `confirmed_response`) |
 | Endpoint | any URL, posted as given | must end in the provider path; plain `http` only for loopback or without a key |
 | Provider APIs | OpenAI-compatible, Anthropic, Ollama native | OpenAI-compatible and Anthropic |
-| `CHIP_ENABLE_THINKING` | sent | refused |
+| `CHIP_ENABLE_THINKING` | sent as top-level `chat_template_kwargs.enable_thinking` (OpenAI-compatible only; ignored on Anthropic) | the same field on OpenAI-compatible endpoints, both `true` and `false`; refused by name on Anthropic |
 | Proxies, custom CA certificates | per `reqwest` | not supported (bundled public roots, no proxy) |
 
 ## What still blocks making `fx` the default and retiring `chip-legacy-http`
@@ -109,7 +109,7 @@ Differences that are deliberate or known:
 * **A live check** against Anthropic, LM Studio and OpenRouter. Everything above is mocked transport; TLS has no test.
 * The **JSON-object mode** difference on real servers (above).
 * LM Studio on a **non-loopback `http`** address (a LAN host) is refused by the native path.
-* **Ollama's native API** and `CHIP_ENABLE_THINKING`.
+* **Ollama's native API** (its OpenAI-compatible `/v1` endpoint works).
 * The remaining consumers of the legacy executor: `work_demo`, `horizon`, `verify`, `pax_work`, `micro`,
   `live_benchmark`, the `--benchmark-live-reasoner` command, and `chip-cli`'s own benches and tests.
 * `chip work` and `chip serve` need a real PAX binary, so their end-to-end run through `fx` was not exercised in the
