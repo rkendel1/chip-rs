@@ -191,11 +191,11 @@ pub fn demo(native: &Native) -> Result<String, String> {
         Agent, Assessment, CapabilityId, CapabilityRequest, ExecutionId, ExecutionStatus,
         Observation, ObservationKind, StateToken,
     };
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
     use chip_local_ml::rust_ml_runtime::{
         DecisionExecution, DecisionProvenance, DecisionResult, DecisionValue, ModelIdentity,
         TypedDecision,
     };
-    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
     struct RemoteModel(Arc<AtomicUsize>);
 

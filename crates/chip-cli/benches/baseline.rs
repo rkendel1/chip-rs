@@ -45,8 +45,8 @@ use chip_core::{
     Observer, WorkDecisionBoundary, WorkEnvironment, WorkEvent, WorkGoal, WorkId, WorkLimits,
     WorkSpec,
 };
-use chip_pax::PaxExecutor;
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_pax::PaxExecutor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 

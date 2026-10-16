@@ -5,9 +5,9 @@ mod common;
 
 use std::time::Duration;
 
-use common::start;
 use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
 use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_ANTHROPIC, default_endpoint};
+use common::start;
 
 const FAKE_KEY: &str = "fake-anthropic-key-for-tests";
 

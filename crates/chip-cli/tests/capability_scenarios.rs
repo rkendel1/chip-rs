@@ -23,8 +23,8 @@ use chip_core::{
     EnvironmentDescription, ExecutionEvent, LocalWorkPolicy, NoLocalPolicy, ObservationKind,
     WorkEvent, WorkId, WorkLimits, WorkOutcome,
 };
-use chip_pax::PaxExecutor;
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_pax::PaxExecutor;
 
 const OLD_LIB: &str = "pub fn len(s: &str) -> usize {\n    s.len()\n}\n";
 const RIGHT: &str = "pub fn len(s: &str) -> usize {\n    s.len()\n}\n\npub fn canonical(s: &str) -> String {\n    let mut p: Vec<&str> = s.split('&').collect();\n    p.sort();\n    p.join(\"&\")\n}\n";

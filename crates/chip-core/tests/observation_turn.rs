@@ -9,7 +9,9 @@ use chip_core::{
     ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor,
     Observation, ObservationKind, ScriptedDecision, TestExecutor, Turn,
 };
-use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{
+    FxError, Message, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage,
+};
 
 #[derive(Default)]
 struct RecordingModel {

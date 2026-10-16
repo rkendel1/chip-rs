@@ -1,0 +1,28 @@
+[package]
+name = "chip-wasm-host"
+version = "0.1.0"
+edition = "2024"
+description = "Chip's work loop as a host-driven WebAssembly session: it asks the host for inference (to FX) and for capability execution, and never reaches either itself"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-inference = { path = "../chip-inference" }
+chip-fx = { path = "../chip-fx" }
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "367da42" }
+# The one WebAssembly export surface, shared with fx-host (the unsafe code lives only there).
+fx-wasm-abi = { git = "https://github.com/rkendel1/fx", rev = "367da42" }
+async-trait = "0.1"
+serde_json = "1"
+
+[lints.rust]
+# The only code that opts in to unsafe is src/abi.rs, which expands the shared macro.
+unsafe_code = "deny"
+
+[dev-dependencies]
+# Tests play the host: they answer inference requests with the real FX executor.
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "367da42" }

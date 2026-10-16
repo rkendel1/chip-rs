@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chip_core::{
-    CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
-    CapabilityInput, CapabilityProvider, ExecutionError, ExecutionRequest, ExecutionResult,
-    Executor, WorkGoal, WorkId, WorkSpec,
+    CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInput,
+    CapabilityProvider, ExecutionError, ExecutionRequest, ExecutionResult, Executor, WorkGoal,
+    WorkId, WorkSpec,
 };
 use fx_core::{AttemptBudget, Request};
 use fx_single_attempt::testing::{done, poll};
@@ -112,7 +112,11 @@ impl ProviderPort for SequencePort {
         match attempt {
             Attempt::Fail(failure) => Err(failure),
             Attempt::Reply(text) => Ok(SequenceCall {
-                polls: VecDeque::from([Ok(poll(reply_items(&text), Observed::OutputObserved, true))]),
+                polls: VecDeque::from([Ok(poll(
+                    reply_items(&text),
+                    Observed::OutputObserved,
+                    true,
+                ))]),
                 flip: None,
             }),
             Attempt::Cut(text) => Ok(SequenceCall {
@@ -125,7 +129,11 @@ impl ProviderPort for SequencePort {
             }),
             Attempt::CancelWhileStreaming(text) => Ok(SequenceCall {
                 polls: VecDeque::from([
-                    Ok(poll(vec![PortItem::Text(text)], Observed::OutputObserved, false)),
+                    Ok(poll(
+                        vec![PortItem::Text(text)],
+                        Observed::OutputObserved,
+                        false,
+                    )),
                     Ok(poll(Vec::new(), Observed::OutputObserved, false)),
                     Ok(poll(
                         vec![done(Some("stop"), Terminal::ProviderMarker)],
@@ -138,7 +146,11 @@ impl ProviderPort for SequencePort {
         }
     }
 
-    fn poll(&mut self, call: &mut SequenceCall, _max_items: usize) -> Result<PortPoll, PortFailure> {
+    fn poll(
+        &mut self,
+        call: &mut SequenceCall,
+        _max_items: usize,
+    ) -> Result<PortPoll, PortFailure> {
         let next = call
             .polls
             .pop_front()
@@ -168,8 +180,11 @@ pub struct Caps;
 #[async_trait]
 impl CapabilityProvider for Caps {
     async fn capabilities(&self) -> Result<Vec<CapabilityDescriptor>, CapabilityError> {
-        let mut descriptor =
-            CapabilityDescriptor::new(CapabilityId::new("compute.selftest")?, "selftest", "runs the self test");
+        let mut descriptor = CapabilityDescriptor::new(
+            CapabilityId::new("compute.selftest")?,
+            "selftest",
+            "runs the self test",
+        );
         descriptor.inputs.push(CapabilityInput {
             name: "n".into(),
             description: String::new(),
@@ -216,7 +231,8 @@ impl Executor for CountingExecutor {
         if self.fail {
             return Ok(ExecutionResult::failure(request.id, "self test failed"));
         }
-        Ok(ExecutionResult::success(request.id, "self test passed").with_receipt_id("sha256:receipt"))
+        Ok(ExecutionResult::success(request.id, "self test passed")
+            .with_receipt_id("sha256:receipt"))
     }
 }
 

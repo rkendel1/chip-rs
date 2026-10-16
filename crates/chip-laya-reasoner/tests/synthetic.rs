@@ -14,9 +14,9 @@ use chip_core::{
     LocalReasoner, LocalReasoningResult, Observation, ObservationKind, ReasoningError,
     ReasoningInput, StateToken,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_laya_reasoner::{LayaReasoner, LayaVerdict};
 use chip_reasoning_corpus::{corpus, evaluate};
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 fn reasoner(tag: &str) -> LayaReasoner {
     let dir = support::temp_dir(tag);

@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use chip_inference::{Delivery, FxError, InferenceFailure, MessageRole, ModelRequest, ModelResponse, Usage};
+use chip_inference::{
+    Delivery, FxError, InferenceFailure, MessageRole, ModelRequest, ModelResponse, Usage,
+};
 use fx_core::{
     AttemptBudget, CacheHint, Correlation, DeliveryCertainty, Disposition, ErrorKind, Message,
     ModelRef, Outcome, Part, Request, RequestId, Role,

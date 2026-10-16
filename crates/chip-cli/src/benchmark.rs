@@ -14,8 +14,8 @@ use chip_core::{
     LocalReasoningResult, ReasoningError, ReasoningInput, StateToken, TestExecutor,
     TestLocalReasoner, Turn,
 };
-use chip_wasm_reasoner::{WasmLocalReasoner, benchmark_fixture};
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_wasm_reasoner::{WasmLocalReasoner, benchmark_fixture};
 
 /// Latency summary over one measured path.
 #[derive(Debug, Clone)]

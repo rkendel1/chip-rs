@@ -352,6 +352,7 @@ dependencies = [
  "chip-inference",
  "fx-core",
  "fx-single-attempt",
+ "serde_json",
  "tokio",
 ]
 
@@ -506,6 +507,19 @@ dependencies = [
  "chip-wasm-decision",
  "wasmi",
  "wat",
+]
+
+[[package]]
+name = "chip-wasm-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "chip-fx",
+ "chip-inference",
+ "fx-core",
+ "fx-wasm-abi",
+ "serde_json",
 ]
 
 [[package]]
@@ -1167,6 +1181,11 @@ source = "git+https://github.com/rkendel1/fx?rev=367da42#367da424fd9db3b39907d92
 dependencies = [
  "fx-core",
 ]
+
+[[package]]
+name = "fx-wasm-abi"
+version = "0.1.0"
+source = "git+https://github.com/rkendel1/fx?rev=367da42#367da424fd9db3b39907d92fd72f630c9cf55cd2"
 
 [[package]]
 name = "gemm"
