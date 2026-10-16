@@ -45,8 +45,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 serde_json = "1"
 # The benchmark's scripted provider port (a host-side double, as in `chip-fx`'s tests). Pinned to the
 # same FX commit as `chip-fx`. Dev-only: nothing in the shipped binary depends on it.
-fx-core = { git = "https://github.com/rkendel1/fx", rev = "72ef7a41c5f7b714774ec224c38aa23b53325759" }
-fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "72ef7a41c5f7b714774ec224c38aa23b53325759" }
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
 
 # The performance baseline (a measurement, not a test): `cargo bench -p chip-cli --bench baseline`.
 [[bench]]

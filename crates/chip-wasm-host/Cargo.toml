@@ -13,9 +13,9 @@ crate-type = ["cdylib", "rlib"]
 chip-core = { path = "../chip-core" }
 chip-inference = { path = "../chip-inference" }
 chip-fx = { path = "../chip-fx" }
-fx-core = { git = "https://github.com/rkendel1/fx", rev = "72ef7a41c5f7b714774ec224c38aa23b53325759" }
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
 # The one WebAssembly export surface, shared with fx-host (the unsafe code lives only there).
-fx-wasm-abi = { git = "https://github.com/rkendel1/fx", rev = "72ef7a41c5f7b714774ec224c38aa23b53325759" }
+fx-wasm-abi = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
 async-trait = "0.1"
 serde_json = "1"
 
@@ -25,4 +25,4 @@ unsafe_code = "deny"
 
 [dev-dependencies]
 # Tests play the host: they answer inference requests with the real FX executor.
-fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "72ef7a41c5f7b714774ec224c38aa23b53325759" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }

@@ -18,12 +18,18 @@ fn manifest(name: &str) -> String {
 }
 
 fn dependency_names(manifest: &str) -> Vec<String> {
+    dependency_names_in(manifest, true)
+}
+
+/// Dependency names; with `dev` false, the `[dev-dependencies]` table is left out (what a shipped
+/// crate links, as opposed to what its tests and benches use).
+fn dependency_names_in(manifest: &str, dev: bool) -> Vec<String> {
     let mut in_deps = false;
     let mut names = Vec::new();
     for line in manifest.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            in_deps = line.contains("dependencies");
+            in_deps = line.contains("dependencies") && (dev || !line.contains("dev-dependencies"));
         } else if in_deps {
             if let Some((name, _)) = line.split_once('=') {
                 names.push(name.trim().to_string());
@@ -71,12 +77,20 @@ fn chip_core_and_model_port_do_not_reference_fx_or_legacy_http() {
 #[test]
 fn only_the_adapter_crates_reference_fx() {
     for name in all_crates() {
-        let deps = dependency_names(&manifest(&name));
-        let uses_fx = FX_CRATES.iter().any(|f| deps.contains(&f.to_string()));
+        let manifest = manifest(&name);
         let allowed = name == "chip-fx" || name == "chip-wasm-host" || name == "chip-fx-native";
+        let uses = |deps: &[String]| FX_CRATES.iter().any(|f| deps.contains(&f.to_string()));
+        // What ships: only the adapter crates link FX.
         assert!(
-            !uses_fx || allowed,
+            !uses(&dependency_names_in(&manifest, false)) || allowed,
             "{name} references FX but is not an adapter crate"
+        );
+        // What only tests and benches use: `chip-cli`'s performance benchmark builds a scripted
+        // `ProviderPort` under the real FX (as `chip-fx`'s own tests do), so it may carry FX as a
+        // dev-dependency and nothing else may.
+        assert!(
+            !uses(&dependency_names(&manifest)) || allowed || name == "chip-cli",
+            "{name} references FX (even as a dev-dependency) but is not an adapter crate"
         );
     }
 }

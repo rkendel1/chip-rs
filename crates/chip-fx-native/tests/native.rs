@@ -34,6 +34,7 @@ fn settings(server: &Server, options: OptionsPolicy) -> NativeSettings {
         json_object_output: false,
         template_thinking: None,
         allow_insecure_lan_http: false,
+        root_certificates_pem: None,
         id_seed: *b"chip-nat",
     }
 }
@@ -183,6 +184,7 @@ fn settings_the_provider_refuses_are_configuration_errors_and_never_print_the_ke
         json_object_output: false,
         template_thinking: None,
         allow_insecure_lan_http: false,
+        root_certificates_pem: None,
         id_seed: [0; 8],
     };
     assert!(matches!(
@@ -272,4 +274,66 @@ async fn a_failed_attempt_ends_the_work_without_a_second_provider_call() {
         1,
         "Chip does not retry and FX does not either"
     );
+}
+
+/// A self-signed certificate used only to check that a bundle is accepted (no handshake uses it).
+const TEST_ROOT: &str = "-----BEGIN CERTIFICATE-----\nMIIBpTCCAUugAwIBAgIUGxuR7UMf4wCGUFknHqHQLWt5m8UwCgYIKoZIzj0EAwIw\nJzElMCMGA1UEAwwcZngtbmF0aXZlLXByb3ZpZGVyIHRlc3Qgcm9vdDAgFw0yNjEw\nMTYyMzMzMDdaGA8yMTI2MDkyMjIzMzMwN1owJzElMCMGA1UEAwwcZngtbmF0aXZl\nLXByb3ZpZGVyIHRlc3Qgcm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD/G\nkpsDC8dks62rbWrLyQOKfPkRE8bJO5zo34h/jpjW6+Bk4E0NxvHG+/Pk5XnE0Kl4\n6ZLRPS23H2e67YN8ey+jUzBRMB0GA1UdDgQWBBSGpTf0iUNc8ZX9GGBfjFmYkX+U\n0DAfBgNVHSMEGDAWgBSGpTf0iUNc8ZX9GGBfjFmYkX+U0DAPBgNVHRMBAf8EBTAD\nAQH/MAoGCCqGSM49BAMCA0gAMEUCIQDnh3EtlQ2kBCfUMrFfqiqIhT/VVZFkqUV+\niZCe/neitgIgb1IFqNXOjw0/7R5oHwzaJiUCaJ+R5Waxy1oxMw8U2LM=\n-----END CERTIFICATE-----\n";
+
+#[test]
+fn a_ca_bundle_is_accepted_for_both_providers_and_a_bundle_without_a_certificate_is_refused() {
+    for kind in [ProviderKind::OpenAiCompatible, ProviderKind::Anthropic] {
+        let base = |pem: Option<&str>| NativeSettings {
+            kind,
+            base_url: "https://gateway.example/v1".into(),
+            api_key: Some(KEY.to_owned()),
+            headers: vec![],
+            options: OptionsPolicy::DropUnsupported,
+            budget: None,
+            default_max_tokens: Some(64),
+            json_object_output: false,
+            template_thinking: None,
+            allow_insecure_lan_http: false,
+            root_certificates_pem: pem.map(|p| p.as_bytes().to_vec()),
+            id_seed: *b"chip-nat",
+        };
+        assert!(NativeModelProvider::new(base(None)).is_ok());
+        assert!(NativeModelProvider::new(base(Some(TEST_ROOT))).is_ok());
+        for bad in [
+            "",
+            "not a certificate",
+            "-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----\n",
+        ] {
+            match NativeModelProvider::new(base(Some(bad))) {
+                Err(FxError::Configuration(why)) => assert!(!why.contains(KEY), "{why}"),
+                other => panic!(
+                    "a bundle with no certificate must be refused, got {:?}",
+                    other.map(|_| "a provider")
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn the_settings_debug_output_shows_that_a_bundle_is_set_but_not_its_contents() {
+    let mut s = NativeSettings {
+        kind: ProviderKind::OpenAiCompatible,
+        base_url: "https://gateway.example/v1".into(),
+        api_key: Some(KEY.to_owned()),
+        headers: vec![],
+        options: OptionsPolicy::DropUnsupported,
+        budget: None,
+        default_max_tokens: None,
+        json_object_output: false,
+        template_thinking: None,
+        allow_insecure_lan_http: false,
+        root_certificates_pem: Some(TEST_ROOT.as_bytes().to_vec()),
+        id_seed: *b"chip-nat",
+    };
+    let shown = format!("{s:?}");
+    assert!(
+        shown.contains("root_certificates_pem") && !shown.contains("MIIB") && !shown.contains(KEY)
+    );
+    s.root_certificates_pem = None;
+    assert!(format!("{s:?}").contains("None"));
 }
