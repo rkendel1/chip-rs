@@ -131,6 +131,12 @@ fn fx_model(
             )));
         }
     };
+    if config.enable_thinking.is_some() {
+        return Err(FxError::Configuration(
+            "CHIP_ENABLE_THINKING is not supported by the fx executor; use --executor legacy"
+                .into(),
+        ));
+    }
     let mut selection = NativeSelection::new(kind);
     selection.endpoint = Some(api_root(&config.endpoint, kind)?);
     selection.budget = Some(config.timeout);
@@ -146,9 +152,6 @@ fn fx_model(
         // Anthropic's Messages API has no equivalent; the legacy adapter ignores the flag there too.
         selection.json_object_output = config.json_object_output;
     }
-    // Carried as the same `chat_template_kwargs.enable_thinking` field the legacy adapter sends. On
-    // Anthropic the legacy adapter ignored it silently; the fx executor refuses it by name instead.
-    selection.template_thinking = config.enable_thinking;
     // The key Chip already resolved from CHIP_API_KEY wins; otherwise the provider's own variable.
     let chip_key = config.api_key.as_ref().map(|k| k.expose().to_string());
     if chip_key.is_some() {

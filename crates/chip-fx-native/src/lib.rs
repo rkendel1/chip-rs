@@ -78,10 +78,6 @@ pub struct NativeSettings {
     /// Ask for one JSON object on every request (OpenAI-compatible endpoints only; Anthropic has
     /// no equivalent and the request is refused before dispatch if this is set).
     pub json_object_output: bool,
-    /// OpenAI-compatible endpoints only: send `chat_template_kwargs.enable_thinking` with this
-    /// value. Anthropic has no equivalent, so setting it there is a configuration error rather
-    /// than a silently dropped request.
-    pub template_thinking: Option<bool>,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -139,19 +135,9 @@ impl NativeModelProvider {
                 for (name, value) in &settings.headers {
                     config = config.with_header(name, value).map_err(bad)?;
                 }
-                if let Some(enable) = settings.template_thinking {
-                    config = config.with_chat_template_thinking(enable);
-                }
                 NativePort::OpenAi(OpenAiCompatible::new(config))
             }
             ProviderKind::Anthropic => {
-                if settings.template_thinking.is_some() {
-                    return Err(FxError::Configuration(
-                        "the chat-template thinking switch has no Anthropic equivalent; unset it \
-                         (CHIP_ENABLE_THINKING) for the Anthropic provider"
-                            .into(),
-                    ));
-                }
                 let key = key.ok_or_else(|| {
                     FxError::Configuration("the Anthropic provider needs an API key".into())
                 })?;

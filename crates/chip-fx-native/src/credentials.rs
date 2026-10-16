@@ -101,9 +101,6 @@ pub struct NativeSelection {
     pub default_max_tokens: Option<u32>,
     /// Ask for one JSON object on every request (OpenAI-compatible endpoints only).
     pub json_object_output: bool,
-    /// OpenAI-compatible endpoints only: send `chat_template_kwargs.enable_thinking` with this
-    /// value (what `CHIP_ENABLE_THINKING` means). `None` sends nothing.
-    pub template_thinking: Option<bool>,
 }
 
 impl NativeSelection {
@@ -117,7 +114,6 @@ impl NativeSelection {
             budget: None,
             default_max_tokens: None,
             json_object_output: false,
-            template_thinking: None,
         }
     }
 }
@@ -187,7 +183,6 @@ impl NativeSettings {
             budget: selection.budget,
             default_max_tokens: selection.default_max_tokens,
             json_object_output: selection.json_object_output,
-            template_thinking: selection.template_thinking,
             id_seed,
         })
     }
