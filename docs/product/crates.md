@@ -140,6 +140,7 @@ member must appear exactly once.
 | `chip-project` | PRODUCT | KEEP | L3 | - |
 | `chip-inference` | PRODUCT | KEEP | L2 | L4 |
 | `chip-fx` | INTEGRATION | KEEP | L3 | - |
+| `chip-session` | INTEGRATION | KEEP | L3 | - |
 | `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
 | `chip-legacy-http` | INTEGRATION | KEEP | L2 | L3 |
 | `chip-pax` | INTEGRATION | KEEP | L3 | - |
@@ -230,6 +231,13 @@ authoritative FX (`fx-core` + `fx-single-attempt` from `rkendel1/fx`). It maps a
 attempt and the FX report back to a `ModelResponse` or an `FxError::Inference` that keeps delivery
 certainty, status and retry hint. It never retries, falls back or routes. Architecture and retirement
 tests in `tests/`. Design: `docs/product/authoritative-fx.md`.
+
+**`chip-session`** (INTEGRATION, L3). Reads the durable session store the Zig `fx` owns
+(`event_log_v1` under `~/.fx/sessions/<id>`): exact-key frames, the committed watermark, contiguous
+sequence numbers, an uncommitted tail that is reported and never returned as history. Read-only in
+this slice; it is not a second store and invents no format. Verified against sessions written by the
+real Zig binary (`tests/fixtures/zig`). Format: [`session-format.md`](session-format.md). No Chip, FX or
+provider dependency.
 
 **`chip-wasm-host`** (INTEGRATION, L3). Chip's work loop as a `wasm32-unknown-unknown` module with no
 imports, driven by a host over the shared `fx-wasm-abi` JSON session ABI. The host performs provider

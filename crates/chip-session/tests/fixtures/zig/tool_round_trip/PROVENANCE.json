@@ -1,0 +1,14 @@
+{
+  "scenario": "tool_round_trip",
+  "binary": "0.0.4",
+  "session_id": "1792169198476-1792169198476164196-9e3220cf5ceeec98",
+  "files": [
+    "authority.json",
+    "checkpoint.json",
+    "commit.bfdf9f31e5376d3b48a24a317fdb62b3.json",
+    "display.json",
+    "events.jsonl",
+    "session.json",
+    "usage-v2.json"
+  ]
+}

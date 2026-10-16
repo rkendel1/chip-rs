@@ -449,6 +449,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chip-session"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "chip-wasm-decision"
 version = "0.1.0"
 

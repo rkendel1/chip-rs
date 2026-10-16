@@ -1,0 +1,14 @@
+{
+  "scenario": "single_text",
+  "binary": "0.0.4",
+  "session_id": "1792169197990-1792169197990375667-44b9dfe654a46a4f",
+  "files": [
+    "authority.json",
+    "checkpoint.json",
+    "commit.610959fef43d253fe02269f0912c943f.json",
+    "display.json",
+    "events.jsonl",
+    "session.json",
+    "usage-v2.json"
+  ]
+}
