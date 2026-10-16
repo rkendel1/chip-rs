@@ -1289,6 +1289,9 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
 
 fn usage() -> i32 {
     eprintln!(
+        "note: RETRYING A TURN MAY REPEAT EXTERNAL EFFECTS: no exactly-once guarantee, no resume of an interrupted response, no automatic replay (docs/product/release-limitations.md)"
+    );
+    eprintln!(
         "usage: chip work \"<goal>\" [--kind change|verify|inspect] [--provider P] [--model M] [--endpoint URL] [--executor fx] [--json] [--print-reply] [--max-turns N] [--max-executions N] [--context-budget-bytes N]"
     );
     eprintln!(
