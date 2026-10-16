@@ -234,8 +234,9 @@ tests in `tests/`. Design: `docs/product/authoritative-fx.md`.
 
 **`chip-session`** (INTEGRATION, L3). Reads the durable session store the Zig `fx` owns
 (`event_log_v1` under `~/.fx/sessions/<id>`): exact-key frames, the committed watermark, contiguous
-sequence numbers, an uncommitted tail that is reported and never returned as history. Read-only in
-this slice; it is not a second store and invents no format. Verified against sessions written by the
+sequence numbers, an uncommitted tail that is reported and never returned as history. Also writes it
+with the Zig commit protocol (`SessionWriter`: create, open with interrupted-write recovery, append) and
+rewrites only the truth files. It is not a second store and invents no format. Verified against sessions written by the
 real Zig binary (`tests/fixtures/zig`). Format: [`session-format.md`](session-format.md). No Chip, FX or
 provider dependency.
 

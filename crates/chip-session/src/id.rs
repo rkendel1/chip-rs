@@ -41,3 +41,20 @@ impl fmt::Debug for Identifier {
         write!(f, "Identifier({self})")
     }
 }
+
+/// Where new identifiers (log generations, event ids, authority ids, operation ids) come from.
+pub trait IdSource {
+    fn next_id(&mut self) -> std::io::Result<Identifier>;
+}
+
+/// Identifiers from the operating system's random source.
+pub struct OsIds;
+
+impl IdSource for OsIds {
+    fn next_id(&mut self) -> std::io::Result<Identifier> {
+        use std::io::Read;
+        let mut bytes = [0u8; 16];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+        Ok(Identifier(bytes))
+    }
+}

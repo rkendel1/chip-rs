@@ -90,7 +90,7 @@ pub struct CommittedLog {
     pub checkpoint: CheckpointStatus,
 }
 
-fn open_regular(dir: &Path, name: &str) -> Result<File, SessionError> {
+pub(crate) fn open_regular(dir: &Path, name: &str) -> Result<File, SessionError> {
     let path = dir.join(name);
     let meta = match fs::symlink_metadata(&path) {
         Ok(meta) => meta,
@@ -117,7 +117,7 @@ fn open_regular(dir: &Path, name: &str) -> Result<File, SessionError> {
     Ok(File::open(path)?)
 }
 
-fn read_bounded(dir: &Path, name: &str, max: u64) -> Result<Vec<u8>, SessionError> {
+pub(crate) fn read_bounded(dir: &Path, name: &str, max: u64) -> Result<Vec<u8>, SessionError> {
     let file = open_regular(dir, name)?;
     let mut bytes = Vec::new();
     file.take(max + 1).read_to_end(&mut bytes)?;
@@ -137,7 +137,7 @@ fn invalid(file: &str, reason: impl ToString) -> SessionError {
     }
 }
 
-fn read_authority(dir: &Path, session_id: &str) -> Result<Authority, SessionError> {
+pub(crate) fn read_authority(dir: &Path, session_id: &str) -> Result<Authority, SessionError> {
     let bytes = read_bounded(dir, AUTHORITY_FILE, AUTHORITY_MAX_BYTES)?;
     let wire: AuthorityWire =
         serde_json::from_slice(&bytes).map_err(|e| invalid(AUTHORITY_FILE, e))?;
@@ -160,7 +160,7 @@ fn read_authority(dir: &Path, session_id: &str) -> Result<Authority, SessionErro
 }
 
 /// Reads the first line of the log to learn the live generation.
-fn first_generation(log: &mut File) -> Result<Identifier, SessionError> {
+pub(crate) fn first_generation(log: &mut File) -> Result<Identifier, SessionError> {
     let mut line = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -180,7 +180,7 @@ fn first_generation(log: &mut File) -> Result<Identifier, SessionError> {
     Ok(decode_frame(&line, 0)?.log_generation)
 }
 
-fn read_watermark(
+pub(crate) fn read_watermark(
     dir: &Path,
     session_id: &str,
     generation: Identifier,
@@ -365,4 +365,15 @@ pub fn read_session(session_dir: &Path) -> Result<CommittedLog, SessionError> {
         manifest,
         checkpoint,
     })
+}
+
+/// The live generation of a session directory: the first frame's `log_generation`.
+pub(crate) fn live_generation(dir: &Path) -> Result<Identifier, SessionError> {
+    let mut log = open_regular(dir, EVENTS_FILE)?;
+    first_generation(&mut log)
+}
+
+/// Proves the log is intact up to `position` (frames, generation, sequence, last frame).
+pub(crate) fn validate_position(dir: &Path, position: CommitPosition) -> Result<(), SessionError> {
+    read_committed_frames(dir, position).map(|_| ())
 }

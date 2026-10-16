@@ -11,10 +11,8 @@ fn deps(manifest: &str) -> Vec<String> {
     for line in manifest.lines().map(str::trim) {
         if line.starts_with('[') {
             in_deps = line.contains("dependencies");
-        } else if in_deps {
-            if let Some((name, _)) = line.split_once('=') {
-                names.push(name.trim().to_string());
-            }
+        } else if in_deps && let Some((name, _)) = line.split_once('=') {
+            names.push(name.trim().to_string());
         }
     }
     names

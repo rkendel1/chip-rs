@@ -39,6 +39,20 @@ pub enum SessionError {
     },
     /// The watermark does not describe a real boundary of the log.
     WatermarkMismatch(String),
+    /// A write could not be made durable and was rolled back; nothing was published.
+    PersistenceDegraded(String),
+    /// A write may or may not have been published; the next open resolves it from the intent.
+    CommitIndeterminate(String),
+    /// The session directory or a managed file is not private (0700 / 0600).
+    PrivateStatePermissions(String),
+    /// Another writer holds the session lock.
+    Locked,
+    /// Creating a session whose directory already exists.
+    AlreadyExists,
+    /// An interrupted publication cannot be resolved to the prior or the proposed position.
+    RecoveryFailed(String),
+    /// Test-only: a configured fault point stopped the writer as if the process had died there.
+    SimulatedCrash(&'static str),
     Io(std::io::Error),
 }
 
@@ -83,6 +97,17 @@ impl fmt::Display for SessionError {
             Self::WatermarkMismatch(reason) => {
                 write!(f, "commit watermark does not match the log: {reason}")
             }
+            Self::PersistenceDegraded(why) => {
+                write!(f, "persistence degraded, nothing published: {why}")
+            }
+            Self::CommitIndeterminate(why) => write!(f, "commit indeterminate: {why}"),
+            Self::PrivateStatePermissions(what) => write!(f, "not private: {what}"),
+            Self::Locked => write!(f, "the session is locked by another writer"),
+            Self::AlreadyExists => write!(f, "the session already exists"),
+            Self::RecoveryFailed(why) => {
+                write!(f, "interrupted publication cannot be resolved: {why}")
+            }
+            Self::SimulatedCrash(at) => write!(f, "simulated crash at {at}"),
             Self::Io(error) => write!(f, "session i/o: {error}"),
         }
     }
