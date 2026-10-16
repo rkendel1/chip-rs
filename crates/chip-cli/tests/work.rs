@@ -451,14 +451,22 @@ async fn the_command_line_selection_is_the_only_model_called() {
 #[test]
 fn a_model_is_never_inferred_from_the_provider() {
     let dir = fixture("nomodel");
-    for provider in ["ollama", "anthropic"] {
-        let out = base(&["--provider", provider, GOAL], &dir)
-            .env_remove("CHIP_MODEL")
-            .env_remove("CHIP_PROVIDER")
-            .env_remove("CHIP_ENDPOINT")
-            .env_remove("CHIP_OLLAMA_ENDPOINT")
-            .output()
-            .unwrap();
+    for provider in ["openai-compatible", "anthropic"] {
+        let out = base(
+            &[
+                "--provider",
+                provider,
+                "--endpoint",
+                "http://127.0.0.1:1/v1/chat/completions",
+                GOAL,
+            ],
+            &dir,
+        )
+        .env_remove("CHIP_MODEL")
+        .env_remove("CHIP_PROVIDER")
+        .env_remove("CHIP_ENDPOINT")
+        .output()
+        .unwrap();
         assert_eq!(out.status.code(), Some(3), "{provider}: {}", text(&out));
         assert!(
             text(&out).contains("no model is selected") && text(&out).contains("CHIP_MODEL"),
@@ -512,20 +520,18 @@ async fn an_unavailable_provider_fails_explicitly_with_no_fallback() {
             &[
                 "--json",
                 "--provider",
-                "ollama",
+                "openai-compatible",
                 "--model",
                 "qwen3-coder",
                 "--endpoint",
-                "http://127.0.0.1:1",
+                "http://127.0.0.1:1/v1/chat/completions",
                 GOAL,
             ],
             &d,
         )
         .env("CHIP_PROVIDER", "openai-compatible")
-        .env("CHIP_EXECUTOR", "legacy") // this case selects Ollama's own API
         .env("CHIP_MODEL", "fallback-model")
         .env("CHIP_ENDPOINT", &url)
-        .env("CHIP_OLLAMA_ENDPOINT", &url)
         .output()
         .unwrap()
     })
@@ -535,7 +541,7 @@ async fn an_unavailable_provider_fails_explicitly_with_no_fallback() {
     assert_eq!(out.status.code(), Some(3), "{t}");
     assert!(
         t.contains("the selected model did not answer")
-            && t.contains("ollama")
+            && t.contains("openai-compatible")
             && t.contains("qwen3-coder"),
         "{t}"
     );
@@ -1062,10 +1068,10 @@ fn a_bad_context_budget_is_a_usage_error_and_runs_nothing() {
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
 }
 
-/// Selecting Ollama's own API on the command line while the default (fx) executor is in force is an
-/// explicit configuration error. The environment's working model is never called in its place.
+/// Selecting Ollama's own API on the command line is refused with the supported replacement named. The
+/// environment's working model is never called in its place.
 #[tokio::test(flavor = "multi_thread")]
-async fn selecting_ollamas_own_api_under_fx_fails_explicitly_and_calls_nothing() {
+async fn selecting_ollamas_own_api_fails_explicitly_and_calls_nothing() {
     if !pax_installed() {
         eprintln!("SKIPPED: PAX is not installed");
         return;
@@ -1103,7 +1109,9 @@ async fn selecting_ollamas_own_api_under_fx_fails_explicitly_and_calls_nothing()
     let t = text(&out);
     assert_eq!(out.status.code(), Some(3), "{t}");
     assert!(
-        t.contains("ollama") && t.contains("--executor legacy") && t.contains("nothing was run"),
+        t.contains("no longer supported")
+            && t.contains("openai-compatible")
+            && t.contains("nothing was run"),
         "{t}"
     );
     assert_eq!(

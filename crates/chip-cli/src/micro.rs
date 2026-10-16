@@ -1247,7 +1247,7 @@ impl ShadowRecord {
 pub fn resolve(
     selection: &crate::provider_selection::Selection,
     env: impl Fn(&str) -> Option<String>,
-) -> Result<chip_legacy_http::HttpProviderConfig, FxError> {
+) -> Result<chip_inference::ProviderConfig, FxError> {
     crate::provider_selection::resolve(selection, |name| {
         name.strip_prefix("CHIP_")
             .and_then(|rest| env(&format!("CHIP_MICRO_{rest}")))

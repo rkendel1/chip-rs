@@ -1,5 +1,11 @@
 use std::fmt;
 
+mod provider_config;
+pub use provider_config::{
+    DEFAULT_TIMEOUT, PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE, ProviderConfig,
+    default_endpoint,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModelId(pub String);
 

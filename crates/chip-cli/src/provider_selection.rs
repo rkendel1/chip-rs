@@ -18,9 +18,8 @@ use chip_fx_native::{
     ProviderKind,
 };
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
-use chip_legacy_http::{
-    HttpProvider, HttpProviderConfig, PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE,
-};
+use chip_inference::{PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
+use chip_legacy_http::HttpProvider;
 
 /// What the command line chose. Anything left `None` is decided by the environment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,16 +33,15 @@ pub struct Selection {
 
 /// The configuration this selection resolves to, with `env` as the environment.
 ///
-/// A command-line endpoint wins over both `CHIP_ENDPOINT` and `CHIP_OLLAMA_ENDPOINT`.
+/// A command-line endpoint wins over `CHIP_ENDPOINT`.
 pub fn resolve(
     selection: &Selection,
     env: impl Fn(&str) -> Option<String>,
-) -> Result<HttpProviderConfig, FxError> {
+) -> Result<ProviderConfig, FxError> {
     crate::config_from_env(|name| match name {
         "CHIP_PROVIDER" => selection.provider.clone().or_else(|| env(name)),
         "CHIP_MODEL" => selection.model.clone().or_else(|| env(name)),
         "CHIP_ENDPOINT" => selection.endpoint.clone().or_else(|| env(name)),
-        "CHIP_OLLAMA_ENDPOINT" if selection.endpoint.is_some() => None,
         _ => env(name),
     })
 }
@@ -53,8 +51,8 @@ pub fn resolve(
 ///
 /// * `fx` (the default): the authoritative FX executor with a native Rust provider
 ///   (`chip-fx-native`). One attempt per call, structured delivery certainty, no Node process.
-/// * `legacy`: `chip-legacy-http`, the original per-provider HTTP adapters. Explicit only; it is
-///   what serves Ollama's own API until a native one exists.
+/// * `legacy`: `chip-legacy-http`, the original HTTP adapters for OpenAI-compatible endpoints and
+///   Anthropic. Explicit only, and on its way out; Ollama's own API is not served by either executor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutorKind {
     /// `chip-legacy-http`. Kept as an explicit choice while its remaining consumers move.
@@ -89,7 +87,7 @@ impl ExecutorKind {
 /// key and options are mapped from the same configuration the legacy path reads, and anything the
 /// native path cannot carry is a configuration error naming it, never a silent difference.
 pub fn build_model(
-    config: HttpProviderConfig,
+    config: ProviderConfig,
     executor: ExecutorKind,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Arc<dyn ModelProvider>, FxError> {
@@ -102,9 +100,7 @@ pub fn build_model(
 /// The model provider for a command that has no `--executor` flag: the executor comes from
 /// `CHIP_EXECUTOR` (default `fx`) and keys from the process environment. There is no fallback
 /// between executors.
-pub fn build_model_from_process(
-    config: HttpProviderConfig,
-) -> Result<Arc<dyn ModelProvider>, FxError> {
+pub fn build_model_from_process(config: ProviderConfig) -> Result<Arc<dyn ModelProvider>, FxError> {
     let env = |name: &str| std::env::var(name).ok();
     let executor = ExecutorKind::choose(None, &env)?;
     build_model(config, executor, &env)
@@ -114,7 +110,7 @@ pub fn build_model_from_process(
 /// the work model's credentials: the provider's own key variables (`ANTHROPIC_API_KEY`,
 /// `OPENAI_API_KEY`) are hidden, so the key is only what the caller put in `config`. The executor
 /// and the LAN opt-in still come from the process environment.
-pub fn build_model_isolated(config: HttpProviderConfig) -> Result<Arc<dyn ModelProvider>, FxError> {
+pub fn build_model_isolated(config: ProviderConfig) -> Result<Arc<dyn ModelProvider>, FxError> {
     let process = |name: &str| std::env::var(name).ok();
     let executor = ExecutorKind::choose(None, &process)?;
     let env = |name: &str| (name == LAN_HTTP_VARIABLE).then(|| process(name)).flatten();
@@ -142,7 +138,7 @@ fn api_root(endpoint: &str, kind: ProviderKind) -> Result<String, FxError> {
 }
 
 fn fx_model(
-    config: HttpProviderConfig,
+    config: ProviderConfig,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Arc<dyn ModelProvider>, FxError> {
     let kind = match config.provider.as_str() {
@@ -150,8 +146,8 @@ fn fx_model(
         PROVIDER_ANTHROPIC => ProviderKind::Anthropic,
         other => {
             return Err(FxError::Configuration(format!(
-                "the fx executor does not support the {other} provider's own API; use \
-                 --executor legacy, or an openai-compatible endpoint (Ollama serves one at /v1)"
+                "the {other} provider is not supported (supported: {PROVIDER_OPENAI_COMPATIBLE}, \
+                 {PROVIDER_ANTHROPIC}); Ollama is reached through its OpenAI-compatible endpoint"
             )));
         }
     };
@@ -273,24 +269,23 @@ mod tests {
     fn the_command_line_wins_over_the_environment() {
         let got = pick(
             sel(
-                Some("ollama"),
+                Some("openai-compatible"),
                 Some("qwen3-coder"),
-                Some("http://10.0.0.5:11434"),
+                Some("http://10.0.0.5:11434/v1/chat/completions"),
             ),
             &[
                 ("CHIP_PROVIDER", "anthropic"),
                 ("CHIP_MODEL", "claude-x"),
                 ("CHIP_ENDPOINT", "https://api.example"),
-                ("CHIP_OLLAMA_ENDPOINT", "http://env-ollama:1"),
             ],
         )
         .unwrap();
         assert_eq!(
             got,
             (
-                "ollama".into(),
+                "openai-compatible".into(),
                 "qwen3-coder".into(),
-                "http://10.0.0.5:11434".into()
+                "http://10.0.0.5:11434/v1/chat/completions".into()
             )
         );
     }
@@ -299,38 +294,32 @@ mod tests {
     fn each_setting_falls_through_independently() {
         // Provider from the command line, model from the environment.
         let got = pick(
-            sel(Some("ollama"), None, None),
-            &[("CHIP_PROVIDER", "anthropic"), ("CHIP_MODEL", "from-env")],
+            sel(Some("anthropic"), None, None),
+            &[
+                ("CHIP_PROVIDER", "openai-compatible"),
+                ("CHIP_MODEL", "from-env"),
+            ],
         )
         .unwrap();
-        assert_eq!((got.0.as_str(), got.1.as_str()), ("ollama", "from-env"));
+        assert_eq!((got.0.as_str(), got.1.as_str()), ("anthropic", "from-env"));
         // Everything from the environment.
         let got = pick(
             Selection::default(),
             &[
-                ("CHIP_PROVIDER", "ollama"),
+                ("CHIP_PROVIDER", "openai-compatible"),
                 ("CHIP_MODEL", "m"),
                 ("CHIP_ENDPOINT", "http://h:1"),
             ],
         )
         .unwrap();
-        assert_eq!(got, ("ollama".into(), "m".into(), "http://h:1".into()));
-        // The environment's Ollama-specific endpoint still applies when nothing overrides it.
-        let got = pick(
-            sel(None, Some("m"), None),
-            &[
-                ("CHIP_PROVIDER", "ollama"),
-                ("CHIP_OLLAMA_ENDPOINT", "http://local:2"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(got.2, "http://local:2");
+        assert_eq!(
+            got,
+            ("openai-compatible".into(), "m".into(), "http://h:1".into())
+        );
     }
 
     #[test]
     fn a_provider_default_endpoint_applies_but_a_model_is_never_inferred() {
-        let got = pick(sel(Some("ollama"), Some("qwen3-coder"), None), &[]).unwrap();
-        assert_eq!(got.2, "http://127.0.0.1:11434");
         let got = pick(
             sel(Some("anthropic"), Some("claude-haiku-4-5-20251001"), None),
             &[],
@@ -338,7 +327,7 @@ mod tests {
         .unwrap();
         assert_eq!(got.2, "https://api.anthropic.com/v1/messages");
         // No model anywhere: an explicit failure, for every provider, even one with a default endpoint.
-        for provider in ["ollama", "anthropic", "openai-compatible"] {
+        for provider in ["anthropic", "openai-compatible"] {
             let err = pick(sel(Some(provider), None, Some("http://x:1")), &[]).unwrap_err();
             assert!(
                 matches!(err, FxError::Configuration(m) if m.contains("CHIP_MODEL")),
@@ -346,7 +335,7 @@ mod tests {
             );
         }
         // An empty value is no value.
-        assert!(pick(sel(Some("ollama"), Some("  "), None), &[]).is_err());
+        assert!(pick(sel(Some("anthropic"), Some("  "), None), &[]).is_err());
     }
 
     #[test]
@@ -386,5 +375,17 @@ mod tests {
         )
         .unwrap();
         assert!(!format!("{c:?}").contains("sk-ant-very-secret"));
+    }
+
+    #[test]
+    fn ollamas_own_api_is_refused_with_the_supported_path() {
+        let err = pick(sel(Some("ollama"), Some("m"), Some("http://h:1")), &[]).unwrap_err();
+        let FxError::Configuration(message) = err else {
+            panic!("not a configuration error")
+        };
+        assert!(
+            message.contains("openai-compatible") && message.contains("11434/v1/chat/completions"),
+            "{message}"
+        );
     }
 }

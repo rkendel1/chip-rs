@@ -186,7 +186,7 @@ cd ~/src/project
 chip work "Fix the failing tests in this project"                       # model from the environment
 chip work --kind verify "Does this project pass its tests?"             # no change needed
 chip work --kind inspect "Where is the request parsed? Cite the file."  # read-only
-chip work --provider ollama --model qwen3-coder "Fix the failing tests"  # fully local
+chip work --provider openai-compatible --endpoint http://127.0.0.1:11434/v1/chat/completions --model qwen3-coder "Fix the failing tests"  # fully local (Ollama)
 chip work --provider anthropic --model claude-haiku-4-5-20251001 --json "<goal>"
 ```
 
@@ -199,7 +199,7 @@ the same boundary: nothing about the provider or model identity grants authority
 ### Shadow-mode micro-model (optional, observation only)
 
 ```sh
-CHIP_MICRO_PROVIDER=ollama CHIP_MICRO_MODEL=<tiny-model> chip work --micro-shadow --json "<goal>"
+CHIP_MICRO_PROVIDER=openai-compatible CHIP_MICRO_ENDPOINT=http://127.0.0.1:11434/v1/chat/completions CHIP_MICRO_MODEL=<tiny-model> chip work --micro-shadow --json "<goal>"
 ```
 
 After the work is final, a separately configured small model may be asked to classify the last failure and
@@ -214,8 +214,8 @@ change the exit status. Without `--micro-shadow` nothing changes. It never falls
 Precedence, the same every time: command line (`--provider`, `--model`, `--endpoint`), then the
 environment (`CHIP_PROVIDER`, `CHIP_MODEL`, `CHIP_ENDPOINT`, `CHIP_API_KEY`), then the provider's
 default endpoint, and then nothing: **a model is always required and never inferred from the
-provider.** Ollama's default endpoint is `http://127.0.0.1:11434`, so a local run needs no external
-request. There is no model discovery, no fallback and no retry: if the selected provider or model
+provider.** A local run needs no external request: point `openai-compatible` at a local server
+(Ollama serves one at `http://127.0.0.1:11434/v1/chat/completions`; LM Studio at `http://localhost:1234/v1/chat/completions`). Ollama's own `/api/chat` API (`--provider ollama`) is no longer supported. There is no model discovery, no fallback and no retry: if the selected provider or model
 cannot answer, the run says so (`error: the selected model did not answer (...). No other provider or
 model was tried.`) and stops. `--json` reports `provider`, `model` and the endpoint's identity
 (scheme, host, port: never a path, userinfo or key).

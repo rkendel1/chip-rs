@@ -5,13 +5,14 @@ mod common;
 use std::time::Duration;
 
 use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
-use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
+use chip_legacy_http::HttpProvider;
 use common::{OK_BODY, start};
 
 const FAKE_KEY: &str = "fake-key-for-tests";
 
-fn config(url: &str) -> HttpProviderConfig {
-    HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "mock-model", url)
+fn config(url: &str) -> ProviderConfig {
+    ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "mock-model", url)
         .with_api_key(Secret::new(FAKE_KEY))
 }
 
@@ -60,7 +61,7 @@ async fn translates_request_and_response() {
 #[tokio::test]
 async fn no_authorization_header_without_api_key() {
     let server = start(200, OK_BODY, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "m", &server.url);
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "m", &server.url);
     HttpProvider::new(cfg)
         .unwrap()
         .complete(request())
@@ -159,12 +160,12 @@ async fn dropping_the_future_cancels_the_request() {
 
 #[test]
 fn configuration_errors() {
-    let bad_provider = HttpProviderConfig::new("nope", "m", "http://x");
+    let bad_provider = ProviderConfig::new("nope", "m", "http://x");
     assert!(matches!(
         HttpProvider::new(bad_provider),
         Err(FxError::Configuration(_))
     ));
-    let no_endpoint = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "m", " ");
+    let no_endpoint = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "m", " ");
     assert!(matches!(
         HttpProvider::new(no_endpoint),
         Err(FxError::Configuration(_))
@@ -223,7 +224,7 @@ async fn consecutive_system_messages_are_sent_as_one_in_order() {
 
 const QWEN: &str = "mlx-community/Qwen3.5-35B-A3B-4bit";
 
-async fn sent(config: HttpProviderConfig, server: &common::MockServer) -> serde_json::Value {
+async fn sent(config: ProviderConfig, server: &common::MockServer) -> serde_json::Value {
     HttpProvider::new(config)
         .unwrap()
         .complete(ModelRequest::new(
@@ -240,7 +241,7 @@ async fn sent(config: HttpProviderConfig, server: &common::MockServer) -> serde_
 #[tokio::test]
 async fn the_request_asks_for_a_json_object_and_no_thinking_when_configured() {
     let server = start(200, OK_BODY, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
         .with_json_object_output()
         .with_enable_thinking(false);
     let body = sent(cfg, &server).await;
@@ -264,7 +265,7 @@ async fn the_request_asks_for_a_json_object_and_no_thinking_when_configured() {
 #[tokio::test]
 async fn nothing_extra_is_sent_unless_configured() {
     let server = start(200, OK_BODY, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url);
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url);
     let body = sent(cfg, &server).await;
     for key in ["response_format", "chat_template_kwargs", "extra_body"] {
         assert!(
@@ -277,7 +278,7 @@ async fn nothing_extra_is_sent_unless_configured() {
 #[tokio::test]
 async fn thinking_can_be_asked_for_explicitly_too() {
     let server = start(200, OK_BODY, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
         .with_enable_thinking(true);
     let body = sent(cfg, &server).await;
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
@@ -287,7 +288,7 @@ async fn thinking_can_be_asked_for_explicitly_too() {
 #[tokio::test]
 async fn the_selected_model_and_endpoint_are_used_unchanged() {
     let server = start(200, OK_BODY, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
         .with_json_object_output();
     let body = sent(cfg, &server).await;
     assert_eq!(body["model"], QWEN);
@@ -301,9 +302,9 @@ async fn the_selected_model_and_endpoint_are_used_unchanged() {
 
 #[tokio::test]
 async fn the_other_adapters_never_send_these_fields() {
-    for provider in ["ollama", "anthropic"] {
+    for provider in ["anthropic"] {
         let server = start(200, OK_BODY, Duration::ZERO).await;
-        let cfg = HttpProviderConfig::new(provider, QWEN, &server.url)
+        let cfg = ProviderConfig::new(provider, QWEN, &server.url)
             .with_json_object_output()
             .with_enable_thinking(false);
         let _ = HttpProvider::new(cfg)
@@ -330,7 +331,7 @@ async fn a_failed_request_stays_failed_with_no_second_attempt() {
         Duration::ZERO,
     )
     .await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
         .with_json_object_output()
         .with_enable_thinking(false);
     let err = HttpProvider::new(cfg)
@@ -355,7 +356,7 @@ async fn a_reply_with_reasoning_before_the_json_is_returned_exactly_as_it_came()
     })
     .to_string();
     let server = start(200, &body, Duration::ZERO).await;
-    let cfg = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
+    let cfg = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, QWEN, &server.url)
         .with_json_object_output();
     let out = HttpProvider::new(cfg)
         .unwrap()

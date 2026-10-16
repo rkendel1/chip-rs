@@ -11,12 +11,10 @@
 #   src/micro.rs                names HttpProviderConfig in a signature (type only)
 #   src/provider_selection.rs   the explicit `legacy` executor (the only constructor)
 #   src/live_benchmark.rs       its own unit tests only (legacy mock)
-#   tests/*                     mocks and the Ollama tests, which only the legacy executor serves
+#   tests/*                     tests and mocks that still build a legacy provider (the explicit `--executor legacy`)
 # Blockers for retiring chip-legacy-http: docs/product/native-provider.md.
 crates/chip-cli/Cargo.toml
-crates/chip-cli/src/lib.rs
 crates/chip-cli/src/live_benchmark.rs
-crates/chip-cli/src/micro.rs
 crates/chip-cli/src/provider_selection.rs
 crates/chip-cli/tests/coding_agent/main.rs
 crates/chip-cli/tests/http_provider_path.rs

@@ -62,7 +62,7 @@ incomplete does not fail; it silently changes behavior.
 
 **Chip today.** `micro::validate` ([`micro.rs`](../../crates/chip-cli/src/micro.rs)) is a strict reader and the only authority:
 duplicate and unknown fields, closed enums, snapshot and version identity, offered strategies, scope provenance. FX
-([`fx-core`](../../crates/chip-inference/src/lib.rs)) has no output-format field on `ModelRequest`; `HttpProviderConfig::json_object_output` is a
+([`fx-core`](../../crates/chip-inference/src/lib.rs)) has no output-format field on `ModelRequest`; `ProviderConfig::json_object_output` is a
 provider setting that the OpenAI-compatible adapter sends as `response_format` and that the Ollama and Anthropic adapters
 **ignore** (documented at [`fx-provider-http/src/lib.rs#L48`](../../crates/chip-legacy-http/src/lib.rs), visible in
 [`ollama.rs`](../../crates/chip-legacy-http/src/ollama.rs), whose wire body has only `temperature` and `num_predict`).

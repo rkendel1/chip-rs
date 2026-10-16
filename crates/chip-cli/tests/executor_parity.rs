@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use chip_cli::provider_selection::{ExecutorKind, build_model};
 use chip_inference::{FxError, Message, MessageRole, ModelRequest, Secret};
-use chip_legacy_http::{HttpProviderConfig, PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
 use serde_json::{Value, json};
 
 const KEY: &str = "sk-parity-0123456789abcdef";
@@ -177,13 +177,13 @@ fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + 'static {
     move |name| map.get(name).cloned()
 }
 
-fn config(provider: &str, base: &str) -> HttpProviderConfig {
+fn config(provider: &str, base: &str) -> ProviderConfig {
     let path = if provider == PROVIDER_ANTHROPIC {
         "/v1/messages"
     } else {
         "/v1/chat/completions"
     };
-    let mut config = HttpProviderConfig::new(provider, "mock-model", format!("{base}{path}"))
+    let mut config = ProviderConfig::new(provider, "mock-model", format!("{base}{path}"))
         .with_api_key(Secret::new(KEY))
         .with_timeout(Duration::from_secs(10));
     config.temperature = Some(0.0);
@@ -206,7 +206,7 @@ fn request() -> ModelRequest {
 }
 
 async fn call(
-    config: HttpProviderConfig,
+    config: ProviderConfig,
     executor: ExecutorKind,
 ) -> Result<chip_inference::ModelResponse, FxError> {
     let model = build_model(config, executor, &env_of(&[]))?;
@@ -465,13 +465,13 @@ fn the_executor_defaults_to_fx_and_legacy_is_only_ever_explicit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn what_the_fx_executor_cannot_carry_is_refused_by_name_before_any_request() {
     let server = Server::start(Answer::Text("never", 1, 1));
-    let refuse = |config: HttpProviderConfig| {
+    let refuse = |config: ProviderConfig| {
         build_model(config, ExecutorKind::Fx, &env_of(&[]))
             .err()
             .map(|e| e.to_string())
     };
 
-    let ollama = HttpProviderConfig::new("ollama", "m", format!("{}/api/chat", server.base));
+    let ollama = ProviderConfig::new("ollama", "m", format!("{}/api/chat", server.base));
     assert!(refuse(ollama).unwrap().contains("ollama"));
 
     let thinking = config(PROVIDER_ANTHROPIC, &server.base).with_enable_thinking(true);
@@ -570,7 +570,7 @@ async fn the_thinking_switch_on_anthropic_is_refused_by_the_fx_executor_before_a
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lan_http_is_refused_by_default_and_the_opt_in_is_strict_about_its_value_and_keys() {
-    let lan = HttpProviderConfig::new(
+    let lan = ProviderConfig::new(
         PROVIDER_OPENAI_COMPATIBLE,
         "m",
         "http://192.168.1.20:1234/v1/chat/completions",
@@ -599,7 +599,7 @@ async fn lan_http_is_refused_by_default_and_the_opt_in_is_strict_about_its_value
         ("OPENAI_API_KEY", "sk-x"),
     ]);
     assert!(with_key.unwrap().contains("refusing to send a credential"));
-    let chip_key = HttpProviderConfig::new(
+    let chip_key = ProviderConfig::new(
         PROVIDER_OPENAI_COMPATIBLE,
         "m",
         "http://192.168.1.20:1234/v1/chat/completions",
@@ -618,7 +618,7 @@ async fn lan_http_is_refused_by_default_and_the_opt_in_is_strict_about_its_value
         "{text}"
     );
     // A public address passes resolution but the provider refuses to be built.
-    let public = HttpProviderConfig::new(
+    let public = ProviderConfig::new(
         PROVIDER_OPENAI_COMPATIBLE,
         "m",
         "http://8.8.8.8:1234/v1/chat/completions",

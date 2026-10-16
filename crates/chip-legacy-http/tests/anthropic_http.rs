@@ -6,16 +6,16 @@ mod common;
 use std::time::Duration;
 
 use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
-use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_ANTHROPIC, default_endpoint};
+use chip_inference::{PROVIDER_ANTHROPIC, ProviderConfig, default_endpoint};
+use chip_legacy_http::HttpProvider;
 use common::start;
 
 const FAKE_KEY: &str = "fake-anthropic-key-for-tests";
 
 const OK_BODY: &str = r#"{"id":"msg_01","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"{\"decision\":"},{"type":"text","text":"\"complete\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":11,"output_tokens":7}}"#;
 
-fn config(url: &str) -> HttpProviderConfig {
-    HttpProviderConfig::new(PROVIDER_ANTHROPIC, "claude-test", url)
-        .with_api_key(Secret::new(FAKE_KEY))
+fn config(url: &str) -> ProviderConfig {
+    ProviderConfig::new(PROVIDER_ANTHROPIC, "claude-test", url).with_api_key(Secret::new(FAKE_KEY))
 }
 
 fn request() -> ModelRequest {

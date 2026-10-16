@@ -25,32 +25,34 @@ pub mod wasm_decision_bench;
 pub mod work_demo;
 
 use chip_inference::{FxError, Secret};
-use chip_legacy_http::{HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
 
 /// Builds provider config from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT / CHIP_API_KEY.
-pub fn config_from_env(
-    get: impl Fn(&str) -> Option<String>,
-) -> Result<HttpProviderConfig, FxError> {
+pub fn config_from_env(get: impl Fn(&str) -> Option<String>) -> Result<ProviderConfig, FxError> {
     let required = |name: &str| {
         get(name)
             .filter(|v| !v.trim().is_empty())
             .ok_or_else(|| FxError::Configuration(format!("{name} is not set")))
     };
     let provider = get("CHIP_PROVIDER").unwrap_or_else(|| PROVIDER_OPENAI_COMPATIBLE.to_string());
+    if provider == "ollama" {
+        // Ollama's own /api/chat API is not supported. Its OpenAI-compatible endpoint is.
+        return Err(FxError::Configuration(
+            "the ollama provider (Ollama's own /api/chat API) is no longer supported; use \
+             CHIP_PROVIDER=openai-compatible with CHIP_ENDPOINT=http://localhost:11434/v1/chat/completions"
+                .into(),
+        ));
+    }
     // A provider with one well-known endpoint does not need CHIP_ENDPOINT.
     let set = |name: &str| get(name).filter(|v| !v.trim().is_empty());
-    let endpoint = match (provider == chip_legacy_http::PROVIDER_OLLAMA)
-        .then(|| set("CHIP_OLLAMA_ENDPOINT"))
-        .flatten()
-        .or_else(|| set("CHIP_ENDPOINT"))
-    {
+    let endpoint = match set("CHIP_ENDPOINT") {
         Some(endpoint) => endpoint,
-        None => match chip_legacy_http::default_endpoint(&provider) {
+        None => match chip_inference::default_endpoint(&provider) {
             Some(endpoint) => endpoint.to_string(),
             None => required("CHIP_ENDPOINT")?,
         },
     };
-    let mut config = HttpProviderConfig::new(provider, required("CHIP_MODEL")?, endpoint);
+    let mut config = ProviderConfig::new(provider, required("CHIP_MODEL")?, endpoint);
     if let Some(key) = get("CHIP_API_KEY").filter(|k| !k.is_empty()) {
         config = config.with_api_key(Secret::new(key));
     }

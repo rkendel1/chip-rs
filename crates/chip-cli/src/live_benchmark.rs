@@ -366,7 +366,8 @@ mod tests {
     use std::time::Duration;
 
     use chip_inference::Secret;
-    use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+    use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
+    use chip_legacy_http::HttpProvider;
 
     use super::*;
 
@@ -379,7 +380,7 @@ mod tests {
     }
 
     fn provider(url: &str, timeout: Duration) -> (Arc<dyn ModelProvider>, Meta) {
-        let config = HttpProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "bench-model", url)
+        let config = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "bench-model", url)
             .with_api_key(Secret::new(KEY))
             .with_timeout(timeout);
         (
