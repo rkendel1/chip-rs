@@ -41,7 +41,9 @@ for crate in chip-core chip-remote-env chip-inference chip-fx chip-legacy-http c
     echo "ok   $crate: no experimental storage engine"
   fi
 done
-if [ "$(cargo tree --workspace -e normal,build,dev --locked -i chip-session-memory 2>/dev/null | wc -l)" -gt 1 ]; then
+# chip-session-memory is excluded from the workspace, so cargo cannot name it here; the
+# `an_excluded_crate_is_an_experiment_and_no_member_depends_on_it` test enforces the same rule.
+if grep -rl 'chip-session-memory' crates/*/Cargo.toml | grep -v '^crates/chip-session-memory/'; then
   echo "FAIL: a workspace crate depends on chip-session-memory" >&2
   fail=1
 else
