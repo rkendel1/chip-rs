@@ -5,7 +5,12 @@
 //! cargo bench -p chip-cli --bench baseline                  # everything
 //! cargo bench -p chip-cli --bench baseline -- --quick       # fewer samples (CI smoke)
 //! cargo bench -p chip-cli --bench baseline -- --only loop   # one section (see SECTIONS)
+//! cargo bench -p chip-cli --bench baseline -- --only fx --json-output out.json
 //! ```
+//!
+//! `fx` is the deterministic Chip + FX measurement (scripted provider, no network, no credentials);
+//! `fxlive` is an opt-in run against an endpoint you name, never part of a default run. See
+//! `docs/product/performance.md`.
 //!
 //! Three tiers, kept apart so that Chip's own overhead is never confused with execution or with
 //! a model:
@@ -53,7 +58,14 @@ use chip_pax::PaxExecutor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+#[path = "baseline/fx.rs"]
+mod fx_section;
+#[path = "baseline/live.rs"]
+mod live;
+
 const SECTIONS: &[&str] = &[
+    "fx",        // L0: Chip + FX end to end over a scripted provider, with timing boundaries
+    "fxlive",    // L2: OPT-IN, one OpenAI-compatible endpoint you name (never in a default run)
     "parts",     // L0: parse, validate, dispatch, environment, observe/evidence, events, goal
     "loop",      // L0: the whole loop, synthetic model, in-process capability
     "real",      // L1: the whole loop over real filesystem / Git / PAX
@@ -67,6 +79,8 @@ const SECTIONS: &[&str] = &[
 #[derive(Clone)]
 struct Row {
     tier: &'static str,
+    /// Stable scenario id; the key a comparison between two reports joins on.
+    id: String,
     name: String,
     n: usize,
     unit: &'static str,
@@ -74,7 +88,29 @@ struct Row {
     p50: f64,
     p95: f64,
     max: f64,
+    /// Operations per second, where the scenario defines one.
+    throughput: Option<(f64, &'static str)>,
     note: String,
+}
+
+/// A p95 is only meaningful with enough samples; below this the JSON says `null`, not a number.
+const P95_MIN_SAMPLES: usize = 20;
+
+/// Stable id for a row that did not name one: tier plus the name with everything but letters and
+/// digits folded to `_`. Changing a row's name changes its id.
+fn slug(tier: &str, name: &str) -> String {
+    let mut out = tier.to_lowercase();
+    out.push('.');
+    let mut last = '.';
+    for c in name.chars().flat_map(char::to_lowercase) {
+        let c = if c.is_ascii_alphanumeric() { c } else { '_' };
+        if c == '_' && last == '_' {
+            continue;
+        }
+        out.push(c);
+        last = c;
+    }
+    out.trim_end_matches('_').to_string()
 }
 
 #[derive(Default)]
@@ -82,23 +118,44 @@ struct Report {
     rows: Vec<Row>,
     skipped: Vec<(String, String)>,
     facts: Vec<(String, String)>,
+    /// Scenario id and its configuration (iterations, warm-up, steps, workers).
+    scenarios: Vec<(String, serde_json::Value)>,
+    /// Measurements that could not be taken, with the reason. Never filled with an estimate.
+    unavailable: Vec<(String, String)>,
+    /// Errors met while measuring (a provider failure, a bad outcome). Recorded, not hidden.
+    errors: Vec<(String, String)>,
+    /// Run metadata (`provenance`) and, for a live run, `real_model`.
+    provenance: serde_json::Value,
+    real_model: serde_json::Value,
 }
 
 impl Report {
     /// Records a series of durations, in microseconds.
-    fn time(
+    fn time(&mut self, tier: &'static str, name: impl Into<String>, d: Vec<Duration>, note: &str) {
+        let name = name.into();
+        let id = slug(tier, &name);
+        self.series(tier, &id, &name, d, note, None);
+    }
+
+    /// As `time`, with a stable id and an optional throughput.
+    fn series(
         &mut self,
         tier: &'static str,
-        name: impl Into<String>,
+        id: &str,
+        name: &str,
         mut d: Vec<Duration>,
         note: &str,
+        throughput: Option<(f64, &'static str)>,
     ) {
+        assert!(!d.is_empty(), "{id}: a series needs at least one sample");
         d.sort();
         let us = |x: Duration| x.as_secs_f64() * 1e6;
         let pick = |q: f64| us(d[((d.len() - 1) as f64 * q).round() as usize]);
         self.rows.push(Row {
             tier,
+            id: id.into(),
             name: name.into(),
+            throughput,
             n: d.len(),
             unit: "us",
             min: us(d[0]),
@@ -118,9 +175,12 @@ impl Report {
         v: f64,
         note: &str,
     ) {
+        let name = name.into();
         self.rows.push(Row {
             tier,
-            name: name.into(),
+            id: slug(tier, &name),
+            name,
+            throughput: None,
             n: 1,
             unit,
             min: v,
@@ -134,6 +194,20 @@ impl Report {
     fn skip(&mut self, what: &str, why: &str) {
         eprintln!("SKIPPED {what}: {why}");
         self.skipped.push((what.into(), why.into()));
+    }
+
+    fn unavailable(&mut self, id: &str, why: &str) {
+        eprintln!("UNAVAILABLE {id}: {why}");
+        self.unavailable.push((id.into(), why.into()));
+    }
+
+    fn scenario(&mut self, id: &str, config: serde_json::Value) {
+        self.scenarios.push((id.into(), config));
+    }
+
+    fn error(&mut self, id: &str, what: &str) {
+        eprintln!("ERROR {id}: {what}");
+        self.errors.push((id.into(), what.into()));
     }
 
     fn fact(&mut self, k: &str, v: impl Into<String>) {
@@ -165,12 +239,39 @@ impl Report {
                     r.p95,
                     r.max,
                     r.unit,
-                    if r.note.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  ({})", r.note)
+                    {
+                        let mut extra = r.note.clone();
+                        if let Some((t, u)) = r.throughput {
+                            if !extra.is_empty() {
+                                extra.push_str("; ");
+                            }
+                            extra.push_str(&format!("{t:.1} {u}"));
+                        }
+                        if r.n < P95_MIN_SAMPLES {
+                            if !extra.is_empty() {
+                                extra.push_str("; ");
+                            }
+                            extra.push_str("p95 not reported (n<20)");
+                        }
+                        if extra.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  ({extra})")
+                        }
                     }
                 );
+            }
+        }
+        if !self.unavailable.is_empty() {
+            println!("\n-- unavailable (not measured, not estimated) --");
+            for (id, why) in &self.unavailable {
+                println!("{id}: {why}");
+            }
+        }
+        if !self.errors.is_empty() {
+            println!("\n-- errors --");
+            for (id, what) in &self.errors {
+                println!("{id}: {what}");
             }
         }
         if !self.skipped.is_empty() {
@@ -181,40 +282,80 @@ impl Report {
         }
     }
 
+    /// The machine-readable report, schema `chip.perf-baseline.v2` (documented in
+    /// `docs/product/performance.md`). Additive over v1: every v1 key is still present.
     fn json(&self) -> String {
-        let esc = |s: &str| serde_json::to_string(s).unwrap();
-        let rows: Vec<String> = self
+        use serde_json::{Value, json};
+        let pairs = |v: &[(String, String)]| -> Value {
+            Value::Object(v.iter().map(|(k, x)| (k.clone(), json!(x))).collect())
+        };
+        let class = |tier: &str| match tier {
+            "L2" => "real-model",
+            "process" | "service" => "process-level",
+            _ => "direct-microbenchmark",
+        };
+        let rows: Vec<Value> = self
             .rows
             .iter()
             .map(|r| {
-                format!(
-                    "{{\"tier\":{},\"name\":{},\"n\":{},\"unit\":{},\"min\":{:.3},\"p50\":{:.3},\"p95\":{:.3},\"max\":{:.3},\"note\":{}}}",
-                    esc(r.tier), esc(&r.name), r.n, esc(r.unit), r.min, r.p50, r.p95, r.max, esc(&r.note)
-                )
+                let round = |x: f64| (x * 1000.0).round() / 1000.0;
+                json!({
+                    "id": r.id,
+                    "tier": r.tier,
+                    "class": class(r.tier),
+                    "name": r.name,
+                    "n": r.n,
+                    "unit": r.unit,
+                    "min": round(r.min),
+                    "p50": round(r.p50),
+                    "p95": if r.n >= P95_MIN_SAMPLES { json!(round(r.p95)) } else { Value::Null },
+                    "max": round(r.max),
+                    "throughput": r.throughput.map_or(Value::Null, |(t, _)| json!(round(t))),
+                    "throughput_unit": r.throughput.map_or(Value::Null, |(_, u)| json!(u)),
+                    "note": r.note,
+                })
             })
             .collect();
-        let facts: Vec<String> = self
-            .facts
+        let scenarios: Vec<Value> = self
+            .scenarios
             .iter()
-            .map(|(k, v)| format!("{}:{}", esc(k), esc(v)))
+            .map(|(id, c)| json!({"id": id, "config": c}))
             .collect();
-        let skipped: Vec<String> = self
-            .skipped
+        let unavailable: Vec<Value> = self
+            .unavailable
             .iter()
-            .map(|(k, v)| format!("{}:{}", esc(k), esc(v)))
+            .map(|(id, why)| json!({"id": id, "reason": why}))
             .collect();
-        format!(
-            "{{\"schema\":\"chip.perf-baseline.v1\",\"facts\":{{{}}},\"skipped\":{{{}}},\"rows\":[{}]}}\n",
-            facts.join(","),
-            skipped.join(","),
-            rows.join(",")
-        )
+        let errors: Vec<Value> = self
+            .errors
+            .iter()
+            .map(|(id, what)| json!({"id": id, "error": what}))
+            .collect();
+        let doc = json!({
+            "schema": "chip.perf-baseline.v2",
+            "provenance": self.provenance,
+            "facts": pairs(&self.facts),
+            "skipped": pairs(&self.skipped),
+            "scenarios": scenarios,
+            "rows": rows,
+            "unavailable": unavailable,
+            "errors": errors,
+            "real_model": self.real_model,
+        });
+        serde_json::to_string_pretty(&doc).unwrap() + "\n"
     }
 }
 
 struct Opts {
     quick: bool,
     only: Option<String>,
+    /// `--json-output PATH`; wins over `CHIP_BENCH_JSON`.
+    json_output: Option<String>,
+    // `fxlive` only.
+    endpoint: Option<String>,
+    model: Option<String>,
+    iterations: Option<String>,
+    allow_remote: bool,
 }
 
 impl Opts {
@@ -222,6 +363,10 @@ impl Opts {
         if self.quick { (full / 10).max(3) } else { full }
     }
     fn wants(&self, section: &str) -> bool {
+        // `fxlive` talks to an endpoint the caller names; it runs only when asked for by name.
+        if section == "fxlive" {
+            return self.only.as_deref() == Some("fxlive");
+        }
         self.only.as_deref().is_none_or(|o| o == section)
     }
 }
@@ -1805,17 +1950,159 @@ async fn real_model(report: &mut Report, _opts: &Opts) {
     let _ = std::fs::remove_dir_all(&probe);
 }
 
+// ---- provenance ------------------------------------------------------------------------------------
+
+/// Output of a command, trimmed, or `None` if it could not be run or failed.
+fn command(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` from the system clock (civil-from-days, proleptic Gregorian).
+fn utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs()) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// Where and how this report was produced. A value that cannot be determined is the string
+/// `"unavailable"`, never a guess and never omitted.
+fn provenance(opts: &Opts) -> serde_json::Value {
+    use serde_json::json;
+    let or_unavailable = |v: Option<String>| v.unwrap_or_else(|| "unavailable".into());
+    let git_sha = command("git", &["rev-parse", "HEAD"]);
+    // Untracked files count: a report from a tree with an uncommitted file is not reproducible from the SHA.
+    let dirty = command("git", &["status", "--porcelain"]).map(|s| !s.is_empty());
+    let cpu = std::fs::read_to_string("/proc/cpuinfo").ok().and_then(|t| {
+        t.lines()
+            .find(|l| l.starts_with("model name"))
+            .and_then(|l| l.split(':').nth(1))
+            .map(|m| m.trim().to_string())
+    });
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).ok();
+    json!({
+        "schema_version": "chip.perf-baseline.v2",
+        "timestamp_utc": utc_now(),
+        "git_sha": or_unavailable(git_sha),
+        "git_dirty": dirty,
+        "rust_version": or_unavailable(command(&rustc, &["--version"])),
+        "build_profile": if cfg!(debug_assertions) { "unoptimized (debug assertions on; numbers are NOT representative)" } else { "optimized (cargo bench / release)" },
+        "os": std::env::consts::OS,
+        "os_release": or_unavailable(std::fs::read_to_string("/proc/sys/kernel/osrelease").ok().map(|s| s.trim().to_string())),
+        "arch": std::env::consts::ARCH,
+        "cpu_model": or_unavailable(cpu),
+        "cpu_count": cpus,
+        "runtime_worker_threads": cpus,
+        "sample_mode": if opts.quick { "quick" } else { "full" },
+        "sections": opts.only.clone().map_or_else(|| json!("all default sections"), |o| json!(o)),
+    })
+}
+
 // ---- main ------------------------------------------------------------------------------------------
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let opts = Opts {
         quick: args.iter().any(|a| a == "--quick"),
-        only: args
-            .iter()
-            .position(|a| a == "--only")
-            .and_then(|i| args.get(i + 1))
-            .cloned(),
+        only: value("--only"),
+        json_output: value("--json-output"),
+        endpoint: value("--endpoint"),
+        model: value("--model"),
+        iterations: value("--iterations"),
+        allow_remote: args.iter().any(|a| a == "--allow-remote"),
+    };
+    // `cargo bench` passes `--bench` through; any other flag we do not know is a typo to refuse.
+    const FLAGS: &[&str] = &[
+        "--quick",
+        "--only",
+        "--json-output",
+        "--endpoint",
+        "--model",
+        "--iterations",
+        "--allow-remote",
+        "--bench",
+    ];
+    let takes_value = [
+        "--only",
+        "--json-output",
+        "--endpoint",
+        "--model",
+        "--iterations",
+    ];
+    let mut skip = false;
+    for a in &args {
+        if std::mem::take(&mut skip) {
+            continue;
+        }
+        if a.starts_with("--") && !FLAGS.contains(&a.as_str()) {
+            eprintln!("unknown option {a}; known: {FLAGS:?}");
+            std::process::exit(2);
+        }
+        skip = takes_value.contains(&a.as_str());
+    }
+    for (flag, v) in [
+        ("--only", &opts.only),
+        ("--json-output", &opts.json_output),
+        ("--endpoint", &opts.endpoint),
+        ("--model", &opts.model),
+        ("--iterations", &opts.iterations),
+    ] {
+        if args.iter().any(|a| a == flag) && v.as_deref().is_none_or(|v| v.starts_with("--")) {
+            eprintln!("{flag} needs a value");
+            std::process::exit(2);
+        }
+    }
+    let live_only = opts.only.as_deref() != Some("fxlive");
+    if live_only
+        && (opts.endpoint.is_some()
+            || opts.model.is_some()
+            || opts.iterations.is_some()
+            || opts.allow_remote)
+    {
+        eprintln!(
+            "--endpoint, --model, --iterations and --allow-remote belong to `--only fxlive`; refusing to ignore them silently"
+        );
+        std::process::exit(2);
+    }
+    // Validate the live configuration before anything runs, so a bad one costs no request.
+    let live = if opts.wants("fxlive") {
+        match live::LiveConfig::resolve(&opts, |n| std::env::var(n).ok()) {
+            Ok(c) => Some(c),
+            Err(why) => {
+                eprintln!("fxlive: {why}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        None
     };
     if let Some(only) = &opts.only {
         assert!(
@@ -1867,7 +2154,15 @@ fn main() {
         report.fact("harness RSS at start (KiB)", format!("{rss} (peak {hwm})"));
     }
 
+    report.provenance = provenance(&opts);
+
     rt.block_on(async {
+        if opts.wants("fx") {
+            fx_section::fx(&mut report, &opts).await;
+        }
+        if let Some(cfg) = &live {
+            live::fxlive(&mut report, cfg).await;
+        }
         if opts.wants("parts") {
             parts(&mut report, &opts).await;
         }
@@ -1889,8 +2184,17 @@ fn main() {
     });
 
     report.print();
-    let out =
-        std::env::var("CHIP_BENCH_JSON").unwrap_or_else(|_| "target/chip-baseline.json".into());
+    let default = if opts.only.as_deref() == Some("fxlive") {
+        // Real-model results never share a file with the deterministic ones by default.
+        "target/chip-perf-live.json"
+    } else {
+        "target/chip-baseline.json"
+    };
+    let out = opts
+        .json_output
+        .clone()
+        .or_else(|| std::env::var("CHIP_BENCH_JSON").ok())
+        .unwrap_or_else(|| default.into());
     if let Some(parent) = Path::new(&out).parent() {
         let _ = std::fs::create_dir_all(parent);
     }

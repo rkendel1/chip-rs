@@ -36,8 +36,9 @@ faster to the user:
 
 `cargo bench -p chip-cli --bench baseline` (`crates/chip-cli/benches/baseline.rs`; not part of the
 shipped binary and not run by `cargo test`). `-- --quick` takes fewer samples, `-- --only <section>`
-runs one of `parts`, `loop`, `real`, `process`, `serve`, `realmodel`. It prints a table and writes
-`target/chip-baseline.json` (`CHIP_BENCH_JSON` overrides the path). The run recorded here is saved as
+runs one of `parts`, `loop`, `real`, `process`, `serve`, `realmodel`, or (revision 3) `fx` and the
+opt-in `fxlive`, described in section 7. It prints a table and writes `target/chip-baseline.json`
+(`CHIP_BENCH_JSON` or `--json-output` overrides the path; the file is now schema v2, section 7). The run recorded here is saved as
 [`performance-baseline.json`](performance-baseline.json).
 
 | Tier | What it runs | What it isolates |
@@ -301,3 +302,235 @@ CHIP_BENCH_REAL_MODEL=1 CHIP_PROVIDER=... CHIP_MODEL=... CHIP_ENDPOINT=... [CHIP
    request) as the contract. No timing budget has been set from these runs, and none is enforced in
    CI.
 3. Revisit findings 2 to 4 only at the thresholds stated there.
+
+## 7. Chip + FX measurement (revision 3: instrumentation, no product change)
+
+Sections 1 to 6 are unchanged and remain the historical record. This section adds a reproducible way
+to measure Chip **with the authoritative FX executor in the path**, to separate Chip's runtime cost
+from inference latency, and to write the result as machine-readable evidence. It changes no
+production behavior (provider selection, retry, authorization and persistence are as they were), adds
+no runtime and no benchmark-only production abstraction: the new code is in
+`crates/chip-cli/benches/baseline/` and two dev-only dependencies (`fx-core`, `fx-single-attempt`,
+pinned to the same FX commit as `chip-fx`). **It claims no performance improvement and sets no budget.**
+
+### Which numbers mean what
+
+| Measurement | Provider | Includes | Does not include | Kind |
+| --- | --- | --- | --- | --- |
+| `fx.*` (section `fx`) | scripted `ProviderPort` under the real `FxModelProvider` | Chip work loop, Chip's FX adapter, FX request validation, attempt execution and normalization, an in-process capability | any network, any model, any process start, any real tool | direct microbenchmark (one process, warm) |
+| `loop` (section 1, unchanged) | in-process synthetic `ModelProvider`; **FX is not in the path** | Chip work loop, in-process capability | FX, network, model, process start | direct microbenchmark |
+| `process`, `serve` | the real `chip` binary / service against a local mock HTTP endpoint (through FX and the native provider) | process start, request to first model request, a loopback HTTP hop, mock latency | a real model | process-level |
+| `fxlive` (opt-in) | one real OpenAI-compatible endpoint you name | everything above plus network and the model | n/a | real model; **optional, non-deterministic** |
+
+Cold start and first-request dispatch are therefore *not* in the `fx.*` rows: the harness process is
+already running and warmed (10 discarded turns per scenario). They are the `process` rows
+(`chip --version`, `chip work: process start to first model request`) and `serve: submit to first
+model request arriving at the endpoint`. Never add a `process` row to an `fx.*` row.
+
+**An end-to-end task benchmark (a goal solved with a real model and a real project) is not provided**:
+it needs a fixed model and project fixture that this PR does not invent. The `real` and `realmodel`
+sections (L1/L2, unchanged) are the nearest existing pieces; `fxlive` measures one bounded decision, not a task.
+
+### Deterministic run (no network, no credentials, no local model)
+
+```text
+cargo bench -p chip-cli --bench baseline -- --only fx --json-output /tmp/chip-perf.json
+python3 scripts/check-perf-report.py /tmp/chip-perf.json --require-fx
+```
+
+About three seconds. `--quick` takes about a tenth of the samples (smoke test only; the larger scenarios then have fewer than 20 samples, so their p95 is `null`). Without `--json-output` the report goes to `target/chip-baseline.json`, which cargo resolves
+against the package directory (`crates/chip-cli/target/`); `target/` is git-ignored, and the file is
+never committed. `CHIP_BENCH_JSON` is honoured when `--json-output` is absent. A run with no
+`--only` runs all default sections (`parts`, `loop`, `real`, `process`, `serve`, `realmodel` if enabled, and `fx`) and never `fxlive`.
+
+Scenarios (stable ids; warm-up = 10 discarded turns, 5 discarded batches for concurrency):
+
+| Id | What one sample is | Samples (full) |
+| --- | --- | --- |
+| `fx.turn.no_tool` | one complete turn: one decision, one inference, no tool call (the smallest agent step) | 2000 |
+| `fx.turn.tool_round_trip` | one tool request, its execution, then completion (2 inferences, 1 execution) | 2000 |
+| `fx.turn.steps.10`, `fx.turn.steps.50` | 10 or 50 tool steps then completion | 1000, 300 |
+| `fx.step.per_iteration.{10,50}` | one loop iteration inside those turns (span between consecutive `complete()` entries) | 10 000, 15 000 |
+| `fx.turn.steps.50.uninstrumented` | the 50-step turn with no timing marks, to show what the marks cost | 300 |
+| `fx.concurrent.{1,4,16}` | N independent 10-step turns in parallel (own provider, agent and capability each), as tokio tasks on the multi-thread runtime | 300 batches |
+
+Every turn asserts what makes it meaningful (completed outcome, exactly one provider invocation per
+decision, one execution per tool request, no retry) and asserts **no time**. Concurrency is "where
+supported": independent turns share nothing, so it measures the host's ability to overlap them, on
+however many cores it has (reported in `provenance.cpu_count`; with fewer cores than workers they
+share cores).
+
+### Timing boundaries
+
+Measured by wrappers in the harness only (a `ModelProvider` around the FX provider, a `ProviderPort`
+around the scripted port, a capability/executor around the in-process capability), on the monotonic
+`Instant` clock. The boundaries are one chronological partition of a run, so they sum exactly to the
+total; the run asserts that identity (not any duration), and a run whose marks are out of the
+expected order is reported `unavailable`, never repaired.
+
+| Id suffix | Boundary | Marks |
+| --- | --- | --- |
+| `b1_submit_to_loop_start` | work submission to agent-loop start | `run_work` call to the first `capabilities()` call. **A proxy:** the loop emits no timestamped start event, so true loop start is reported as `unavailable` (`fx.agent_loop_start`) |
+| `b2_loop_before_inference` | agent-loop processing before inference | summed over the turn |
+| `b3_fx_invocation_to_dispatch` | FX invocation to provider dispatch | `complete()` entry to `ProviderPort::invoke` (request mapping, FX validation, attempt setup) |
+| `b4_dispatch_to_first_event` | provider dispatch to first response event | `invoke` to the first poll that yields an item. With the scripted port this is the harness's own cost and **not** a network time |
+| `b5_first_event_to_terminal` | first response event to terminal inference outcome | to `complete()` returning (FX normalization and the mapping back to a Chip response) |
+| `b6_loop_after_inference` | agent-loop processing after inference | decision parse and checks, observation, events; summed |
+| `b7_tool_execution` | tool execution | executor entry to exit (an in-process no-op: dispatch cost only) |
+| `b8_total` | total submission to terminal work outcome | around `run_work`; equals the sum of `b1`..`b7` |
+
+`b2`, `b3`, `b4`, `b5`, `b6` and `b7` are summed over the turn (a 50-step turn has 51 of each inference
+boundary), so compare them within one scenario or divide by the counts in `scenarios[].config`.
+The scripted port answers in two polls (text, then the provider's terminal marker) without waiting.
+Each mark is one uncontended mutex lock and a `Vec` push; compare `fx.turn.steps.50.b8_total` with
+`fx.turn.steps.50.uninstrumented.b8_total` to see what that costs on your machine.
+
+### Optional: a real endpoint (LM Studio or similar)
+
+Opt-in, never part of a default run, and **not comparable with the `fx.*` rows**. It uses the product
+path (`build_model` with the FX executor and the native provider, then the real work loop). There is
+no default endpoint or model, no credential is needed for a keyless local server, and no provider
+key variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) is ever read.
+
+```text
+# LM Studio default address; use the model id the server lists
+cargo bench -p chip-cli --bench baseline -- --only fxlive \
+    --endpoint http://127.0.0.1:1234/v1/chat/completions --model <model-id> --iterations 5 \
+    --json-output /tmp/chip-perf-live.json
+python3 scripts/check-perf-report.py /tmp/chip-perf-live.json --live
+```
+
+Equivalent environment: `CHIP_PERF_ENDPOINT`, `CHIP_PERF_MODEL`. Flags win. `CHIP_PERF_API_KEY` supplies a
+key if the server needs one; it goes only to the provider's authentication header and the report
+records only `credential_supplied: true|false`. A private-LAN `http` endpoint also needs the existing
+`CHIP_ALLOW_INSECURE_LAN_HTTP` opt-in the product uses. A host that is not loopback or private-LAN is refused unless you add
+`--allow-remote` (it may be paid and is non-deterministic). Invalid configuration (missing or malformed endpoint
+or model, credentials inside the URL, `--iterations` outside 1 to 50, live flags without `--only fxlive`) exits with status 2 and a
+message before any request is made.
+
+* **Requests:** exactly `--iterations` (default 3), each one turn with `max_turns: 1` and
+  `max_executions: 0`, so at most one request per iteration whatever the model answers. No warm-up and
+  no retry; a failed iteration is recorded in `errors` and the next still runs.
+* **Fixed prompt, bounded output:** the goal is one fixed sentence (recorded as `prompt_id`, not as
+  text), `max_tokens` 128, temperature 0, a 120 s timeout.
+* **Recorded:** `inference_total` (the model call, network included), `turn_total`, `chip_overhead`
+  (turn minus model minus execution), token counts as the endpoint reported them (`null` on failure;
+  the response type cannot distinguish "0" from "not supplied"), model id, endpoint scheme/host/port and type
+  (`loopback`, `private-lan`, `remote`), the config, the iteration outcomes (the variant name only,
+  never a model reply), and errors with any key removed and length bounded.
+* **Time to first response event is `unavailable`** (`real_model.time_to_first_response_event: null`): the
+  native provider's port is private to `chip-fx-native`, and exposing it would change production code.
+  A streamed first token is therefore not separated from total inference time here.
+* A remote or paid endpoint, if you choose to run one, is **optional and non-deterministic**; the report
+  carries that label in `real_model.label`. Results go to `target/chip-perf-live.json` by default,
+  a different file from the deterministic report, and a live report contains no synthetic rows.
+
+### Report format: `chip.perf-baseline.v2`
+
+Additive over v1 (`schema`, `facts`, `skipped` and the row keys `tier`, `name`, `n`, `unit`, `min`,
+`p50`, `p95`, `max`, `note` are all still there). `scripts/check-perf-report.py` checks a report
+against this; it checks structure and types and never a timing.
+
+```text
+schema            "chip.perf-baseline.v2"
+provenance        schema_version, timestamp_utc (YYYY-MM-DDTHH:MM:SSZ), git_sha, git_dirty (bool|null),
+                  rust_version, build_profile, os, os_release, arch, cpu_model, cpu_count,
+                  runtime_worker_threads, sample_mode ("quick"|"full"), sections
+                  (any value that cannot be determined is the string "unavailable", or null for git_dirty)
+facts, skipped    string maps (as v1)
+scenarios[]       { id, config: { kind, iterations, warmup, tool_steps | workers, ... } }
+rows[]            { id, tier, class ("direct-microbenchmark"|"process-level"|"real-model"), name,
+                    n, unit ("us" unless the row says otherwise), min, p50 (median), p95 (null when n < 20), max,
+                    throughput (null|number), throughput_unit (null|string), note }
+unavailable[]     { id, reason }      measurements that could not be taken; never estimated
+errors[]          { id, error }       failures met while measuring
+real_model        null for a deterministic run; for fxlive: { label, status, provider, executor, model,
+                    endpoint, endpoint_type, credential_supplied, prompt_id, config, requests_made,
+                    time_to_first_response_event (null), iterations[] }
+```
+
+Row ids are stable (`fx.turn.steps.50.b2_loop_before_inference`); rows that predate this section get a
+derived id (tier plus the slugged name), which changes if the name changes. `build_profile` says
+"unoptimized" for a debug build; do not use those numbers.
+
+### Comparing two commits
+
+Reports are only comparable when `provenance` matches in `cpu_model`, `cpu_count`, `build_profile`
+and `rust_version`, and both have `git_dirty: false`. Compare medians of the same row id; treat a
+difference as meaningful only if it exceeds the run-to-run spread you measure on that machine (below).
+
+```text
+git checkout <base>      && cargo bench -p chip-cli --bench baseline -- --only fx --json-output /tmp/base.json
+git checkout <candidate> && cargo bench -p chip-cli --bench baseline -- --only fx --json-output /tmp/cand.json
+# repeat each at least twice, interleaved (base, candidate, base, candidate), and compare p50 per row id
+python3 - <<'PY'
+import json
+load = lambda p: {r["id"]: r for r in json.load(open(p))["rows"]}
+a, b = load("/tmp/base.json"), load("/tmp/cand.json")
+for k in sorted(a.keys() & b.keys()):
+    print(f"{k:60} {a[k]['p50']:>10.1f} {b[k]['p50']:>10.1f} {100*(b[k]['p50']/a[k]['p50']-1) if a[k]['p50'] else float('nan'):>7.1f}%")
+PY
+```
+
+A row id present in one report and not the other is a scenario change, not a regression. Do not
+compare an `fx.*` row with a `loop` row, or any synthetic row with an `fxlive` row.
+
+### Caveats
+
+* One process, warm, microsecond scale: the clock resolution, the mutex in each mark and the allocator
+  matter. Use p50 and the spread, not a single run.
+* Shared cloud sandboxes have noisy neighbours; pin a quiet machine for anything you will act on.
+  Build in the optimized profile (`cargo bench` does); a debug build is flagged in `provenance`.
+* `fx.concurrent.N` with N above `cpu_count` measures oversubscription, not scaling.
+* The scripted provider never waits, so these numbers say nothing about streaming, TLS, or any real
+  provider; they bound only Chip's and FX's own cost around a provider.
+* The in-process capability is a no-op; real tools (filesystem, Git, PAX) are the L1 section.
+* Cross-machine, cross-OS and Rust-versus-retired-implementation comparisons are out of scope.
+
+### Recorded run (revision 3), and what it does not show
+
+Two consecutive runs of `--only fx` on the same sandbox as section "Environment of the recorded run"
+(4 vCPU Intel Xeon @ 2.10 GHz, Linux, `rustc 1.97.0`, optimized profile, tree at `747f991` plus this
+change). Median (p50) in microseconds. Raw JSON is deliberately not committed (it is machine-specific);
+re-run the commands above to produce your own. This is a record of one environment, not a budget.
+
+| Row | p50 run 1 | p50 run 2 | spread | p95 run 1 | p95 run 2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fx.turn.no_tool.b8_total` | 8.2 | 8.2 | -0.7% | 11.4 | 11.8 |
+| `fx.turn.tool_round_trip.b8_total` | 21.5 | 22.1 | +2.8% | 33.1 | 51.5 |
+| `fx.turn.steps.10.b8_total` | 215.8 | 217.6 | +0.8% | 386.3 | 317.4 |
+| `fx.turn.steps.50.b8_total` | 2873.4 | 2960.1 | +3.0% | 3438.9 | 4777.7 |
+| `fx.turn.steps.50.uninstrumented.b8_total` | 2853.2 | 2901.7 | +1.7% | 4286.0 | 4349.7 |
+| `fx.step.per_iteration.50` | 57.4 | 61.1 | +6.4% | 102.3 | 129.5 |
+| `fx.concurrent.1.batch_wall` | 344.0 | 320.1 | -6.9% | 538.3 | 516.0 |
+| `fx.concurrent.4.batch_wall` | 333.0 | 358.1 | +7.5% | 472.3 | 492.6 |
+| `fx.concurrent.16.batch_wall` | 1288.5 | 1102.8 | -14.4% | 1751.4 | 1364.3 |
+
+Boundary medians for `fx.turn.steps.50` (run 1): b1 0.5, b2 2002.0, b3 257.0, b4 10.8, b5 260.6,
+b6 329.2, b7 9.4 (sum of medians 2869.5 against a median total of 2873.4; medians do not add exactly,
+the per-run values do). Throughput (turns/s, run 1 / run 2): no_tool 113 616 / 104 497; steps.50 330 / 301;
+concurrent.1 2649 / 2360, .4 11 551 / 10 663, .16 12 054 / 13 666.
+
+What these rows show and do not show:
+
+* Medians agree within about 8% between the two runs, except `fx.concurrent.16.batch_wall` (14%). Tail
+  values (p95) move more, up to about 55% on `fx.turn.tool_round_trip`. Any comparison smaller than this
+  spread is noise on this machine.
+* The marks cost about 1% on the 50-step turn here (2873 against 2853 us, inside the run-to-run spread).
+* Cost per step is not constant: the 50-step turn costs about 13 times the 10-step turn for 5 times the
+  steps, and `b2` (loop processing before inference) is the largest share (about 70%). That is consistent with
+  the request context growing with the turn (section 3, finding 2) but this run does not isolate the cause.
+* **The earlier baseline and this one measure different things.** Section 1's 10.6 us per step and 1.63 ms
+  for 50 steps are *Chip overhead* (`total - model - execution`) with an instant in-process model and
+  **without FX**. Re-running `--only loop` on this sandbox gave 11.1 us per decision (10 steps) and
+  1.61 ms (50 steps) of overhead, and a 50-step *wall total* of 2.39 ms, against 2.87 ms for the `fx`
+  scenario, which includes the FX adapter, FX itself and the timing marks. Those two runs are one session
+  apart and the scenarios are not identical, so the 0.5 ms difference is **not** attributed to FX here; the
+  two-commit procedure above, or `b3` + `b5` (about 0.52 ms of the 50-step turn), is how to look.
+* Neither is comparable with a live run. A live model call takes seconds, at least three orders of magnitude
+  longer than any row above. Reported live figures from other runs (for example 2.2 s against Anthropic and
+  16.6 s against LM Studio) are a different measurement context (network, model, hardware) and are not in this
+  report; if the hypothesis is that Chip + FX overhead is negligible against inference, the evidence here is
+  consistent with it for these scripted scenarios but a real-model run through `fxlive` is what tests it.
+* `fxlive` was exercised in this change only against a local mock endpoint and against a closed port, to
+  check the report path and the error path. **No real-model number is recorded here.**
