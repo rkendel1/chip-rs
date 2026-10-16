@@ -1,0 +1,21 @@
+[package]
+name = "chip-turns"
+version = "0.1.0"
+edition = "2024"
+description = "Runs a Chip turn over a Zig-compatible session: reconstructs context from its history and persists the turn through the session writer"
+license = "MIT"
+
+# Integration crate. Chip's loop (chip-core) and the session store (chip-session) know nothing of
+# each other; this is the only place they meet. It adds no provider path and no persistence
+# authority: the model comes in through chip-core's Agent, and every durable write goes through
+# chip-session's SessionWriter.
+[dependencies]
+chip-core = { path = "../chip-core" }
+chip-session = { path = "../chip-session" }
+serde_json = "1"
+
+[dev-dependencies]
+async-trait = "0.1"
+chip-inference = { path = "../chip-inference" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

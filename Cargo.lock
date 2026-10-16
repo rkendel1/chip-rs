@@ -459,6 +459,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chip-turns"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "chip-inference",
+ "chip-session",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "chip-wasm-decision"
 version = "0.1.0"
 
