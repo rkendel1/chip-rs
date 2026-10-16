@@ -131,7 +131,7 @@ back, and an interrupted compaction is never counted as done.
 
 ## 5. Tests (Phases E and F, section 9 of the brief): 48 + the benchmark
 
-`cargo test -p chip-session-memory` (7 test files). Highlights:
+`cargo test --manifest-path crates/chip-session-memory/Cargo.toml` (7 test files). Highlights:
 
 * **Recovery from persisted data**: a session with failed attempts, a verified repair, test
   failures, an unresolved question and an escalation is checkpointed, compacted, **destroyed**
@@ -160,7 +160,7 @@ Not tested, and not claimed: concurrent writers to one session; behaviour on a p
 
 ## 6. Benchmark results (Phase G)
 
-`cargo bench -p chip-session-memory --bench session_memory`. 10,000 observations (payloads 60% 1
+`cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench session_memory`. 10,000 observations (payloads 60% 1
 KiB, 30% 8 KiB, 9% 32 KiB, 1% 128 KiB; about 30% repeating an earlier payload exactly; 72 MiB of
 payload in all), multiple failed attempts and repairs, test failures and passes, superseded
 observations, 11 checkpoints, 5 escalations, an unresolved failure and a pending question, and a
@@ -323,9 +323,9 @@ Any WASM-hosting or alternative-store investigation requires its own decision an
 
 ```sh
 # FeltDB is a git dependency pinned to a commit; cargo fetches it (needs network once).
-cargo test  -p chip-session-memory                      # 48 tests incl. a real process kill
-cargo bench -p chip-session-memory --bench session_memory                 # 10,000 obs, 5 trials
-cargo bench -p chip-session-memory --bench session_memory -- --quick      # 2,000 obs, 3 trials
+cargo test  --manifest-path crates/chip-session-memory/Cargo.toml                      # 48 tests incl. a real process kill
+cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench session_memory                 # 10,000 obs, 5 trials
+cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench session_memory -- --quick      # 2,000 obs, 3 trials
 #   options: --observations N --trials N --seed N --out PATH
 #   output:  target/session-memory-bench.json (or SESSION_MEMORY_BENCH_JSON)
 sh scripts/audit-dependencies.sh                         # dependency direction still holds

@@ -270,7 +270,11 @@ workflow is manual only. It stays because the PR36-39 experiments depend on it.
 None of these is used by `chip work`, `chip serve` or `chip verify`. Several are linked into the
 shipped `chip` binary only because `chip-cli` also hosts their commands (section 8).
 
-* **`chip-session-memory`** (EXPERIMENT, FROZEN, L2): *the durable-session-store evaluation.* A leaf
+* **`chip-session-memory`** (EXPERIMENT, FROZEN, L2): *the durable-session-store evaluation.* Excluded
+  from the root workspace (its own cargo workspace; its private `flow_db` git dependency cannot be
+  resolved by the default CI, and one unresolvable git source stops cargo from resolving the whole
+  workspace). Run it with `--manifest-path crates/chip-session-memory/Cargo.toml`; the opt-in CI job
+  `session-memory-experiment` runs it when `FLOW_DB_ACCESS` and `FLOW_DB_TOKEN` are configured. A leaf
   crate: no workspace crate depends on it (its only workspace dependency, `chip-core`, is a
   dev-dependency for a benchmark baseline), and the shipped `chip` binary does not link it or any of
   its storage dependencies (FeltDB, `rusqlite`/bundled SQLite, `redb`, `durability`;

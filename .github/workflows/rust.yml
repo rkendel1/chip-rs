@@ -143,3 +143,23 @@ jobs:
         with:
           name: chip-release
           path: dist/
+
+  # The storage experiment is its own cargo workspace because its git dependency
+  # (rkendel1/flow_db) is private. It runs only when the repository opts in with the variable
+  # FLOW_DB_ACCESS=true and a read-only deploy token in the secret FLOW_DB_TOKEN. Without them the
+  # job is reported as SKIPPED, never as passing.
+  session-memory-experiment:
+    name: Session-memory experiment (opt-in, private dependency)
+    runs-on: ubuntu-latest
+    if: ${{ vars.FLOW_DB_ACCESS == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Allow cargo to read flow_db with the token (not echoed, not written to the repo)
+        env:
+          FLOW_DB_TOKEN: ${{ secrets.FLOW_DB_TOKEN }}
+        run: |
+          test -n "$FLOW_DB_TOKEN"
+          git config --global url."https://x-access-token:${FLOW_DB_TOKEN}@github.com/rkendel1/flow_db".insteadOf "https://github.com/rkendel1/flow_db"
+      - name: Test the experiment
+        run: cargo test --manifest-path crates/chip-session-memory/Cargo.toml

@@ -49,6 +49,24 @@ fn workspace_members() -> Vec<String> {
         .collect()
 }
 
+/// Crates that live under `crates/` but are deliberately outside the root workspace (the root
+/// manifest's `exclude`). They are still inventoried, and each must be an EXPERIMENT.
+fn excluded_crates() -> Vec<String> {
+    let text = fs::read_to_string(repo_root().join("Cargo.toml")).unwrap();
+    text.split("exclude")
+        .nth(1)
+        .and_then(|rest| rest.split('[').nth(1))
+        .and_then(|rest| rest.split(']').next())
+        .map(|list| {
+            list.split(',')
+                .map(|m| m.trim().trim_matches('"'))
+                .filter(|m| !m.is_empty())
+                .map(|m| m.strip_prefix("crates/").unwrap_or(m).to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn inventory() -> Vec<(String, Row)> {
     let text = fs::read_to_string(repo_root().join("docs/product/crates.md")).unwrap();
     let table = text
@@ -87,7 +105,7 @@ fn every_workspace_crate_is_in_the_inventory_exactly_once_and_nothing_else_is() 
     for (name, _) in inventory() {
         *counts.entry(name).or_default() += 1;
     }
-    for member in workspace_members() {
+    for member in workspace_members().into_iter().chain(excluded_crates()) {
         assert_eq!(
             counts.remove(&member),
             Some(1),
@@ -178,6 +196,29 @@ fn only_chip_cli_links_crates_that_are_not_product_integration_or_supporting() {
                     other.class
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn an_excluded_crate_is_an_experiment_and_no_member_depends_on_it() {
+    let rows: BTreeMap<String, Row> = inventory().into_iter().collect();
+    for name in excluded_crates() {
+        let row = rows
+            .get(&name)
+            .unwrap_or_else(|| panic!("{name} is not inventoried"));
+        assert_eq!(
+            row.class, "EXPERIMENT",
+            "{name} is outside the workspace, so it must be an EXPERIMENT"
+        );
+        for member in workspace_members() {
+            let manifest =
+                fs::read_to_string(repo_root().join("crates").join(&member).join("Cargo.toml"))
+                    .unwrap();
+            assert!(
+                !manifest.contains(&name),
+                "{member} depends on the excluded crate {name}"
+            );
         }
     }
 }

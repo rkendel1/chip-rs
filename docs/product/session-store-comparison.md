@@ -342,12 +342,12 @@ added.
 ## 10. Reproduce
 
 ```sh
-cargo test -p chip-session-memory                        # 48 original + 62 contract tests
-cargo bench -p chip-session-memory --bench session_memory -- --profile normal --trials 15 \
+cargo test --manifest-path crates/chip-session-memory/Cargo.toml                        # 48 original + 62 contract tests
+cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench session_memory -- --profile normal --trials 15 \
   --kill-recovery --arms chip_baseline,memory_compact,felt_store_all,sqlite_store_all,redb_store_all,redb_default_cache,journal_store_all,felt_synced,sqlite_synced,redb_synced,journal_synced
-cargo bench -p chip-session-memory --bench session_memory -- --profile stress --trials 5 --kill-recovery --arms …
-cargo build --release -p chip-cli && cargo bench -p chip-session-memory --bench service_retention -- --works 2000
-cargo test -p chip-session-memory --test contract flipped -- --nocapture   # bit-flip counts
+cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench session_memory -- --profile stress --trials 5 --kill-recovery --arms …
+cargo build --release -p chip-cli && cargo bench --manifest-path crates/chip-session-memory/Cargo.toml --bench service_retention -- --works 2000
+cargo test --manifest-path crates/chip-session-memory/Cargo.toml --test contract flipped -- --nocapture   # bit-flip counts
 ```
 
 Limitations: one machine, one synthetic workload (the real work-run payload mix is approximated, not
