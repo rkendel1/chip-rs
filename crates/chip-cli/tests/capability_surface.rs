@@ -170,6 +170,9 @@ async fn the_boundary_assigns_no_execution_id_and_keeps_the_provider_id_as_metad
     use chip_inference::{ModelResponse, Usage};
     let capabilities: Vec<Capability> = {
         let dir = std::env::temp_dir().join(format!("chip-surface-{}", std::process::id()));
+        // This test must not depend on a sibling test having created the directory first: tests in
+        // one binary run in any order, and without the root `project.*` is unavailable.
+        std::fs::create_dir_all(&dir).unwrap();
         let env = LocalEnvironment::new(
             opaque_id(&dir),
             &dir,
