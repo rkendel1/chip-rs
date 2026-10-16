@@ -39,29 +39,6 @@ fn chip_inference_does_not_depend_on_chip_core_or_provider() {
 }
 
 #[test]
-fn chip_legacy_http_depends_on_chip_inference_but_not_chip_core() {
-    let deps = dependency_names(&manifest("chip-legacy-http"));
-    assert!(deps.contains(&"chip-inference".into()));
-    for forbidden in ["chip-core", "chip-cli"] {
-        assert!(
-            !deps.contains(&forbidden.to_string()),
-            "chip-legacy-http must not depend on {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn chip_legacy_http_has_no_vendor_sdk() {
-    let deps = dependency_names(&manifest("chip-legacy-http"));
-    for sdk in ["openai", "async-openai", "anthropic", "ollama"] {
-        assert!(
-            !deps.contains(&sdk.to_string()),
-            "vendor SDK {sdk} is forbidden"
-        );
-    }
-}
-
-#[test]
 fn chip_core_does_not_depend_on_chip_legacy_http() {
     let manifest = manifest("chip-core");
     assert!(

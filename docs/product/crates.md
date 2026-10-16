@@ -57,7 +57,7 @@ or the human control plane.
 | Responsibility | Owner | What this repository contains |
 | --- | --- | --- |
 | Model intelligence | Model / provider | nothing |
-| Model/provider abstraction | **Rust FX** | `chip-inference`, `chip-legacy-http` (co-located, versioned independently) |
+| Model/provider abstraction | **Rust FX** | `chip-inference`, `chip-fx`, `chip-fx-native` (Chip's model port and its adapters onto the authoritative FX in `rkendel1/fx`) |
 | Agent agency | **Rust Chip** | `chip-core` and the work path of `chip-cli` |
 | Explicit application capabilities | AppPort | nothing. No AppPort code or dependency exists here (audited by `scripts/audit-dependencies.sh`) |
 | Computer / execution | **Compute** | `chip-compute` only: a legacy `compute exec` CLI adapter used by demos and proofs. The real `EnvironmentProvider` over Compute lives in the Compute repository (reported by its maintainers; not verifiable from this repository) |
@@ -68,14 +68,13 @@ or the human control plane.
 Rust Chip may integrate with these systems; it does not absorb their responsibilities.
 
 **Rust FX (this repository) is not the npm/Zig FX.** The Compute-configured distribution ships a
-separate agent, Chip/Eve (npm), on a separate FX/Zig stack. Rust FX (`chip-inference`, `chip-legacy-http`)
-and Rust Chip share nothing with them and neither falls back to the other. `chip-inference` and
-`chip-legacy-http` must not depend on `chip-core` or on the npm/Zig stack
+separate agent, Chip/Eve (npm), on a separate FX/Zig stack. Rust FX (the authoritative FX in `rkendel1/fx`, reached through `chip-fx`)
+and Rust Chip share nothing with them and neither falls back to the other. `chip-inference` must not depend on `chip-core` or on the npm/Zig stack
 (`crates/chip-remote-env/tests/architecture.rs`).
 
 **What Chip requires from FX:** `chip-inference`'s `ModelProvider` trait and its request/response types
-(`chip-core` and `chip-cli` depend on `chip-inference`), and, in `chip-cli` only, `chip-legacy-http` to
-build a concrete provider. `chip-core` does not depend on `chip-legacy-http`. FX is otherwise an
+(`chip-core` and `chip-cli` depend on `chip-inference`), and, in `chip-cli` only, `chip-fx-native` to
+build a concrete provider. FX is otherwise an
 independent product; Chip has no provider-specific logic.
 
 **Environment boundary.** `chip-core` defines `WorkEnvironment`, `EnvironmentProvider`
@@ -144,7 +143,6 @@ member must appear exactly once.
 | `chip-session` | INTEGRATION | KEEP | L3 | - |
 | `chip-turns` | INTEGRATION | KEEP | L3 | - |
 | `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
-| `chip-legacy-http` | INTEGRATION | KEEP | L2 | L3 |
 | `chip-pax` | INTEGRATION | KEEP | L3 | - |
 | `chip-remote-env` | INTEGRATION | KEEP | L3 | L4 |
 | `chip-compute` | INTEGRATION | FROZEN | L2 | L4 |
@@ -258,11 +256,6 @@ as committed, not committed, or uncertain. It adds no provider path and no persi
 imports, driven by a host over the shared `fx-wasm-abi` JSON session ABI. The host performs provider
 calls (through FX) and tool execution; the module never reaches the network or filesystem.
 
-**`chip-legacy-http`** (INTEGRATION, Rust FX). One HTTP provider with three wire adapters:
-`openai-compatible`, `anthropic` (the `ollama` adapter was removed; Ollama is reached through its OpenAI-compatible endpoint). 41 tests, all against a local mock HTTP server except
-`live_provider.rs`, which runs only when `FX_PROVIDER_*` variables are set and otherwise returns.
-Provider matrix in section 5.3.
-
 **`chip-pax`** (INTEGRATION, L3). Runs an independently installed `pax` (verified as PAX >= 0.3.0 and not
 the POSIX `pax` archiver; lazily: located without starting a process, verified once per executor
 when first needed), fixes `pax --dir <root> --json test`, parses stdout strictly as
@@ -356,7 +349,7 @@ shipped `chip` binary only because `chip-cli` also hosts their commands (section
 | `--test-real-evidence`, `--test-real-cycle`, `--test-real-work`, `--compute-test` | PROOF (need a real `compute`; exit 3 / SKIPPED without) |
 | `chip "<prompt>"` (single turn with a configured provider) | historical demo |
 
-Direct dependencies of `chip-cli`: `chip-core`, `chip-inference`, `chip-legacy-http`, `chip-project`,
+Direct dependencies of `chip-cli`: `chip-core`, `chip-inference`, `chip-project`,
 `chip-pax`, `chip-remote-env` (product path); `chip-compute`, `chip-graph`, `chip-local-decision`,
 `chip-decision-corpus`, `chip-reasoning-corpus`, `chip-wasm-decision`, `chip-wasm-decision-host`,
 `chip-wasm-reasoner` (experiment and proof path, linked unconditionally); `chip-local-ml`,
@@ -385,9 +378,9 @@ repository. Level L3 (real PAX, real binary over HTTP, mock model).
 
 | Provider | Role | Automated tests | Live evidence |
 | --- | --- | --- | --- |
-| `chip-legacy-http` / `openai-compatible` | supported provider | local mock server (headers, bodies, errors, usage, consecutive-system-message merging added for vLLM-style templates) | opt-in only; `AGENTS.md` reports live PR36-38 runs with one non-Anthropic model (Qwen), serving endpoint not recorded here |
-| `chip-legacy-http` / `anthropic` | supported provider | local mock server | `AGENTS.md` reports live PR36-38 runs with Haiku; not reproduced by CI |
-| `chip-legacy-http` / `ollama` | removed (use Ollama's OpenAI-compatible endpoint) | n/a | n/a |
+| FX native provider / `openai-compatible` | supported provider | local mock server (headers, bodies, errors, usage, consecutive-system-message merging added for vLLM-style templates) | opt-in only; `AGENTS.md` reports live PR36-38 runs with one non-Anthropic model (Qwen), serving endpoint not recorded here |
+| FX native provider / `anthropic` | supported provider | local mock server | `AGENTS.md` reports live PR36-38 runs with Haiku; not reproduced by CI |
+| Ollama | its own `/api/chat` API is not supported; use its OpenAI-compatible endpoint through `openai-compatible` | n/a | n/a |
 | vLLM | no adapter of its own: reached through `openai-compatible`; one commit adapted the wire format for it | mock server only | none recorded in the repository |
 | `chip-local-ml`, `chip-laya-reasoner` local models | experimental, not a chat provider | test doubles / random weights | none recorded |
 | in-memory test providers in `chip-core`, `chip-inference` | development / test | yes | not applicable |
@@ -423,7 +416,7 @@ experiments only measure model robustness against that mechanism.
   many others return early and pass; without the Wasm target, 10 tests fail. Those were seen in this
   sandbox before the tools were installed.
 * Per crate (passed): chip-cli 302 (307 with the inventory tests), chip-core 267, chip-compute 50, chip-project 51,
-  chip-legacy-http 41, chip-pax 32, chip-graph 33, chip-local-decision 18, chip-wasm-decision-host 16,
+  chip-pax 32, chip-graph 33, chip-local-decision 18, chip-wasm-decision-host 16,
   chip-local-decision-train 13 (+1 ignored), chip-reasoning-corpus 13, chip-wasm-reasoner 12,
   chip-decision-corpus 10, chip-remote-env 8, chip-inference 7, chip-laya-reasoner 6 (default features),
   chip-local-ml 3 (default features), chip-wasm-decision 0.
@@ -461,7 +454,7 @@ experiments only measure model robustness against that mechanism.
   No sandbox is claimed.
 * **Service:** no persistence, authentication, streaming events or remote exposure; cancellation of
   an in-flight call is advisory.
-* **Mock-only integrations:** `chip-compute` without a `compute` binary, `chip-legacy-http` against
+* **Mock-only integrations:** `chip-compute` without a `compute` binary, the FX native provider against
   any real endpoint, the Laya/local-ml adapters against real models.
 * **Skips look like passes.** Tests that say `SKIPPED` return successfully. A green run on a machine
   without PAX, Compute, Git or a model proves less than the same run elsewhere.

@@ -873,8 +873,12 @@ async fn live_provider_path_is_reported_honestly() {
     let config =
         chip_cli::provider_selection::resolve(&Default::default(), |k| std::env::var(k).ok())
             .unwrap();
-    let provider: Arc<dyn ModelProvider> =
-        Arc::new(chip_legacy_http::HttpProvider::new(config.clone()).unwrap());
+    let provider: Arc<dyn ModelProvider> = chip_cli::provider_selection::build_model(
+        config.clone(),
+        chip_cli::provider_selection::ExecutorKind::Fx,
+        &|name| std::env::var(name).ok(),
+    )
+    .unwrap();
     let dir = fixture::materialize("live");
     let Some((pax, _)) = fixture::pax_version(&dir).await else {
         return;

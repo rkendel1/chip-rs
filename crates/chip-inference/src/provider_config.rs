@@ -1,6 +1,5 @@
 //! The configuration that selects one model provider. It describes a selection and its settings; it
-//! performs no I/O, and it is not an executor: the model is reached through FX (`chip-fx-native`) or,
-//! while it still exists, the explicit legacy executor.
+//! performs no I/O, and it is not an executor: the model is reached through FX (`chip-fx-native`), the only executor.
 
 use std::fmt;
 use std::time::Duration;

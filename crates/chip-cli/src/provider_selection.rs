@@ -19,7 +19,6 @@ use chip_fx_native::{
 };
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_inference::{PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
-use chip_legacy_http::HttpProvider;
 
 /// What the command line chose. Anything left `None` is decided by the environment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -27,7 +26,7 @@ pub struct Selection {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub endpoint: Option<String>,
-    /// `legacy` (the default) or `fx`; see [`ExecutorKind`].
+    /// `fx` (the only executor; anything else is refused); see [`ExecutorKind`].
     pub executor: Option<String>,
 }
 
@@ -46,45 +45,56 @@ pub fn resolve(
     })
 }
 
-/// Which inference executor serves the selected model. The choice is explicit; nothing is tried
-/// as a fallback for the other.
+/// Which inference executor serves the selected model. There is one: the authoritative FX executor
+/// with a native Rust provider (`chip-fx-native`): one attempt per call, structured delivery
+/// certainty, no Node process, no retry and no fallback. The former `legacy` executor
+/// (`chip-legacy-http`) was removed; asking for it is an error, not a request to fall back.
 ///
-/// * `fx` (the default): the authoritative FX executor with a native Rust provider
-///   (`chip-fx-native`). One attempt per call, structured delivery certainty, no Node process.
-/// * `legacy`: `chip-legacy-http`, the original HTTP adapters for OpenAI-compatible endpoints and
-///   Anthropic. Explicit only, and on its way out; Ollama's own API is not served by either executor.
+/// `fx` stays accepted as a value of `--executor` / `CHIP_EXECUTOR` so a deployment that set it
+/// explicitly keeps working.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutorKind {
-    /// `chip-legacy-http`. Kept as an explicit choice while its remaining consumers move.
-    Legacy,
     /// The authoritative FX executor with a native provider.
     #[default]
     Fx,
 }
 
 impl ExecutorKind {
-    /// The executor named by `--executor`, else `CHIP_EXECUTOR`, else the default.
+    /// Validates `--executor` and `CHIP_EXECUTOR`. Both are checked, so a valid flag does not hide
+    /// a stale environment value. Anything but `fx` fails here, before any request is made.
     pub fn choose(
         flag: Option<&str>,
         env: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, FxError> {
-        let named = flag
-            .map(str::to_owned)
-            .or_else(|| env("CHIP_EXECUTOR"))
-            .filter(|v| !v.trim().is_empty());
-        match named.as_deref().map(str::trim) {
-            None => Ok(Self::default()),
-            Some("legacy") => Ok(Self::Legacy),
-            Some("fx") => Ok(Self::Fx),
-            Some(other) => Err(FxError::Configuration(format!(
-                "unknown executor {other:?}: use `legacy` or `fx`"
-            ))),
+        for (source, value) in [
+            ("--executor", flag.map(str::to_owned)),
+            ("CHIP_EXECUTOR", env("CHIP_EXECUTOR")),
+        ] {
+            let Some(value) = value.filter(|v| !v.trim().is_empty()) else {
+                continue;
+            };
+            match value.trim() {
+                "fx" => {}
+                "legacy" => {
+                    return Err(FxError::Configuration(format!(
+                        "{source}=legacy: the legacy executor was removed; FX is the only supported executor \
+                         (omit {source}, or use `fx`). Nothing was run"
+                    )));
+                }
+                other => {
+                    return Err(FxError::Configuration(format!(
+                        "{source}={other:?} is not an executor: FX is the only supported executor (`fx`). \
+                         Nothing was run"
+                    )));
+                }
+            }
         }
+        Ok(Self::Fx)
     }
 }
 
 /// Builds the model provider for `config` on `executor`. With `fx` the provider kind, endpoint,
-/// key and options are mapped from the same configuration the legacy path reads, and anything the
+/// key and options are mapped from the same configuration, and anything the
 /// native path cannot carry is a configuration error naming it, never a silent difference.
 pub fn build_model(
     config: ProviderConfig,
@@ -92,7 +102,6 @@ pub fn build_model(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Arc<dyn ModelProvider>, FxError> {
     match executor {
-        ExecutorKind::Legacy => Ok(Arc::new(HttpProvider::new(config)?)),
         ExecutorKind::Fx => fx_model(config, env),
     }
 }
@@ -117,8 +126,8 @@ pub fn build_model_isolated(config: ProviderConfig) -> Result<Arc<dyn ModelProvi
     build_model(config, executor, &env)
 }
 
-/// The API root a native provider appends its path to, from the full URL the legacy adapters post
-/// to (`.../v1/chat/completions`, `.../v1/messages`).
+/// The API root a native provider appends its path to, from the full URL users configure
+///  (`.../v1/chat/completions`, `.../v1/messages`).
 fn api_root(endpoint: &str, kind: ProviderKind) -> Result<String, FxError> {
     let suffix = match kind {
         ProviderKind::OpenAiCompatible => "/chat/completions",
@@ -155,7 +164,7 @@ fn fx_model(
     selection.endpoint = Some(api_root(&config.endpoint, kind)?);
     selection.budget = Some(config.timeout);
     if kind == ProviderKind::Anthropic {
-        // The same fallback the legacy Anthropic adapter uses when nothing sets a cap.
+        // Anthropic requires a cap; this is the fallback when nothing sets one.
         selection.default_max_tokens = Some(config.max_tokens.unwrap_or(1024));
         if let Some(workspace) = &config.workspace_id {
             selection
@@ -163,11 +172,11 @@ fn fx_model(
                 .push(("anthropic-workspace-id".into(), workspace.clone()));
         }
     } else {
-        // Anthropic's Messages API has no equivalent; the legacy adapter ignores the flag there too.
+        // Anthropic's Messages API has no equivalent.
         selection.json_object_output = config.json_object_output;
     }
-    // Carried as the same `chat_template_kwargs.enable_thinking` field the legacy adapter sends. On
-    // Anthropic the legacy adapter ignored it silently; the fx executor refuses it by name instead.
+    // Carried as the top-level `chat_template_kwargs.enable_thinking` field. On Anthropic, which has
+    // no such field, it is refused by name instead of dropped.
     selection.template_thinking = config.enable_thinking;
     selection.allow_insecure_lan_http = lan_http_opt_in(env)?;
     // The key Chip already resolved from CHIP_API_KEY wins; otherwise the provider's own variable.
@@ -205,7 +214,7 @@ fn lan_http_opt_in(env: &dyn Fn(&str) -> Option<String>) -> Result<bool, FxError
 }
 
 /// Applies the configured `max_tokens` and `temperature` to a request that carries none, as the
-/// legacy adapters do (the request's own value wins).
+/// users configure (the request's own value wins).
 struct ConfigDefaults {
     inner: NativeModelProvider,
     max_tokens: Option<u32>,

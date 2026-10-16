@@ -1,11 +1,10 @@
 //! Commands that talk to a model but are not `chip work`: they build their provider through the
-//! same selection as everything else, so the default executor is FX and `legacy` is only ever
-//! explicit. The model is a loopback mock; the `chip` binary is real.
+//! same selection as everything else, so the executor is FX and nothing else. The model is a loopback mock; the `chip` binary is real.
 
 use std::process::{Command, Output};
 use std::time::Duration;
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
 fn run(url: &str, args: &[&str], executor: Option<&str>) -> Output {
@@ -66,22 +65,31 @@ async fn the_live_reasoner_benchmark_uses_the_fx_executor_by_default() {
     );
 }
 
+/// The removed `legacy` value and any other value are refused before a single request, from the
+/// environment, by every model-calling command, and nothing falls back to anything.
 #[tokio::test(flavor = "multi_thread")]
-async fn legacy_is_explicit_and_posts_without_streaming() {
-    let (out, bodies) = go(LIVE, Some("legacy")).await;
-    assert!(!bodies.is_empty(), "{}", text(&out));
-    for body in &bodies {
-        let body: serde_json::Value = serde_json::from_str(body).unwrap();
-        assert_eq!(body.get("stream"), None);
+async fn the_removed_legacy_executor_and_unknown_values_fail_before_any_request() {
+    for value in ["legacy", "both", "FX", "fx,legacy", "0"] {
+        let (out, bodies) = go(LIVE, Some(value)).await;
+        assert!(
+            bodies.is_empty(),
+            "{value}: nothing was sent: {}",
+            text(&out)
+        );
+        assert_ne!(out.status.code(), Some(0), "{value}");
+        assert!(
+            text(&out).contains("FX is the only supported executor"),
+            "{value}: {}",
+            text(&out)
+        );
     }
 }
 
+/// `fx` stays accepted, so a deployment that set it explicitly keeps working.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unknown_executor_is_an_error_with_no_request_and_no_fallback() {
-    let (out, bodies) = go(LIVE, Some("both")).await;
-    assert!(bodies.is_empty(), "nothing was sent: {}", text(&out));
-    assert_ne!(out.status.code(), Some(0));
-    assert!(text(&out).contains("unknown executor"), "{}", text(&out));
+async fn fx_is_still_accepted_as_an_explicit_value() {
+    let (out, bodies) = go(LIVE, Some("fx")).await;
+    assert!(!bodies.is_empty(), "{}", text(&out));
 }
 
 const HORIZON: &[&str] = &["--test-horizon-live", "--horizon", "1"];
@@ -91,9 +99,13 @@ const HORIZON: &[&str] = &["--test-horizon-live", "--horizon", "1"];
 /// executor and the refusal of Ollama's own API both surface before anything is sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_live_horizon_run_builds_its_provider_through_the_shared_selection() {
-    let (out, bodies) = go(HORIZON, Some("both")).await;
+    let (out, bodies) = go(HORIZON, Some("legacy")).await;
     assert!(bodies.is_empty(), "{}", text(&out));
-    assert!(text(&out).contains("unknown executor"), "{}", text(&out));
+    assert!(
+        text(&out).contains("FX is the only supported executor"),
+        "{}",
+        text(&out)
+    );
 
     let server = common::start(200, common::OK_BODY, Duration::ZERO).await;
     let url = server.url.clone();

@@ -358,16 +358,16 @@ pub fn render(report: &LiveReport, local: Option<&LocalReference>, secret: Optio
 }
 
 #[cfg(test)]
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "../tests/common/mod.rs"]
 mod mock;
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
+    use crate::provider_selection::{ExecutorKind, build_model};
     use chip_inference::Secret;
     use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
-    use chip_legacy_http::HttpProvider;
 
     use super::*;
 
@@ -384,13 +384,13 @@ mod tests {
             .with_api_key(Secret::new(KEY))
             .with_timeout(timeout);
         (
-            Arc::new(HttpProvider::new(config).unwrap()),
+            build_model(config, ExecutorKind::Fx, &|_| None).unwrap(),
             Meta::new(PROVIDER_OPENAI_COMPATIBLE, "bench-model", url),
         )
     }
 
     #[tokio::test]
-    async fn requests_go_through_the_real_http_provider_once_each_with_no_execution() {
+    async fn requests_go_through_the_fx_executor_once_each_with_no_execution() {
         let server = mock::start(200, &body("ESCALATE"), Duration::ZERO).await;
         let (p, meta) = provider(&server.url, Duration::from_secs(5));
         let report = run(p, meta, 3).await;
@@ -418,10 +418,7 @@ mod tests {
         ] {
             let server = mock::start(status, &text, Duration::ZERO).await;
             let auth_checked = server.captured.clone();
-            let (p, meta) = provider(
-                &format!("{}?api_key={KEY}", server.url),
-                Duration::from_secs(5),
-            );
+            let (p, meta) = provider(&server.url, Duration::from_secs(5));
             let report = run(p, meta, 2).await;
             let rendered = render(&report, None, Some(KEY));
             assert!(!rendered.contains(KEY), "{rendered}");
@@ -437,6 +434,22 @@ mod tests {
             assert_eq!(sent, format!("Bearer {KEY}"));
             assert!(!rendered.contains("Bearer"));
         }
+    }
+
+    /// A key placed in the endpoint's query string is refused by the executor (it needs a plain
+    /// `.../chat/completions` endpoint), and the refusal does not echo it.
+    #[test]
+    fn a_key_in_the_endpoint_query_string_is_refused_and_not_echoed() {
+        let config = ProviderConfig::new(
+            PROVIDER_OPENAI_COMPATIBLE,
+            "bench-model",
+            format!("http://127.0.0.1:9/v1/chat/completions?api_key={KEY}"),
+        );
+        let error = match build_model(config, ExecutorKind::Fx, &|_| None) {
+            Ok(_) => panic!("an endpoint with a query string must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(!error.contains(KEY), "{error}");
     }
 
     #[tokio::test]
@@ -457,7 +470,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_errors_are_surfaced_without_retries_or_fallback() {
-        for (status, needle) in [(401, "authentication"), (500, "provider error")] {
+        for (status, needle) in [(401, "unauthenticated"), (500, "provider error")] {
             let server =
                 mock::start(status, r#"{"error":{"message":"nope"}}"#, Duration::ZERO).await;
             let (p, meta) = provider(&server.url, Duration::from_secs(5));
@@ -483,10 +496,13 @@ mod tests {
         assert_eq!(report.errors(), 4);
         assert!(render(&report, None, None).contains("timeout"));
 
-        let (p, meta) = provider("http://127.0.0.1:1/v1", Duration::from_secs(2));
+        let (p, meta) = provider(
+            "http://127.0.0.1:1/v1/chat/completions",
+            Duration::from_secs(2),
+        );
         let report = run(p, meta, 1).await;
         assert_eq!(report.errors(), 4);
-        assert!(render(&report, None, None).contains("http failure"));
+        assert!(render(&report, None, None).contains("Connection refused"));
     }
 
     #[tokio::test]
@@ -495,7 +511,7 @@ mod tests {
         let (p, meta) = provider(&server.url, Duration::from_secs(5));
         let report = run(p, meta, 1).await;
         assert_eq!(report.errors(), 4);
-        assert!(render(&report, None, None).contains("invalid response"));
+        assert!(render(&report, None, None).contains("not an event stream"));
     }
 
     #[test]

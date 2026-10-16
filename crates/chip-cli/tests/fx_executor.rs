@@ -1,13 +1,8 @@
-//! The legacy HTTP executor and the authoritative FX executor, side by side.
+//! The FX executor, the only executor, against a loopback mock that answers in the format FX asks for
+//! (an event stream). Mocked transport only: nothing here talks to a live provider or uses TLS.
 //!
-//! The same Chip configuration and the same `ModelRequest` go through `chip-legacy-http` and
-//! through `chip-fx-native` (FX plus a native provider) against one loopback mock server that
-//! answers each executor in the format it asks for (a JSON body for the legacy non-streaming
-//! call, an event stream for FX). The tests compare what Chip can observe: the response, the
-//! failure class, how many requests were made, and what was put on the wire. Where the two
-//! differ on purpose, a test says so.
-//!
-//! Mocked transport only. Nothing here talks to a live provider or uses TLS.
+//! These tests pin what is put on the wire, how failures are classified (one request, no retry, no key
+//! in an error), what the executor refuses by name before any request, and how the executor is chosen.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -233,35 +228,30 @@ const PROVIDERS: [&str; 2] = [PROVIDER_OPENAI_COMPATIBLE, PROVIDER_ANTHROPIC];
 // ---- success ---------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn both_executors_return_the_same_text_and_usage() {
+async fn the_executor_returns_the_text_and_usage_with_one_request() {
     for provider in PROVIDERS {
-        let mut results = Vec::new();
-        for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-            let server = Server::start(Answer::Text("hello there", 11, 4));
-            let response = call(config(provider, &server.base), executor)
-                .await
-                .unwrap();
-            assert_eq!(
-                server.connections(),
-                1,
-                "{provider} {executor:?}: one request"
-            );
-            results.push((
+        let server = Server::start(Answer::Text("hello there", 11, 4));
+        let response = call(config(provider, &server.base), ExecutorKind::Fx)
+            .await
+            .unwrap();
+        assert_eq!(server.connections(), 1, "{provider}: one request");
+        assert_eq!(
+            (
                 response.output,
                 response.usage.prompt_tokens,
-                response.usage.completion_tokens,
-            ));
-        }
-        assert_eq!(results[0], results[1], "{provider}");
-        assert_eq!(results[0], ("hello there".to_owned(), 11, 4));
+                response.usage.completion_tokens
+            ),
+            ("hello there".to_owned(), 11, 4),
+            "{provider}"
+        );
     }
 }
 
 // ---- what is put on the wire ---------------------------------------------------------------
 
-async fn wire(provider: &str, executor: ExecutorKind) -> (String, Value) {
+async fn wire(provider: &str) -> (String, Value) {
     let server = Server::start(Answer::Text("ok", 1, 1));
-    call(config(provider, &server.base), executor)
+    call(config(provider, &server.base), ExecutorKind::Fx)
         .await
         .unwrap();
     server.requests().remove(0)
@@ -275,13 +265,10 @@ fn header(head: &str, name: &str) -> Option<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_openai_request_carries_the_same_model_messages_cap_and_temperature() {
-    let (legacy_head, legacy) = wire(PROVIDER_OPENAI_COMPATIBLE, ExecutorKind::Legacy).await;
-    let (fx_head, fx) = wire(PROVIDER_OPENAI_COMPATIBLE, ExecutorKind::Fx).await;
-    for field in ["model", "messages", "max_tokens", "temperature"] {
-        assert_eq!(legacy[field], fx[field], "{field}");
-    }
-    // The consecutive system messages are one message in both.
+async fn the_openai_request_carries_the_model_messages_cap_and_temperature() {
+    let (fx_head, fx) = wire(PROVIDER_OPENAI_COMPATIBLE).await;
+    assert_eq!(fx["model"], "mock-model");
+    // The consecutive system messages are one message.
     assert_eq!(
         fx["messages"][0],
         json!({"role": "system", "content": "be brief\n\nand exact"})
@@ -296,121 +283,89 @@ async fn the_openai_request_carries_the_same_model_messages_cap_and_temperature(
         "a configured zero temperature is sent, not dropped"
     );
     assert_eq!(
-        header(&legacy_head, "authorization"),
-        header(&fx_head, "authorization")
-    );
-    assert_eq!(
         header(&fx_head, "authorization").as_deref(),
         Some(&*format!("Bearer {KEY}"))
     );
-    // The only intended differences: FX asks for a stream and usage in it.
-    assert_eq!(legacy.get("stream"), None);
+    // FX asks for a stream.
     assert_eq!(fx["stream"], true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_anthropic_request_carries_the_same_model_system_cap_and_temperature() {
-    let (legacy_head, legacy) = wire(PROVIDER_ANTHROPIC, ExecutorKind::Legacy).await;
-    let (fx_head, fx) = wire(PROVIDER_ANTHROPIC, ExecutorKind::Fx).await;
-    for field in ["model", "system", "messages", "max_tokens", "temperature"] {
-        assert_eq!(legacy[field], fx[field], "{field}");
-    }
+async fn the_anthropic_request_carries_the_model_system_cap_and_temperature() {
+    let (fx_head, fx) = wire(PROVIDER_ANTHROPIC).await;
+    assert_eq!(fx["model"], "mock-model");
     assert_eq!(fx["system"], "be brief\n\nand exact");
     assert_eq!(fx["max_tokens"], 300);
-    for name in ["x-api-key", "anthropic-version"] {
-        assert_eq!(header(&legacy_head, name), header(&fx_head, name), "{name}");
-    }
+    assert_eq!(fx["temperature"], 0.0);
+    assert!(header(&fx_head, "anthropic-version").is_some());
     assert_eq!(header(&fx_head, "x-api-key").as_deref(), Some(KEY));
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn json_object_output_is_requested_on_openai_compatible_endpoints_in_both() {
-    for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-        let server = Server::start(Answer::Text("{}", 1, 1));
-        let config = config(PROVIDER_OPENAI_COMPATIBLE, &server.base).with_json_object_output();
-        call(config, executor).await.unwrap();
-        let body = &server.requests()[0].1;
-        match executor {
-            ExecutorKind::Legacy => {
-                assert_eq!(body["response_format"], json!({"type": "json_object"}))
-            }
-            // A documented difference: FX expresses structured output as a schema, here "an object".
-            ExecutorKind::Fx => {
-                assert_eq!(body["response_format"]["type"], "json_schema");
-                assert_eq!(
-                    body["response_format"]["json_schema"]["schema"],
-                    json!({"type": "object"})
-                );
-            }
-        }
-    }
+async fn json_object_output_is_requested_on_openai_compatible_endpoints() {
+    let server = Server::start(Answer::Text("{}", 1, 1));
+    let config = config(PROVIDER_OPENAI_COMPATIBLE, &server.base).with_json_object_output();
+    call(config, ExecutorKind::Fx).await.unwrap();
+    let body = &server.requests()[0].1;
+    // FX expresses structured output as a schema, here "an object".
+    assert_eq!(body["response_format"]["type"], "json_schema");
+    assert_eq!(
+        body["response_format"]["json_schema"]["schema"],
+        json!({"type": "object"})
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn anthropic_ignores_the_json_object_flag_in_both() {
-    for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-        let server = Server::start(Answer::Text("ok", 1, 1));
-        let config = config(PROVIDER_ANTHROPIC, &server.base).with_json_object_output();
-        call(config, executor).await.unwrap();
-        assert_eq!(
-            server.requests()[0].1.get("response_format"),
-            None,
-            "{executor:?}"
-        );
-    }
+async fn anthropic_ignores_the_json_object_flag() {
+    let server = Server::start(Answer::Text("ok", 1, 1));
+    let config = config(PROVIDER_ANTHROPIC, &server.base).with_json_object_output();
+    call(config, ExecutorKind::Fx).await.unwrap();
+    assert_eq!(server.requests()[0].1.get("response_format"), None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_anthropic_workspace_header_and_fallback_cap_match() {
-    for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-        let server = Server::start(Answer::Text("ok", 1, 1));
-        let mut config = config(PROVIDER_ANTHROPIC, &server.base).with_workspace_id("wrkspc_1");
-        config.max_tokens = None;
-        call(config, executor).await.unwrap();
-        let (head, body) = &server.requests()[0];
-        assert_eq!(
-            header(head, "anthropic-workspace-id").as_deref(),
-            Some("wrkspc_1"),
-            "{executor:?}"
-        );
-        assert_eq!(
-            body["max_tokens"], 1024,
-            "{executor:?}: the same fallback cap"
-        );
-    }
+async fn the_anthropic_workspace_header_and_fallback_cap_are_sent() {
+    let server = Server::start(Answer::Text("ok", 1, 1));
+    let mut config = config(PROVIDER_ANTHROPIC, &server.base).with_workspace_id("wrkspc_1");
+    config.max_tokens = None;
+    call(config, ExecutorKind::Fx).await.unwrap();
+    let (head, body) = &server.requests()[0];
+    assert_eq!(
+        header(head, "anthropic-workspace-id").as_deref(),
+        Some("wrkspc_1")
+    );
+    assert_eq!(body["max_tokens"], 1024, "the fallback cap");
 }
 
 // ---- failures ---------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn http_errors_fail_in_the_same_class_with_one_request_and_no_key_in_the_error() {
+async fn http_errors_fail_in_their_class_with_one_request_and_no_key_in_the_error() {
     for provider in PROVIDERS {
-        for status in [401u16, 403, 429, 500, 503] {
-            let mut classes = Vec::new();
-            for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-                let server = Server::start(Answer::Status(status));
-                let error = call(config(provider, &server.base), executor)
-                    .await
-                    .unwrap_err();
-                assert_eq!(
-                    server.connections(),
-                    1,
-                    "{provider} {status} {executor:?}: no retry"
-                );
-                let shown = format!("{error} {error:?}");
-                assert!(
-                    !shown.contains(KEY) && !shown.contains("0123456789abcdef"),
-                    "{shown}"
-                );
-                classes.push(class(&error));
-            }
-            assert_eq!(classes[0], classes[1], "{provider} {status}");
+        for (status, expected) in [
+            (401u16, "authentication"),
+            (403, "authentication"),
+            (429, "rate limited"),
+            (500, "server error"),
+            (503, "server error"),
+        ] {
+            let server = Server::start(Answer::Status(status));
+            let error = call(config(provider, &server.base), ExecutorKind::Fx)
+                .await
+                .unwrap_err();
+            assert_eq!(server.connections(), 1, "{provider} {status}: no retry");
+            let shown = format!("{error} {error:?}");
+            assert!(
+                !shown.contains(KEY) && !shown.contains("0123456789abcdef"),
+                "{shown}"
+            );
+            assert_eq!(class(&error), expected, "{provider} {status}");
         }
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn only_the_fx_failure_carries_delivery_certainty() {
+async fn a_failure_carries_its_delivery_certainty() {
     let server = Server::start(Answer::Status(500));
     let error = call(
         config(PROVIDER_OPENAI_COMPATIBLE, &server.base),
@@ -428,17 +383,9 @@ async fn only_the_fx_failure_carries_delivery_certainty() {
 // ---- selection ---------------------------------------------------------------------------------
 
 #[test]
-fn the_executor_defaults_to_fx_and_legacy_is_only_ever_explicit() {
+fn fx_is_the_only_executor_and_anything_else_is_refused_before_any_request() {
     let none = env_of(&[]);
     assert_eq!(ExecutorKind::choose(None, &none).unwrap(), ExecutorKind::Fx);
-    assert_eq!(
-        ExecutorKind::choose(Some("legacy"), &none).unwrap(),
-        ExecutorKind::Legacy
-    );
-    assert_eq!(
-        ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", "legacy")])).unwrap(),
-        ExecutorKind::Legacy
-    );
     assert_eq!(
         ExecutorKind::choose(Some("fx"), &none).unwrap(),
         ExecutorKind::Fx
@@ -447,19 +394,28 @@ fn the_executor_defaults_to_fx_and_legacy_is_only_ever_explicit() {
         ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", "fx")])).unwrap(),
         ExecutorKind::Fx
     );
-    // The flag beats the environment.
-    assert_eq!(
-        ExecutorKind::choose(Some("legacy"), &env_of(&[("CHIP_EXECUTOR", "fx")])).unwrap(),
-        ExecutorKind::Legacy
-    );
     assert_eq!(
         ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", "  ")])).unwrap(),
-        ExecutorKind::Fx
+        ExecutorKind::Fx,
+        "a blank value is no value"
     );
-    assert!(matches!(
-        ExecutorKind::choose(Some("both"), &none),
-        Err(FxError::Configuration(_))
-    ));
+    // The removed `legacy` value, an unknown value, and a flag that disagrees with the environment
+    // are all refused, in the flag and in the environment, and the message says FX is the only one.
+    for refused in ["legacy", "LEGACY", "both", "FX", "fx,legacy", "ollama", "0"] {
+        for result in [
+            ExecutorKind::choose(Some(refused), &none),
+            ExecutorKind::choose(None, &env_of(&[("CHIP_EXECUTOR", refused)])),
+            ExecutorKind::choose(Some(refused), &env_of(&[("CHIP_EXECUTOR", "fx")])),
+        ] {
+            let message = result.unwrap_err().to_string();
+            assert!(
+                message.contains("FX is the only supported executor"),
+                "{refused}: {message}"
+            );
+        }
+    }
+    // A valid flag does not rescue a stale environment value: both are validated.
+    assert!(ExecutorKind::choose(Some("fx"), &env_of(&[("CHIP_EXECUTOR", "legacy")])).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -526,29 +482,24 @@ async fn lm_studio_on_loopback_needs_no_key_in_the_fx_executor() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_thinking_switch_is_the_same_top_level_template_field_in_both_states_and_unset() {
+async fn the_thinking_switch_is_a_top_level_template_field_in_both_states_and_unset() {
     for setting in [None, Some(false), Some(true)] {
-        let mut bodies = Vec::new();
-        for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
-            let server = Server::start(Answer::Text("ok", 1, 1));
-            let mut config = config(PROVIDER_OPENAI_COMPATIBLE, &server.base);
-            if let Some(enable) = setting {
-                config = config.with_enable_thinking(enable);
-            }
-            call(config, executor).await.unwrap();
-            bodies.push(server.requests()[0].1.clone());
+        let server = Server::start(Answer::Text("ok", 1, 1));
+        let mut config = config(PROVIDER_OPENAI_COMPATIBLE, &server.base);
+        if let Some(enable) = setting {
+            config = config.with_enable_thinking(enable);
         }
+        call(config, ExecutorKind::Fx).await.unwrap();
+        let body = server.requests()[0].1.clone();
         let expected = setting.map(|enable| json!({ "enable_thinking": enable }));
-        for body in &bodies {
-            assert_eq!(
-                body.get("chat_template_kwargs"),
-                expected.as_ref(),
-                "{setting:?}"
-            );
-            assert_eq!(body.get("extra_body"), None);
-            // A request field, never prompt text.
-            assert_eq!(body["messages"], bodies[0]["messages"]);
-        }
+        assert_eq!(
+            body.get("chat_template_kwargs"),
+            expected.as_ref(),
+            "{setting:?}"
+        );
+        assert_eq!(body.get("extra_body"), None);
+        // A request field, never prompt text.
+        assert!(!body["messages"].to_string().contains("enable_thinking"));
     }
 }
 
@@ -556,9 +507,7 @@ async fn the_thinking_switch_is_the_same_top_level_template_field_in_both_states
 async fn the_thinking_switch_on_anthropic_is_refused_by_the_fx_executor_before_any_request() {
     let server = Server::start(Answer::Text("never", 1, 1));
     let config = config(PROVIDER_ANTHROPIC, &server.base).with_enable_thinking(false);
-    // Documented difference: the legacy adapter ignored the switch on Anthropic; the fx executor
-    // names it instead of dropping it.
-    call(config.clone(), ExecutorKind::Legacy).await.unwrap();
+    // The executor names the switch instead of dropping it.
     let before = server.connections();
     let error = call(config, ExecutorKind::Fx)
         .await
@@ -640,14 +589,6 @@ async fn with_no_flag_and_no_environment_the_request_goes_through_the_fx_executo
     call(config(PROVIDER_OPENAI_COMPATIBLE, &server.base), executor)
         .await
         .unwrap();
-    // The fx wire format streams; the legacy adapter posts one non-streaming call.
+    // The fx wire format streams.
     assert_eq!(server.requests()[0].1["stream"], json!(true));
-    let legacy = Server::start(Answer::Text("ok", 1, 1));
-    call(
-        config(PROVIDER_OPENAI_COMPATIBLE, &legacy.base),
-        ExecutorKind::choose(Some("legacy"), &env_of(&[])).unwrap(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(legacy.requests()[0].1.get("stream"), None);
 }

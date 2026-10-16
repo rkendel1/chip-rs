@@ -93,7 +93,7 @@ pub async fn start(status: u16, body: &str, delay: Duration) -> MockServer {
                 });
 
                 tokio::time::sleep(delay).await;
-                // The FX executor streams (`"stream":true`); the legacy adapters do not. A
+                // The FX executor streams (`"stream":true`). A
                 // successful OpenAI-style JSON body is re-served as an event stream with the same
                 // content and usage, so one scripted reply serves both executors. Anything else
                 // (errors, other shapes) is sent as written.

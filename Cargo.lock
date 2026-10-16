@@ -268,7 +268,6 @@ dependencies = [
  "chip-graph",
  "chip-inference",
  "chip-laya-reasoner",
- "chip-legacy-http",
  "chip-local-decision",
  "chip-local-ml",
  "chip-pax",
@@ -377,18 +376,6 @@ dependencies = [
  "laya-decision",
  "serde_json",
  "tokenizers 0.21.4",
-]
-
-[[package]]
-name = "chip-legacy-http"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chip-inference",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

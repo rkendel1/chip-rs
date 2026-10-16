@@ -57,7 +57,6 @@ const PRODUCT: &[&str] = &[
     "chip-core",
     "chip-remote-env",
     "chip-inference",
-    "chip-legacy-http",
     "chip-project",
     "chip-pax",
 ];
@@ -77,7 +76,7 @@ fn no_product_crate_depends_on_compute_or_its_neighbours() {
 
 #[test]
 fn the_rust_fx_boundary_stays_independent_of_chip_compute_and_the_npm_stack() {
-    for name in ["chip-inference", "chip-legacy-http"] {
+    for name in ["chip-inference"] {
         let m = manifest(name);
         let deps = dependency_names(&m);
         assert!(
