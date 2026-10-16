@@ -8,8 +8,8 @@ use chip_inference::{Delivery, FxError, Message, MessageRole, ModelRequest};
 use common::{Attempt, SequencePort};
 use fx_core::{
     Cancellation, Completion, DeliveryCertainty, Disposition, ErrorKind, Failure, FailureOrigin,
-    FinishReason, Limits, Metadata, NoHost, Outcome, PartialOutput, RemoteCancellation,
-    RequestId, Usage, encode_report, execute,
+    FinishReason, Limits, Metadata, NoHost, Outcome, PartialOutput, RemoteCancellation, RequestId,
+    Usage, encode_report, execute,
 };
 use fx_single_attempt::SingleAttemptCapability;
 
@@ -67,7 +67,13 @@ fn request_ids_are_unique_per_attempt_and_carry_the_hosts_seed() {
 
 #[test]
 fn a_chip_request_becomes_a_text_only_fx_request_with_nothing_added() {
-    let fx = to_fx_request(&request(), RequestId([9; 16]), OptionsPolicy::DropUnsupported, None).unwrap();
+    let fx = to_fx_request(
+        &request(),
+        RequestId([9; 16]),
+        OptionsPolicy::DropUnsupported,
+        None,
+    )
+    .unwrap();
     assert_eq!(fx.model.0, "model-x");
     assert_eq!(fx.messages.len(), 2);
     assert!(fx.tools.is_empty());
@@ -79,18 +85,34 @@ fn a_chip_request_becomes_a_text_only_fx_request_with_nothing_added() {
 
 #[test]
 fn refuse_policy_fails_closed_on_options_the_path_cannot_carry() {
-    let error = to_fx_request(&request(), RequestId([9; 16]), OptionsPolicy::Refuse, None).unwrap_err();
+    let error =
+        to_fx_request(&request(), RequestId([9; 16]), OptionsPolicy::Refuse, None).unwrap_err();
     assert!(matches!(error, FxError::InvalidRequest(_)));
     let mut no_temperature = request();
     no_temperature.temperature = None;
-    let fx = to_fx_request(&no_temperature, RequestId([9; 16]), OptionsPolicy::Refuse, None).unwrap();
-    assert_eq!(fx.options.max_output_tokens, Some(256), "max_tokens goes to FX, which decides");
+    let fx = to_fx_request(
+        &no_temperature,
+        RequestId([9; 16]),
+        OptionsPolicy::Refuse,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        fx.options.max_output_tokens,
+        Some(256),
+        "max_tokens goes to FX, which decides"
+    );
 }
 
 #[test]
 fn a_verified_completion_is_the_only_success() {
     let id = RequestId([1; 16]);
-    let ok = from_outcome(&Outcome::Completed(completion("hello")), Some(Disposition::Complete), id).unwrap();
+    let ok = from_outcome(
+        &Outcome::Completed(completion("hello")),
+        Some(Disposition::Complete),
+        id,
+    )
+    .unwrap();
     assert_eq!(ok.output, "hello");
     assert_eq!((ok.usage.prompt_tokens, ok.usage.completion_tokens), (7, 3));
     for disposition in [
@@ -100,34 +122,69 @@ fn a_verified_completion_is_the_only_success() {
         Some(Disposition::InvalidCompletion),
         None,
     ] {
-        let error = from_outcome(&Outcome::Completed(completion("x")), disposition, id).unwrap_err();
-        let FxError::Inference(detail) = error else { panic!("{disposition:?}") };
-        assert_eq!(detail.delivery, Delivery::ConfirmedResponse, "{disposition:?}");
+        let error =
+            from_outcome(&Outcome::Completed(completion("x")), disposition, id).unwrap_err();
+        let FxError::Inference(detail) = error else {
+            panic!("{disposition:?}")
+        };
+        assert_eq!(
+            detail.delivery,
+            Delivery::ConfirmedResponse,
+            "{disposition:?}"
+        );
     }
     let mut truncated = completion("x");
     truncated.content_truncated = true;
-    assert!(from_outcome(&Outcome::Completed(truncated), Some(Disposition::Complete), id).is_err());
+    assert!(
+        from_outcome(
+            &Outcome::Completed(truncated),
+            Some(Disposition::Complete),
+            id
+        )
+        .is_err()
+    );
 }
 
 #[test]
 fn every_failure_keeps_its_kind_delivery_status_and_partial_output() {
     let id = RequestId([1; 16]);
     for kind in [
-        ErrorKind::InvalidRequest, ErrorKind::CapabilityUnavailable, ErrorKind::Unauthenticated,
-        ErrorKind::Forbidden, ErrorKind::ModelUnavailable, ErrorKind::RateLimited,
-        ErrorKind::ProviderUnavailable, ErrorKind::Transport, ErrorKind::SystemResumed,
-        ErrorKind::Timeout, ErrorKind::Cancelled, ErrorKind::ProtocolViolation,
-        ErrorKind::ResourceLimit, ErrorKind::Internal,
+        ErrorKind::InvalidRequest,
+        ErrorKind::CapabilityUnavailable,
+        ErrorKind::Unauthenticated,
+        ErrorKind::Forbidden,
+        ErrorKind::ModelUnavailable,
+        ErrorKind::RateLimited,
+        ErrorKind::ProviderUnavailable,
+        ErrorKind::Transport,
+        ErrorKind::SystemResumed,
+        ErrorKind::Timeout,
+        ErrorKind::Cancelled,
+        ErrorKind::ProtocolViolation,
+        ErrorKind::ResourceLimit,
+        ErrorKind::Internal,
     ] {
         for (certainty, expected) in [
-            (DeliveryCertainty::DefinitelyUnsent, Delivery::DefinitelyUnsent),
+            (
+                DeliveryCertainty::DefinitelyUnsent,
+                Delivery::DefinitelyUnsent,
+            ),
             (DeliveryCertainty::PossiblySent, Delivery::PossiblySent),
-            (DeliveryCertainty::ConfirmedResponse, Delivery::ConfirmedResponse),
+            (
+                DeliveryCertainty::ConfirmedResponse,
+                Delivery::ConfirmedResponse,
+            ),
         ] {
-            let error = from_outcome(&Outcome::Failed(failure(kind, certainty)), None, id).unwrap_err();
-            let FxError::Inference(detail) = error else { panic!() };
+            let error =
+                from_outcome(&Outcome::Failed(failure(kind, certainty)), None, id).unwrap_err();
+            let FxError::Inference(detail) = error else {
+                panic!()
+            };
             assert_eq!(detail.kind, kind_label(kind));
-            assert_eq!(detail.delivery, expected, "delivery is carried through, never lowered");
+            assert_eq!(
+                detail.delivery, expected,
+                "delivery is carried through, never lowered"
+            );
             assert_eq!(detail.status, Some(429));
             assert_eq!(detail.retry_after_ms, Some(3000));
             assert_eq!(detail.partial_output.as_deref(), Some("part"));
@@ -139,7 +196,10 @@ fn every_failure_keeps_its_kind_delivery_status_and_partial_output() {
 fn a_cancellation_is_a_failure_and_never_claims_the_request_was_unsent_unless_fx_did() {
     let id = RequestId([1; 16]);
     for (certainty, expected) in [
-        (DeliveryCertainty::DefinitelyUnsent, Delivery::DefinitelyUnsent),
+        (
+            DeliveryCertainty::DefinitelyUnsent,
+            Delivery::DefinitelyUnsent,
+        ),
         (DeliveryCertainty::PossiblySent, Delivery::PossiblySent),
     ] {
         let outcome = Outcome::Cancelled(Cancellation {
@@ -147,7 +207,9 @@ fn a_cancellation_is_a_failure_and_never_claims_the_request_was_unsent_unless_fx
             remote: RemoteCancellation::Unconfirmed,
             partial: None,
         });
-        let FxError::Inference(detail) = from_outcome(&outcome, None, id).unwrap_err() else { panic!() };
+        let FxError::Inference(detail) = from_outcome(&outcome, None, id).unwrap_err() else {
+            panic!()
+        };
         assert_eq!(detail.kind, "cancelled");
         assert_eq!(detail.delivery, expected);
     }
@@ -157,7 +219,10 @@ fn real_report(attempt: Attempt) -> (fx_core::ExecutionReport, RequestId) {
     let id = RequestId([5; 16]);
     let fx = to_fx_request(&request(), id, OptionsPolicy::DropUnsupported, None).unwrap();
     let mut capability = SingleAttemptCapability::new(SequencePort::new(vec![attempt]));
-    (execute(&mut capability, &fx, &Limits::default(), &mut NoHost), id)
+    (
+        execute(&mut capability, &fx, &Limits::default(), &mut NoHost),
+        id,
+    )
 }
 
 #[test]

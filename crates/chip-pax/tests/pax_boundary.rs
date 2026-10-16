@@ -24,11 +24,11 @@ use chip_core::{
     TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome,
     WorkReport, WorkSpec, WorkView, audit_safety, measure_utility, verify_trajectory,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxResultError, PaxStatus, PaxTestPassed,
     PaxUnavailable, RESULT_SCHEMA, parse_execution_result, render_observation,
 };
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 // ---- fixtures ---------------------------------------------------------------------------------
 

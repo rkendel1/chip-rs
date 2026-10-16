@@ -31,7 +31,11 @@ fn begin_document() -> Value {
 
 fn call(session: &mut Session, begin: bool, document: &Value) -> Value {
     let bytes = document.to_string().into_bytes();
-    let response = if begin { session.begin(&bytes) } else { session.command(&bytes) };
+    let response = if begin {
+        session.begin(&bytes)
+    } else {
+        session.command(&bytes)
+    };
     serde_json::from_slice(&response).expect("every response is JSON")
 }
 
@@ -50,16 +54,30 @@ fn a_multi_step_work_runs_through_fx_and_the_hosts_capability() {
     let first = call(&mut session, true, &begin_document());
     assert_eq!(first["status"], "need_inference", "{first}");
     assert_eq!(first["request_id"].as_str().unwrap().len(), 32);
-    assert!(first["request"]["tools"].as_array().is_none_or(Vec::is_empty), "no provider tools");
+    assert!(
+        first["request"]["tools"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "no provider tools"
+    );
 
     let second = call(
         &mut session,
         false,
         &json!({"cmd": "inference_result", "report": fx_report(&first["request"], FakePort::text(&[REQUEST_SELFTEST]))}),
     );
-    assert_eq!(second["status"], "need_execution", "the model's request became an execution Chip constructed: {second}");
+    assert_eq!(
+        second["status"], "need_execution",
+        "the model's request became an execution Chip constructed: {second}"
+    );
     assert_eq!(second["execution"]["capability"], "compute.selftest");
-    assert!(second["execution"]["id"].as_str().unwrap().starts_with("w-exec-"), "Chip assigns the id");
+    assert!(
+        second["execution"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("w-exec-"),
+        "Chip assigns the id"
+    );
 
     let third = call(
         &mut session,
@@ -67,9 +85,15 @@ fn a_multi_step_work_runs_through_fx_and_the_hosts_capability() {
         &json!({"cmd": "execution_result", "status": "success", "output": "self test passed", "receipt_id": "sha256:r"}),
     );
     assert_eq!(third["status"], "need_inference", "{third}");
-    assert_ne!(third["request_id"], first["request_id"], "each attempt has its own id");
+    assert_ne!(
+        third["request_id"], first["request_id"],
+        "each attempt has its own id"
+    );
     let observed = third["request"]["messages"].to_string();
-    assert!(observed.contains("self test passed"), "the result is in the next inference: {observed}");
+    assert!(
+        observed.contains("self test passed"),
+        "the result is in the next inference: {observed}"
+    );
 
     let done = call(
         &mut session,
@@ -84,7 +108,11 @@ fn a_multi_step_work_runs_through_fx_and_the_hosts_capability() {
     assert_eq!(done["result"]["trajectory_problems"], json!([]));
 
     let late = call(&mut session, false, &json!({"cmd": "cancel"}));
-    assert_eq!(late, json!({"status": "done", "ignored": true}), "nothing is accepted after the end");
+    assert_eq!(
+        late,
+        json!({"status": "done", "ignored": true}),
+        "nothing is accepted after the end"
+    );
 }
 
 #[test]
@@ -104,7 +132,10 @@ fn an_unauthorized_or_malformed_decision_never_reaches_the_hosts_capability() {
         assert_eq!(done["status"], "done", "{reply}: {done}");
         assert_ne!(done["result"]["state"], "completed", "{reply}");
         assert_eq!(done["result"]["measurement"]["executions"], 0, "{reply}");
-        assert_eq!(done["result"]["measurement"]["model_calls"], 1, "{reply}: no repair call");
+        assert_eq!(
+            done["result"]["measurement"]["model_calls"], 1,
+            "{reply}: no repair call"
+        );
     }
 }
 
@@ -119,17 +150,27 @@ fn an_fx_failure_ends_the_work_with_its_delivery_and_asks_for_no_second_inferenc
         false,
         &json!({"cmd": "inference_result", "report": fx_report(&first["request"], port)}),
     );
-    assert_eq!(done["status"], "done", "an ambiguous attempt is not repeated: {done}");
+    assert_eq!(
+        done["status"], "done",
+        "an ambiguous attempt is not repeated: {done}"
+    );
     assert_eq!(done["result"]["state"], "failed");
     let reason = done["result"]["reason"].as_str().unwrap();
-    assert!(reason.contains("possibly_sent") && reason.contains("not retried"), "{reason}");
+    assert!(
+        reason.contains("possibly_sent") && reason.contains("not retried"),
+        "{reason}"
+    );
 }
 
 #[test]
 fn a_host_error_is_a_failed_model_call_not_a_retry() {
     let mut session = Session::new();
     call(&mut session, true, &begin_document());
-    let done = call(&mut session, false, &json!({"cmd": "inference_result", "host_error": "the bridge failed"}));
+    let done = call(
+        &mut session,
+        false,
+        &json!({"cmd": "inference_result", "host_error": "the bridge failed"}),
+    );
     assert_eq!(done["result"]["state"], "failed", "{done}");
     assert_eq!(done["result"]["measurement"]["model_calls"], 1);
 }
@@ -139,7 +180,10 @@ fn cancel_stops_the_next_model_call_without_asking_fx() {
     let mut session = Session::new();
     let first = call(&mut session, true, &begin_document());
     let again = call(&mut session, false, &json!({"cmd": "cancel"}));
-    assert_eq!(again, first, "cancel is idempotent: it repeats what is pending");
+    assert_eq!(
+        again, first,
+        "cancel is idempotent: it repeats what is pending"
+    );
     let second = call(
         &mut session,
         false,
@@ -148,11 +192,26 @@ fn cancel_stops_the_next_model_call_without_asking_fx() {
     // The work is cancelled, so the capability still runs only if the host chooses; the model
     // is not asked again after the execution.
     assert_eq!(second["status"], "need_execution", "{second}");
-    let done = call(&mut session, false, &json!({"cmd": "execution_result", "status": "cancelled", "output": "stopped"}));
-    assert_eq!(done["status"], "done", "no further inference was requested: {done}");
-    assert_eq!(done["result"]["measurement"]["model_calls"], 2, "the second call was refused before FX");
+    let done = call(
+        &mut session,
+        false,
+        &json!({"cmd": "execution_result", "status": "cancelled", "output": "stopped"}),
+    );
+    assert_eq!(
+        done["status"], "done",
+        "no further inference was requested: {done}"
+    );
+    assert_eq!(
+        done["result"]["measurement"]["model_calls"], 2,
+        "the second call was refused before FX"
+    );
     assert_eq!(done["result"]["state"], "failed");
-    assert!(done["result"]["reason"].as_str().unwrap().contains("cancellation was requested"));
+    assert!(
+        done["result"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("cancellation was requested")
+    );
 }
 
 #[test]
@@ -164,7 +223,11 @@ fn a_capability_failure_is_an_observation_and_the_loop_continues_within_its_limi
         false,
         &json!({"cmd": "inference_result", "report": fx_report(&first["request"], FakePort::text(&[REQUEST_SELFTEST]))}),
     );
-    let third = call(&mut session, false, &json!({"cmd": "execution_result", "status": "failure", "output": "boom"}));
+    let third = call(
+        &mut session,
+        false,
+        &json!({"cmd": "execution_result", "status": "failure", "output": "boom"}),
+    );
     assert_eq!(third["status"], "need_inference");
     assert!(third["request"]["messages"].to_string().contains("boom"));
 }
@@ -175,26 +238,55 @@ fn protocol_misuse_is_rejected_without_effect_and_without_echo() {
     for (document, code) in [
         (json!({"cmd": "cancel"}), "not_begun"),
         (json!({"v": 2}), "unsupported_version"),
-        (json!({"v": 1, "work_id": "w", "goal": "g", "model": "m"}), "invalid_document"),
-        (json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "zz", "options_policy": "refuse"}), "invalid_document"),
-        (json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "0000000000000000", "options_policy": "sometimes"}), "invalid_document"),
-        (json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "0000000000000000", "options_policy": "refuse", "capabilities": [{"id": "Bad Id", "name": "x"}]}), "invalid_document"),
+        (
+            json!({"v": 1, "work_id": "w", "goal": "g", "model": "m"}),
+            "invalid_document",
+        ),
+        (
+            json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "zz", "options_policy": "refuse"}),
+            "invalid_document",
+        ),
+        (
+            json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "0000000000000000", "options_policy": "sometimes"}),
+            "invalid_document",
+        ),
+        (
+            json!({"v": 1, "work_id": "w", "goal": "g", "model": "m", "request_seed": "0000000000000000", "options_policy": "refuse", "capabilities": [{"id": "Bad Id", "name": "x"}]}),
+            "invalid_document",
+        ),
     ] {
         let begin = document.get("v").is_some();
         let response = call(&mut session, begin, &document);
         assert_eq!(response["status"], "error", "{document}");
         assert_eq!(response["error"]["code"], code, "{document}");
-        assert!(!response.to_string().contains("rm -rf"), "errors never echo input");
+        assert!(
+            !response.to_string().contains("rm -rf"),
+            "errors never echo input"
+        );
     }
     // A good begin works after rejected ones; a second begin is refused; stray results are refused.
     let first = call(&mut session, true, &begin_document());
     assert_eq!(first["status"], "need_inference");
-    assert_eq!(call(&mut session, true, &begin_document())["error"]["code"], "already_begun");
     assert_eq!(
-        call(&mut session, false, &json!({"cmd": "execution_result", "status": "success"}))["error"]["code"],
+        call(&mut session, true, &begin_document())["error"]["code"],
+        "already_begun"
+    );
+    assert_eq!(
+        call(
+            &mut session,
+            false,
+            &json!({"cmd": "execution_result", "status": "success"})
+        )["error"]["code"],
         "unexpected_command"
     );
-    assert_eq!(call(&mut session, false, &json!({"cmd": "fly"}))["error"]["code"], "unknown_command");
+    assert_eq!(
+        call(&mut session, false, &json!({"cmd": "fly"}))["error"]["code"],
+        "unknown_command"
+    );
     let garbage = session.command(b"{not json");
-    assert!(String::from_utf8(garbage).unwrap().contains("invalid_command"));
+    assert!(
+        String::from_utf8(garbage)
+            .unwrap()
+            .contains("invalid_command")
+    );
 }

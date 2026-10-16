@@ -14,12 +14,12 @@ use chip_core::{
     ExecutionStatus, InputValue, LocalReasoner, LocalReasoningResult, Observation, ObservationKind,
     ReasoningError, ReasoningInput, StateToken,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_local_ml::{
     CONTINUE_LABEL, ESCALATE_LABEL, LocalMlError, ModelVerdict, QUESTION_NAME, RustMLReasoner,
     build_request, encode_state, installation_status, interpret,
 };
 use chip_reasoning_corpus::{Verdict, corpus, evaluate};
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use rust_ml_runtime::{
     DecisionExecution, DecisionModel, DecisionModelCapabilities, DecisionModelProvider,
     DecisionProvenance, DecisionRequest, DecisionResult, DecisionValue, DeviceKind,

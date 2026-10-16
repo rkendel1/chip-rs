@@ -207,8 +207,8 @@ mod tests {
         Observation, ObservationKind, StateToken,
     };
     use chip_core::{ExecutionError, ExecutionRequest, ExecutionResult, ExecutionStatus};
-    use chip_reasoning_corpus::Verdict;
     use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
+    use chip_reasoning_corpus::Verdict;
 
     use super::*;
 

@@ -6,7 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 
 fn crates_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn manifest(name: &str) -> String {
@@ -47,8 +50,14 @@ fn all_crates() -> Vec<String> {
 fn chip_core_and_model_port_do_not_reference_fx_or_legacy_http() {
     for name in ["chip-core", "chip-inference"] {
         let deps = dependency_names(&manifest(name));
-        for forbidden in FX_CRATES.iter().chain(&["chip-fx", "chip-legacy-http", "reqwest"]) {
-            assert!(!deps.contains(&forbidden.to_string()), "{name} must not depend on {forbidden}");
+        for forbidden in FX_CRATES
+            .iter()
+            .chain(&["chip-fx", "chip-legacy-http", "reqwest"])
+        {
+            assert!(
+                !deps.contains(&forbidden.to_string()),
+                "{name} must not depend on {forbidden}"
+            );
         }
     }
 }
@@ -59,7 +68,10 @@ fn only_the_adapter_crates_reference_fx() {
         let deps = dependency_names(&manifest(&name));
         let uses_fx = FX_CRATES.iter().any(|f| deps.contains(&f.to_string()));
         let allowed = name == "chip-fx" || name == "chip-wasm-host";
-        assert!(!uses_fx || allowed, "{name} references FX but is not an adapter crate");
+        assert!(
+            !uses_fx || allowed,
+            "{name} references FX but is not an adapter crate"
+        );
     }
 }
 
@@ -67,7 +79,10 @@ fn only_the_adapter_crates_reference_fx() {
 fn chip_fx_reaches_providers_only_through_fx() {
     let deps = dependency_names(&manifest("chip-fx"));
     for forbidden in ["reqwest", "hyper", "ureq", "chip-legacy-http", "chip-cli"] {
-        assert!(!deps.contains(&forbidden.to_string()), "chip-fx must not depend on {forbidden}");
+        assert!(
+            !deps.contains(&forbidden.to_string()),
+            "chip-fx must not depend on {forbidden}"
+        );
     }
     assert!(deps.contains(&"fx-core".to_string()));
     assert!(deps.contains(&"chip-inference".to_string()));
@@ -87,6 +102,9 @@ fn reqwest_lives_only_in_the_legacy_executor() {
 fn no_second_fx_core_exists_in_this_workspace() {
     let crates = all_crates();
     for name in ["fx-core", "fx-provider-http", "fx-single-attempt"] {
-        assert!(!crates.contains(&name.to_string()), "{name} is the authoritative FX's name; no copy here");
+        assert!(
+            !crates.contains(&name.to_string()),
+            "{name} is the authoritative FX's name; no copy here"
+        );
     }
 }

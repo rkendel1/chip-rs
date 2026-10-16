@@ -22,11 +22,11 @@ use chip_core::{
     WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView,
     audit_safety, measure_utility, verify_trajectory,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxTestPassed, ResolvedPax,
     parse_execution_result,
 };
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 /// Keeps what the model replied, for the report. Replies only: no prompt, no credentials.
 pub(crate) struct Recording<P> {

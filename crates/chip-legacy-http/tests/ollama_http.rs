@@ -5,9 +5,9 @@ mod common;
 
 use std::time::Duration;
 
-use common::start;
 use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
 use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OLLAMA, default_endpoint};
+use common::start;
 
 /// A representative non-streaming `/api/chat` reply.
 const OK_BODY: &str = r#"{"model":"qwen3-coder:latest","created_at":"2025-10-07T10:11:12.123456Z","message":{"role":"assistant","content":"{\"schema\":\"chip.work-decision.v1\",\"decision\":\"request_capability\",\"capability\":\"compute.op_a\"}"},"done":true,"done_reason":"stop","total_duration":1234567890,"load_duration":12345,"prompt_eval_count":229,"prompt_eval_duration":111,"eval_count":48,"eval_duration":222}"#;

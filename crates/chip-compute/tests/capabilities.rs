@@ -158,7 +158,11 @@ async fn run_turn_executes_a_capability_through_compute_with_receipt() {
     #[async_trait::async_trait]
     impl ModelProvider for Model {
         async fn complete(&self, _r: ModelRequest) -> Result<ModelResponse, FxError> {
-            Ok(ModelResponse::new("r", "ok", chip_inference::Usage::new(1, 1)))
+            Ok(ModelResponse::new(
+                "r",
+                "ok",
+                chip_inference::Usage::new(1, 1),
+            ))
         }
     }
     let (script, marker) = fake_compute("run-turn");
@@ -214,7 +218,11 @@ async fn a_compute_observation_informs_the_next_deterministic_turn() {
     impl ModelProvider for Recording {
         async fn complete(&self, r: ModelRequest) -> Result<ModelResponse, FxError> {
             self.0.lock().unwrap().push(r);
-            Ok(ModelResponse::new("r", "ok", chip_inference::Usage::new(1, 1)))
+            Ok(ModelResponse::new(
+                "r",
+                "ok",
+                chip_inference::Usage::new(1, 1),
+            ))
         }
     }
     let (script, _) = fake_compute("next-turn");
@@ -250,7 +258,11 @@ async fn bounded_cycle_through_the_compute_adapter() {
     impl ModelProvider for Recording {
         async fn complete(&self, r: ModelRequest) -> Result<ModelResponse, FxError> {
             self.0.lock().unwrap().push(r);
-            Ok(ModelResponse::new("r", "ok", chip_inference::Usage::new(1, 1)))
+            Ok(ModelResponse::new(
+                "r",
+                "ok",
+                chip_inference::Usage::new(1, 1),
+            ))
         }
     }
 

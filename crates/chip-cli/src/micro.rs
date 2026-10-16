@@ -1747,7 +1747,10 @@ mod tests {
     struct Fixed(Result<String, ()>);
     #[async_trait::async_trait]
     impl ModelProvider for Fixed {
-        async fn complete(&self, _r: ModelRequest) -> Result<chip_inference::ModelResponse, FxError> {
+        async fn complete(
+            &self,
+            _r: ModelRequest,
+        ) -> Result<chip_inference::ModelResponse, FxError> {
             match &self.0 {
                 Ok(text) => Ok(chip_inference::ModelResponse::new(
                     "r1",
@@ -1762,7 +1765,10 @@ mod tests {
     struct Slow;
     #[async_trait::async_trait]
     impl ModelProvider for Slow {
-        async fn complete(&self, _r: ModelRequest) -> Result<chip_inference::ModelResponse, FxError> {
+        async fn complete(
+            &self,
+            _r: ModelRequest,
+        ) -> Result<chip_inference::ModelResponse, FxError> {
             tokio::time::sleep(Duration::from_secs(5)).await;
             unreachable!("the timeout fires first")
         }

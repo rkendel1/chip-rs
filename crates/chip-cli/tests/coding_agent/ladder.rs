@@ -16,8 +16,8 @@ use std::sync::{Arc, OnceLock};
 use chip_cli::local_environment::{LocalEnvironment, opaque_id};
 use chip_cli::software_work::{GoalKind, SoftwareWork, goal_is_acceptable, run_software_work_kind};
 use chip_core::{EnvironmentDescription, WorkId, WorkLimits, WorkOutcome};
-use chip_pax::PaxExecutor;
 use chip_inference::ModelProvider;
+use chip_pax::PaxExecutor;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 

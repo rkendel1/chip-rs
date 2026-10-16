@@ -5,7 +5,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -41,7 +46,11 @@ fn legacy_http_consumers_equal_the_ratchet_list() {
     walk(&crates, &mut files);
     let mut actual = BTreeSet::new();
     for f in files {
-        let rel = f.strip_prefix(root()).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = f
+            .strip_prefix(root())
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         if rel.starts_with("crates/chip-legacy-http/") || rel.starts_with("crates/chip-fx/tests/") {
             continue;
         }
@@ -49,15 +58,22 @@ fn legacy_http_consumers_equal_the_ratchet_list() {
             actual.insert(rel);
         }
     }
-    let listed: BTreeSet<String> = fs::read_to_string(root().join("docs/product/legacy-http-consumers.txt"))
-        .unwrap()
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(String::from)
-        .collect();
+    let listed: BTreeSet<String> =
+        fs::read_to_string(root().join("docs/product/legacy-http-consumers.txt"))
+            .unwrap()
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(String::from)
+            .collect();
     let new: Vec<_> = actual.difference(&listed).collect();
     let stale: Vec<_> = listed.difference(&actual).collect();
-    assert!(new.is_empty(), "new use of the legacy executor (use chip-fx): {new:?}");
-    assert!(stale.is_empty(), "stale ratchet entries (remove them): {stale:?}");
+    assert!(
+        new.is_empty(),
+        "new use of the legacy executor (use chip-fx): {new:?}"
+    );
+    assert!(
+        stale.is_empty(),
+        "stale ratchet entries (remove them): {stale:?}"
+    );
 }

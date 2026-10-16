@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 pub use capability_set::{CapabilityBackend, CapabilitySet};
+use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
@@ -28,7 +29,6 @@ pub use environment::{
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 pub use execution_evidence::ExecutionEvidence;
-use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use model_decision::{ModelDecisionBoundary, WORK_DECISION_SCHEMA};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,

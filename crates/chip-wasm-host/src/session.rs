@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chip_core::{
-    Agent, CapabilityAvailability, CapabilityDescriptor, CapabilityError,
-    CapabilityId, CapabilityInput, CapabilityProvider, ExecutionError, ExecutionId,
-    ExecutionObserver, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor, InputValue,
+    Agent, CapabilityAvailability, CapabilityDescriptor, CapabilityError, CapabilityId,
+    CapabilityInput, CapabilityProvider, ExecutionError, ExecutionId, ExecutionObserver,
+    ExecutionRequest, ExecutionResult, ExecutionStatus, Executor, InputValue,
     ModelDecisionBoundary, NoLocalPolicy, WorkGoal, WorkId, WorkLimits, WorkReport, WorkSpec,
     verify_trajectory,
 };
@@ -46,7 +46,9 @@ struct Exchange {
 }
 
 fn lock(exchange: &Mutex<Exchange>) -> std::sync::MutexGuard<'_, Exchange> {
-    exchange.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    exchange
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A future that is ready once the host has answered. It never registers a waker: the host
@@ -172,11 +174,18 @@ fn error(code: &str, message: &str) -> Vec<u8> {
 }
 
 fn text<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
-    object.get(key).and_then(Value::as_str).filter(|value| !value.is_empty())
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
 }
 
 fn seed(hex: &str) -> Option<[u8; 8]> {
-    if hex.len() != 16 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if hex.len() != 16
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return None;
     }
     let mut out = [0u8; 8];
@@ -191,14 +200,29 @@ fn capability(value: &Value) -> Option<CapabilityDescriptor> {
     let mut descriptor = CapabilityDescriptor::new(
         CapabilityId::new(text(object, "id")?).ok()?,
         text(object, "name")?,
-        object.get("description").and_then(Value::as_str).unwrap_or(""),
+        object
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
     );
-    for input in object.get("inputs").and_then(Value::as_array).into_iter().flatten() {
+    for input in object
+        .get("inputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let input = input.as_object()?;
         descriptor.inputs.push(CapabilityInput {
             name: text(input, "name")?.to_owned(),
-            description: input.get("description").and_then(Value::as_str).unwrap_or("").to_owned(),
-            required: input.get("required").and_then(Value::as_bool).unwrap_or(false),
+            description: input
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            required: input
+                .get("required")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         });
     }
     Some(descriptor)
@@ -215,7 +239,10 @@ fn input_json(value: &InputValue) -> Value {
 fn done_json(report: &WorkReport, limits: &WorkLimits) -> Value {
     let measurement = report.measurement();
     let mut result = Map::new();
-    result.insert("state".into(), json!(report.outcome.terminal_state().name()));
+    result.insert(
+        "state".into(),
+        json!(report.outcome.terminal_state().name()),
+    );
     match &report.outcome {
         chip_core::WorkOutcome::Completed { summary } => {
             result.insert("summary".into(), json!(summary));
@@ -274,10 +301,16 @@ impl Session {
             return error("already_begun", "this session already has a work");
         }
         if input.len() > MAX_COMMAND_BYTES {
-            return error("too_large", "the document is larger than the session accepts");
+            return error(
+                "too_large",
+                "the document is larger than the session accepts",
+            );
         }
         let Ok(Value::Object(document)) = serde_json::from_slice::<Value>(input) else {
-            return error("invalid_document", "the begin document is not a JSON object");
+            return error(
+                "invalid_document",
+                "the begin document is not a JSON object",
+            );
         };
         if document.get("v").and_then(Value::as_u64) != Some(u64::from(PROTOCOL_VERSION)) {
             return error("unsupported_version", "unsupported protocol version");
@@ -287,10 +320,16 @@ impl Session {
             text(&document, "goal"),
             text(&document, "model"),
         ) else {
-            return error("invalid_document", "work_id, goal and model are required strings");
+            return error(
+                "invalid_document",
+                "work_id, goal and model are required strings",
+            );
         };
         let Some(seed) = text(&document, "request_seed").and_then(seed) else {
-            return error("invalid_document", "request_seed must be 16 lowercase hex digits");
+            return error(
+                "invalid_document",
+                "request_seed must be 16 lowercase hex digits",
+            );
         };
         let policy = match text(&document, "options_policy") {
             Some("refuse") => OptionsPolicy::Refuse,
@@ -303,7 +342,12 @@ impl Session {
             }
         };
         let mut descriptors = Vec::new();
-        for value in document.get("capabilities").and_then(Value::as_array).into_iter().flatten() {
+        for value in document
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let Some(descriptor) = capability(value) else {
                 return error("invalid_document", "a capability declaration is malformed");
             };
@@ -362,7 +406,10 @@ impl Session {
             return error("not_begun", "the session has no work yet");
         }
         if input.len() > MAX_COMMAND_BYTES {
-            return error("too_large", "the command is larger than the session accepts");
+            return error(
+                "too_large",
+                "the command is larger than the session accepts",
+            );
         }
         let Ok(Value::Object(command)) = serde_json::from_slice::<Value>(input) else {
             return error("invalid_command", "the command is not a JSON object");
@@ -378,7 +425,10 @@ impl Session {
             }
             "inference_result" => {
                 if running.waiting_on != Some(Waiting::Inference) {
-                    return error("unexpected_command", "the work is not waiting for an inference");
+                    return error(
+                        "unexpected_command",
+                        "the work is not waiting for an inference",
+                    );
                 }
                 let answer = match (command.get("host_error"), command.get("report")) {
                     (Some(Value::String(message)), None) => Err(FxError::Provider(message.clone())),
@@ -401,12 +451,19 @@ impl Session {
             }
             "execution_result" => {
                 if running.waiting_on != Some(Waiting::Execution) {
-                    return error("unexpected_command", "the work is not waiting for an execution");
+                    return error(
+                        "unexpected_command",
+                        "the work is not waiting for an execution",
+                    );
                 }
                 let Some(id) = running.execution_id.clone() else {
                     return error("invalid_command", "no execution is pending");
                 };
-                let output = command.get("output").and_then(Value::as_str).unwrap_or("").to_owned();
+                let output = command
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
                 let answer = match (text(&command, "status"), text(&command, "error")) {
                     (Some("success"), None) => {
                         let mut result = ExecutionResult::success(id, output);
@@ -481,7 +538,10 @@ impl Session {
             None => {
                 self.running = None;
                 self.finished = true;
-                return error("stalled", "the work is waiting for neither an inference nor an execution");
+                return error(
+                    "stalled",
+                    "the work is waiting for neither an inference nor an execution",
+                );
             }
         };
         running.waiting_on = Some(waiting);
@@ -489,4 +549,3 @@ impl Session {
         running.current.clone()
     }
 }
-

@@ -17,7 +17,8 @@ fn get_workspace_root() -> PathBuf {
 #[test]
 fn chip_inference_does_not_depend_on_chip_core() {
     let fx_manifest_path = get_workspace_root().join("crates/chip-inference/Cargo.toml");
-    let manifest = fs::read_to_string(fx_manifest_path).expect("chip-inference Cargo.toml must exist");
+    let manifest =
+        fs::read_to_string(fx_manifest_path).expect("chip-inference Cargo.toml must exist");
 
     assert!(
         !manifest.contains("chip-core"),

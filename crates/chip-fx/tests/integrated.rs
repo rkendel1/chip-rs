@@ -110,7 +110,11 @@ async fn a_single_step_request_completes_through_the_authoritative_fx() {
         "{:?}",
         report.outcome
     );
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "one FX attempt, one provider call");
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        1,
+        "one FX attempt, one provider call"
+    );
     assert_eq!(h.executor.runs(), 0, "a plain completion executes nothing");
     assert_eq!(h.provider.stats().attempts, 1);
     assert_eq!(
@@ -126,16 +130,30 @@ async fn a_multi_step_turn_runs_the_tool_and_feeds_the_result_to_the_next_infere
         Attempt::Reply(COMPLETE.into()),
     ]);
     let report = run(&h).await;
-    assert!(matches!(report.outcome, WorkOutcome::Completed { .. }), "{:?}", report.outcome);
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 2, "two inference attempts");
-    assert_eq!(h.executor.runs(), 1, "Chip executed the authorized capability once");
+    assert!(
+        matches!(report.outcome, WorkOutcome::Completed { .. }),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        2,
+        "two inference attempts"
+    );
+    assert_eq!(
+        h.executor.runs(),
+        1,
+        "Chip executed the authorized capability once"
+    );
 
     let requests = h.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     let first = texts(&requests[0]);
     let second = texts(&requests[1]);
     assert!(
-        !first.iter().any(|(_, text)| text.contains("self test passed")),
+        !first
+            .iter()
+            .any(|(_, text)| text.contains("self test passed")),
         "the first inference cannot know the result"
     );
     assert!(
@@ -158,12 +176,20 @@ async fn the_inference_request_is_text_only_and_carries_no_tools() {
     let requests = h.requests.lock().unwrap();
     let request = &requests[0];
     assert!(request.tools.is_empty(), "Chip proposes no provider tools");
-    assert!(request.messages.iter().all(|m| m.parts.iter().all(|p| matches!(p, Part::Text(_)))));
+    assert!(
+        request
+            .messages
+            .iter()
+            .all(|m| m.parts.iter().all(|p| matches!(p, Part::Text(_))))
+    );
     assert!(request.options.max_output_tokens.is_none());
     assert_eq!(h.provider.stats().options_dropped, 1);
     let (role, text) = texts(request).pop().unwrap();
     assert_eq!(role, Role::User);
-    assert!(text.contains("Run the self test"), "the goal reaches the model: {text}");
+    assert!(
+        text.contains("Run the self test"),
+        "the goal reaches the model: {text}"
+    );
 }
 
 // ---------------------------------------------------------------- tool policy
@@ -182,20 +208,44 @@ async fn an_unauthorized_proposal_is_rejected_and_nothing_executes() {
             "{reply}: {:?}",
             report.outcome
         );
-        assert_eq!(h.executor.runs(), 0, "{reply}: the proposal executed nothing");
-        assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "{reply}: no second inference to repair it");
+        assert_eq!(
+            h.executor.runs(),
+            0,
+            "{reply}: the proposal executed nothing"
+        );
+        assert_eq!(
+            h.invokes.load(Ordering::SeqCst),
+            1,
+            "{reply}: no second inference to repair it"
+        );
     }
 }
 
 #[tokio::test]
 async fn a_malformed_proposal_is_rejected_safely_without_a_retry() {
-    for reply in ["not json at all", "", "Run the self test now:\n```sh\ncompute selftest\n```"] {
+    for reply in [
+        "not json at all",
+        "",
+        "Run the self test now:\n```sh\ncompute selftest\n```",
+    ] {
         let h = harness(vec![Attempt::Reply(reply.into())]);
         let report = run(&h).await;
-        assert!(matches!(report.outcome, WorkOutcome::Failed { .. }), "{reply}: {:?}", report.outcome);
-        assert!(reason(&report).contains("not a valid decision"), "{}", reason(&report));
+        assert!(
+            matches!(report.outcome, WorkOutcome::Failed { .. }),
+            "{reply}: {:?}",
+            report.outcome
+        );
+        assert!(
+            reason(&report).contains("not a valid decision"),
+            "{}",
+            reason(&report)
+        );
         assert_eq!(h.executor.runs(), 0);
-        assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "one attempt: no repair loop");
+        assert_eq!(
+            h.invokes.load(Ordering::SeqCst),
+            1,
+            "one attempt: no repair loop"
+        );
     }
 }
 
@@ -234,7 +284,11 @@ async fn a_tool_that_fails_is_an_observation_not_a_retry_of_inference() {
         None,
     );
     let report = run(&h).await;
-    assert!(matches!(report.outcome, WorkOutcome::Blocked { .. }), "{:?}", report.outcome);
+    assert!(
+        matches!(report.outcome, WorkOutcome::Blocked { .. }),
+        "{:?}",
+        report.outcome
+    );
     assert_eq!(h.executor.runs(), 1);
     assert_eq!(h.invokes.load(Ordering::SeqCst), 2);
 }
@@ -244,33 +298,62 @@ async fn a_tool_that_fails_is_an_observation_not_a_retry_of_inference() {
 #[tokio::test]
 async fn a_provider_failure_reaches_chip_with_its_delivery_and_is_not_retried() {
     let h = harness(vec![
-        Attempt::Fail(failure(PortFailureKind::ProviderError, Observed::Invoked, Some(429))),
+        Attempt::Fail(failure(
+            PortFailureKind::ProviderError,
+            Observed::Invoked,
+            Some(429),
+        )),
         Attempt::Reply(COMPLETE.into()),
     ]);
     let report = run(&h).await;
     let text = reason(&report);
     assert!(matches!(report.outcome, WorkOutcome::Failed { .. }));
     assert!(text.contains("rate_limited"), "{text}");
-    assert!(text.contains("possibly_sent"), "an error never lowers delivery: {text}");
+    assert!(
+        text.contains("possibly_sent"),
+        "an error never lowers delivery: {text}"
+    );
     assert!(text.contains("status 429"), "{text}");
     assert!(text.contains("not retried"), "{text}");
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "the ambiguous attempt was not repeated");
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        1,
+        "the ambiguous attempt was not repeated"
+    );
     assert!(
-        report.events.iter().any(|e| matches!(e, WorkEvent::ModelCalled { succeeded: false, .. })),
+        report.events.iter().any(|e| matches!(
+            e,
+            WorkEvent::ModelCalled {
+                succeeded: false,
+                ..
+            }
+        )),
         "the failed call is on the event stream"
     );
 }
 
 #[tokio::test]
 async fn an_ambiguous_delivery_does_not_cause_a_duplicate_provider_call() {
-    for failure_kind in [PortFailureKind::ProviderError, PortFailureKind::Timeout, PortFailureKind::IncompleteStream] {
+    for failure_kind in [
+        PortFailureKind::ProviderError,
+        PortFailureKind::Timeout,
+        PortFailureKind::IncompleteStream,
+    ] {
         let h = harness(vec![
             Attempt::Fail(failure(failure_kind, Observed::Invoked, None)),
             Attempt::Reply(COMPLETE.into()),
         ]);
         let report = run(&h).await;
-        assert!(matches!(report.outcome, WorkOutcome::Failed { .. }), "{failure_kind:?}: {:?}", report.outcome);
-        assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "{failure_kind:?}: exactly one provider call");
+        assert!(
+            matches!(report.outcome, WorkOutcome::Failed { .. }),
+            "{failure_kind:?}: {:?}",
+            report.outcome
+        );
+        assert_eq!(
+            h.invokes.load(Ordering::SeqCst),
+            1,
+            "{failure_kind:?}: exactly one provider call"
+        );
         assert_eq!(h.executor.runs(), 0);
     }
 }
@@ -283,8 +366,16 @@ async fn a_stream_that_ends_without_a_verified_finish_is_not_a_success() {
     ]);
     let report = run(&h).await;
     // The cut stream carried a perfectly valid decision, and it still must not be used.
-    assert!(matches!(report.outcome, WorkOutcome::Failed { .. }), "{:?}", report.outcome);
-    assert!(reason(&report).contains("delivery confirmed_response"), "{}", reason(&report));
+    assert!(
+        matches!(report.outcome, WorkOutcome::Failed { .. }),
+        "{:?}",
+        report.outcome
+    );
+    assert!(
+        reason(&report).contains("delivery confirmed_response"),
+        "{}",
+        reason(&report)
+    );
     assert_eq!(h.invokes.load(Ordering::SeqCst), 1);
     assert_eq!(h.executor.runs(), 0);
 }
@@ -293,15 +384,24 @@ async fn a_stream_that_ends_without_a_verified_finish_is_not_a_success() {
 async fn a_request_fx_refuses_never_reaches_the_provider() {
     // Under `Refuse` the sampling options go to FX, whose port here cannot carry them.
     let h = harness_with(
-        SequencePort::new(vec![Attempt::Reply(COMPLETE.into())]).with_support(PortSupport::default()),
+        SequencePort::new(vec![Attempt::Reply(COMPLETE.into())])
+            .with_support(PortSupport::default()),
         CountingExecutor::new(),
         OptionsPolicy::Refuse,
         None,
     );
     let report = run(&h).await;
-    assert!(matches!(report.outcome, WorkOutcome::Failed { .. }), "{:?}", report.outcome);
+    assert!(
+        matches!(report.outcome, WorkOutcome::Failed { .. }),
+        "{:?}",
+        report.outcome
+    );
     // The first refusal is Chip's own (temperature cannot be carried): nothing reached FX.
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 0, "refused before the provider");
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        0,
+        "refused before the provider"
+    );
 }
 
 #[tokio::test]
@@ -313,12 +413,21 @@ async fn fx_refuses_unsupported_features_before_invocation_with_nothing_sent() {
         OptionsPolicy::Refuse,
     );
     // No temperature, but a max_tokens the port cannot carry.
-    let mut request = ModelRequest::new("m", vec![chip_inference::Message::new(chip_inference::MessageRole::User, "hi")]);
+    let mut request = ModelRequest::new(
+        "m",
+        vec![chip_inference::Message::new(
+            chip_inference::MessageRole::User,
+            "hi",
+        )],
+    );
     request.temperature = None;
     let error = provider.complete(request).await.unwrap_err();
     let text = error.to_string();
     assert!(text.contains("capability_unavailable"), "{text}");
-    assert!(text.contains("definitely_unsent"), "refusal before dispatch proves nothing was sent: {text}");
+    assert!(
+        text.contains("definitely_unsent"),
+        "refusal before dispatch proves nothing was sent: {text}"
+    );
     assert_eq!(provider.with_port(|p| p.invokes.load(Ordering::SeqCst)), 0);
 }
 
@@ -344,24 +453,45 @@ async fn cancellation_before_invocation_sends_nothing() {
     let text = reason(&report);
     assert!(text.contains("cancelled"), "{text}");
     assert!(text.contains("definitely_unsent"), "{text}");
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 0, "the provider was never called");
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        0,
+        "the provider was never called"
+    );
 }
 
 #[tokio::test]
 async fn cancellation_after_invocation_is_never_reported_as_unsent() {
     let flag = Arc::new(AtomicBool::new(false));
     let h = harness_with(
-        SequencePort::new(vec![Attempt::CancelWhileStreaming(COMPLETE.into()), Attempt::Reply(COMPLETE.into())])
-            .with_cancel_flag(flag.clone()),
+        SequencePort::new(vec![
+            Attempt::CancelWhileStreaming(COMPLETE.into()),
+            Attempt::Reply(COMPLETE.into()),
+        ])
+        .with_cancel_flag(flag.clone()),
         CountingExecutor::new(),
         OptionsPolicy::DropUnsupported,
         Some(Arc::new(Flag(flag))),
     );
     let report = run(&h).await;
     let text = reason(&report);
-    assert!(matches!(report.outcome, WorkOutcome::Failed { .. }), "{:?}", report.outcome);
+    assert!(
+        matches!(report.outcome, WorkOutcome::Failed { .. }),
+        "{:?}",
+        report.outcome
+    );
     assert!(text.contains("cancelled"), "{text}");
-    assert!(!text.contains("definitely_unsent"), "the provider was invoked: {text}");
-    assert!(text.contains("confirmed_response"), "output had been observed: {text}");
-    assert_eq!(h.invokes.load(Ordering::SeqCst), 1, "no second call after a cancel");
+    assert!(
+        !text.contains("definitely_unsent"),
+        "the provider was invoked: {text}"
+    );
+    assert!(
+        text.contains("confirmed_response"),
+        "output had been observed: {text}"
+    );
+    assert_eq!(
+        h.invokes.load(Ordering::SeqCst),
+        1,
+        "no second call after a cancel"
+    );
 }

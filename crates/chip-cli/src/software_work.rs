@@ -28,6 +28,7 @@ use chip_core::{
     WorkState, WorkTrajectory, WorkUtilityMeasurement, WorkView, audit_safety,
     classify_observations, context_report, measure_utility, verify_trajectory,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 #[cfg(test)]
 use chip_pax::PaxExecutor;
 use chip_pax::{PAX_TEST_CAPABILITY, PROJECT_OBSERVE_CAPABILITY, PaxTestPassed};
@@ -35,7 +36,6 @@ use chip_project::{
     GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
     PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, write_summary,
 };
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 use crate::local_environment::LocalEnvironmentProvider;
 use crate::verify::{
@@ -1721,8 +1721,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use chip_core::{CapabilityProvider, CapabilitySet, ExecutionEvent, ObservationKind};
-    use chip_project::ProjectExecutor;
     use chip_inference::{FxError, ModelRequest, ModelResponse, Usage};
+    use chip_project::ProjectExecutor;
 
     use super::*;
 

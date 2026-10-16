@@ -3,9 +3,10 @@ use std::path::Path;
 
 #[test]
 fn chip_inference_has_no_chip_core_dependency() {
-    let manifest =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-inference/Cargo.toml"))
-            .expect("chip-inference Cargo.toml should exist");
+    let manifest = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-inference/Cargo.toml"),
+    )
+    .expect("chip-inference Cargo.toml should exist");
 
     assert!(
         !manifest.contains("chip-core"),

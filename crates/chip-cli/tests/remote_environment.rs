@@ -14,11 +14,11 @@ use chip_core::{
     EnvironmentDescription, EnvironmentId, ExecutionId, ExecutionRequest, Executor, InputValue,
     WorkEnvironment, WorkId, WorkLimits, WorkOutcome,
 };
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 use chip_pax::PaxExecutor;
 use chip_remote_env::{
     CommandOutput, CommandRunner, RemoteEnvironment, RunnerError, WorkerCommand,
 };
-use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const OLD_LIB: &str = "pub fn payload_len(payload: &str) -> usize {\n    payload.len()\n}\n";
 const RIGHT: &str = "pub fn payload_len(payload: &str) -> usize {\n    payload.len()\n}\n\npub fn canonical_fingerprint(payload: &str) -> String {\n    let mut pairs: Vec<&str> = payload.split('&').collect();\n    pairs.sort();\n    pairs.join(\"&\")\n}\n";
