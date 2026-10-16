@@ -25,7 +25,7 @@
 //! and `docs/rebuild/NATIVE_PROVIDER.md` in `rkendel1/fx`.
 //!
 //! `chip-fx` stays free of HTTP and still compiles for `wasm32`; only this crate links the
-//! native transport. `chip-legacy-http` is untouched.
+//! native transport.
 
 use std::sync::Arc;
 use std::time::Duration;

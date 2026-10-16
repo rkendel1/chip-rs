@@ -243,7 +243,6 @@ fn architecture_isolation() {
         "chip-local-ml",
         "chip-laya-reasoner",
         "chip-inference",
-        "chip-legacy-http",
         "chip-compute",
         "reqwest",
         "hyper",

@@ -30,7 +30,7 @@ fn mentions_compute(names: &[String]) -> Vec<&String> {
 
 #[test]
 fn core_crates_do_not_depend_on_compute() {
-    for krate in ["chip-core", "chip-inference", "chip-legacy-http"] {
+    for krate in ["chip-core", "chip-inference"] {
         let found = deps(krate);
         assert!(
             mentions_compute(&found).is_empty(),
@@ -62,7 +62,6 @@ fn chip_compute_depends_on_chip_core_only_one_way() {
 fn chip_core_does_not_depend_on_chip_compute() {
     assert!(!deps("chip-core").contains(&"chip-compute".to_string()));
     assert!(!deps("chip-inference").contains(&"chip-compute".to_string()));
-    assert!(!deps("chip-legacy-http").contains(&"chip-compute".to_string()));
 }
 
 #[test]

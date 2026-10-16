@@ -7,7 +7,7 @@
 //! and real PAX where a PAX result is needed; skipped (and said so) when PAX is not installed. The
 //! work model and the shadow model are mock HTTP servers; nothing here is evidence about a real model.
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};

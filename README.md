@@ -29,7 +29,7 @@ The Compute-configured distribution already ships an npm agent. This repository 
 | | Existing | This repository |
 | --- | --- | --- |
 | Agent | **Chip/Eve** (npm) | **Rust Chip** (`chip`) |
-| Model/provider boundary | **FX/Zig** (npm/Zig) | **Rust FX** (`chip-inference`, `chip-legacy-http`; see "Authoritative FX" below) |
+| Model/provider boundary | **FX/Zig** (npm/Zig) | **Rust FX** (`chip-inference`, `chip-fx`, `chip-fx-native`; see "Authoritative FX" below) |
 | Launched by | `compute-configured-chip` | `chip`, or `compute-configured-rust-chip` when hosted |
 
 They are independent implementations and can coexist in one Compute-configured distribution. Neither
@@ -119,7 +119,7 @@ and how to reproduce it (`cargo bench -p chip-cli --bench baseline`).
 
 ## Workspace
 
-- `crates/chip-inference`, `crates/chip-legacy-http`: Chip's model port and the legacy HTTP provider behind it (superseded by authoritative FX; see below)
+- `crates/chip-inference`: Chip's model port and provider configuration (the legacy HTTP provider was removed; FX is the only executor)
 - `crates/chip-core`: the agent runtime, including the generic environment contract
 - `crates/chip-remote-env`: a generic transport for running Chip's capabilities in an external environment
 - `crates/chip-project`, `crates/chip-pax`: the project and test capabilities

@@ -10,7 +10,7 @@
 
 #![cfg(unix)]
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
 use std::os::unix::fs::PermissionsExt;

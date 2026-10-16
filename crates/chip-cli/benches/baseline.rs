@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "../tests/common/mod.rs"]
 mod common;
 
 use chip_cli::local_environment::{LocalEnvironment, LocalEnvironmentProvider, opaque_id};
@@ -1147,8 +1147,8 @@ async fn mock_model(delay: Duration, script: fn(usize) -> &'static str) -> Mock 
                 let payload = format!(
                     "{{\"id\":\"m\",\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{content}}}}}],\"usage\":{{\"prompt_tokens\":100,\"completion_tokens\":20}}}}"
                 );
-                // The default executor (FX) streams; the legacy one does not. One scripted reply
-                // serves whichever the run under measurement asked for.
+                // FX streams, so a request that asks for a stream gets an event stream; anything else gets
+                // the plain JSON body.
                 let streamed = body.contains("\"stream\":true");
                 let response = match streamed
                     .then(|| common::as_event_stream(&payload))

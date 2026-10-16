@@ -136,11 +136,16 @@ fn chip_fx_native_adds_no_second_executor_or_http_client_of_its_own() {
 }
 
 #[test]
-fn reqwest_lives_only_in_the_legacy_executor() {
+fn no_crate_in_this_workspace_has_an_http_client_of_its_own() {
+    // The only HTTP transport is FX's native provider (an fx dependency). The legacy executor that
+    // used `reqwest` here was removed.
     for name in all_crates() {
         let deps = dependency_names(&manifest(&name));
-        if deps.contains(&"reqwest".to_string()) {
-            assert_eq!(name, "chip-legacy-http", "{name} must not use reqwest");
+        for client in ["reqwest", "hyper", "ureq"] {
+            assert!(
+                !deps.contains(&client.to_string()),
+                "{name} must not use {client}"
+            );
         }
     }
 }

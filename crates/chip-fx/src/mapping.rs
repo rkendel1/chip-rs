@@ -20,7 +20,7 @@ pub enum OptionsPolicy {
     /// refuses it before any provider call when its port cannot carry it.
     Refuse,
     /// Send neither and say so in [`crate::ProviderStats::options_dropped`]. The provider's
-    /// own defaults apply. This is a documented difference from the legacy HTTP provider,
+    /// own defaults apply. This differs from the removed legacy HTTP provider,
     /// which sent the values (see `docs/product/authoritative-fx.md`, D2).
     DropUnsupported,
     /// Send both to FX: `max_tokens` as the output cap and `temperature` as thousandths. A port

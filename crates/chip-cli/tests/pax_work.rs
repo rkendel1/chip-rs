@@ -3,7 +3,7 @@
 //! not installed the tests say SKIPPED and return. The one test against a real model is opt-in
 //! (`CHIP_TEST_REAL_MODEL=1`).
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};

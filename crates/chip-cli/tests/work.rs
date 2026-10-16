@@ -8,7 +8,7 @@
 //! what an independent run of PAX says about the project afterwards. It does not assert that the
 //! model succeeded: that is the measurement, not the test.
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};
@@ -446,6 +446,64 @@ async fn the_command_line_selection_is_the_only_model_called() {
         "a secret or host path was printed"
     );
     assert_eq!(j["terminal_state"], "blocked");
+}
+
+/// The removed `legacy` executor, in the flag or in the environment, and any unknown value, are
+/// refused before any request, with FX named as the only executor. Nothing is written and nothing
+/// falls back.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_removed_legacy_executor_is_refused_in_the_flag_and_in_the_environment() {
+    let dir = fixture("nolegacy");
+    let before = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    let server = common::start(
+        200,
+        &completion(r#"{"decision":"block","reason":"x"}"#),
+        Duration::ZERO,
+    )
+    .await;
+    for (flag, env) in [
+        (Some("legacy"), None),
+        (None, Some("legacy")),
+        (Some("both"), None),
+        (None, Some("both")),
+        (Some("fx"), Some("legacy")),
+    ] {
+        let (url, d) = (server.url.clone(), dir.clone());
+        let out = tokio::task::spawn_blocking(move || {
+            let mut args = vec!["--json"];
+            if let Some(flag) = flag {
+                args.push("--executor");
+                args.push(flag);
+            }
+            args.push(GOAL);
+            let mut c = base(&args, &d);
+            c.env("CHIP_PROVIDER", "openai-compatible")
+                .env("CHIP_MODEL", "m")
+                .env("CHIP_ENDPOINT", &url);
+            match env {
+                Some(value) => c.env("CHIP_EXECUTOR", value),
+                None => c.env_remove("CHIP_EXECUTOR"),
+            };
+            c.output().unwrap()
+        })
+        .await
+        .unwrap();
+        let t = text(&out);
+        assert_ne!(out.status.code(), Some(0), "{flag:?} {env:?}: {t}");
+        assert!(
+            t.contains("FX is the only supported executor") && t.contains("nothing was run"),
+            "{flag:?} {env:?}: {t}"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "{flag:?} {env:?}: no verdict for a run that never began"
+        );
+    }
+    assert_eq!(server.captured.lock().await.len(), 0, "no request was made");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("src/lib.rs")).unwrap(),
+        before
+    );
 }
 
 #[test]

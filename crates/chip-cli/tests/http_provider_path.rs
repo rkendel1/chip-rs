@@ -1,23 +1,25 @@
-//! First complete path: Turn → Agent → ModelProvider → HttpProvider → mock HTTP → TurnResult.
+//! First complete path: Turn → Agent → ModelProvider → FX executor → mock HTTP → TurnResult.
 //! Lives in chip-cli (the composition root) so chip-core never links the HTTP provider.
 
-#[path = "../../chip-legacy-http/tests/common/mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 
-use std::sync::Arc;
 use std::time::Duration;
 
+use chip_cli::provider_selection::{ExecutorKind, build_model};
 use chip_core::{Agent, AgentError, AgentEvent, Turn};
 use chip_inference::Secret;
 use chip_inference::{PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
-use chip_legacy_http::HttpProvider;
 
 const FAKE_KEY: &str = "fake-key-for-tests";
 
 fn agent(url: &str) -> Agent {
     let config = ProviderConfig::new(PROVIDER_OPENAI_COMPATIBLE, "mock-model", url)
         .with_api_key(Secret::new(FAKE_KEY));
-    Agent::with_model(Arc::new(HttpProvider::new(config).unwrap()), "mock-model")
+    Agent::with_model(
+        build_model(config, ExecutorKind::Fx, &|_| None).unwrap(),
+        "mock-model",
+    )
 }
 
 #[tokio::test]

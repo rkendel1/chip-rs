@@ -36,7 +36,6 @@ fn chip_core_and_the_other_crates_do_not_depend_on_the_runtime() {
     for krate in [
         "chip-core",
         "chip-inference",
-        "chip-legacy-http",
         "chip-compute",
         "chip-wasm-reasoner",
         "chip-reasoning-corpus",

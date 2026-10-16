@@ -1,6 +1,9 @@
-//! Retirement ratchet for the legacy HTTP executor. The consumer list may only shrink.
+//! `chip-legacy-http` (the second inference executor) is gone, and stays gone.
+//!
+//! FX is the only executor. This test fails if the crate comes back, if anything depends on it or
+//! imports it, if a script or workflow names it, or if anything outside the shared selection boundary
+//! constructs a model provider from a vendor HTTP client.
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,73 +24,81 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             if name != "target" && !name.starts_with('.') {
                 walk(&p, out);
             }
-        } else if name == "Cargo.toml" || name.ends_with(".rs") {
+        } else {
             out.push(p);
         }
     }
 }
 
-fn uses_legacy(text: &str) -> bool {
-    text.lines().any(|l| {
-        let l = l.trim();
-        if l.starts_with("//") {
-            return false;
-        }
-        l.contains("chip_legacy_http::")
-            || l.starts_with("use chip_legacy_http")
-            || (l.starts_with("chip-legacy-http") && l.contains('='))
-    })
+fn code_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().filter(|l| !l.trim_start().starts_with("//"))
 }
 
 #[test]
-fn legacy_http_consumers_equal_the_ratchet_list() {
-    let crates = root().join("crates");
+fn the_legacy_crate_is_gone() {
+    assert!(!root().join("crates/chip-legacy-http").exists());
+}
+
+#[test]
+fn nothing_depends_on_or_imports_the_legacy_crate() {
     let mut files = Vec::new();
-    walk(&crates, &mut files);
-    let mut actual = BTreeSet::new();
+    walk(&root().join("crates"), &mut files);
+    files.push(root().join("Cargo.toml"));
+    let mut offenders = Vec::new();
     for f in files {
         let rel = f
             .strip_prefix(root())
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        // The parity test compares the two executors; it is the evidence for retiring the legacy
-        // one and is deleted with it. It is not a consumer.
-        if rel.starts_with("crates/chip-legacy-http/")
-            || rel.starts_with("crates/chip-fx/tests/")
-            || rel == "crates/chip-cli/tests/executor_parity.rs"
-        {
+        // This file names the crate in order to forbid it.
+        if rel == "crates/chip-fx/tests/retirement.rs" {
             continue;
         }
-        if uses_legacy(&fs::read_to_string(&f).unwrap()) {
-            actual.insert(rel);
+        let name = f.file_name().unwrap().to_string_lossy().into_owned();
+        if !(name == "Cargo.toml" || name.ends_with(".rs")) {
+            continue;
+        }
+        let text = fs::read_to_string(&f).unwrap_or_default();
+        let hit = code_lines(&text).any(|l| {
+            let l = l.trim();
+            l.contains("chip_legacy_http::")
+                || l.starts_with("use chip_legacy_http")
+                || l.contains("HttpProvider::new(")
+                || (name == "Cargo.toml" && l.contains("chip-legacy-http") && l.contains('='))
+                || (name == "Cargo.toml" && l.contains("crates/chip-legacy-http"))
+        });
+        if hit {
+            offenders.push(rel);
         }
     }
-    let listed: BTreeSet<String> =
-        fs::read_to_string(root().join("docs/product/legacy-http-consumers.txt"))
-            .unwrap()
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(String::from)
-            .collect();
-    let new: Vec<_> = actual.difference(&listed).collect();
-    let stale: Vec<_> = listed.difference(&actual).collect();
     assert!(
-        new.is_empty(),
-        "new use of the legacy executor (use chip-fx): {new:?}"
-    );
-    assert!(
-        stale.is_empty(),
-        "stale ratchet entries (remove them): {stale:?}"
+        offenders.is_empty(),
+        "chip-legacy-http was removed; FX is the only executor: {offenders:?}"
     );
 }
 
-/// Production code builds its model through `provider_selection`, whose default is FX. Only that
-/// file may construct the legacy provider (test modules and the legacy crate itself excepted), so
-/// a new consumer cannot quietly depend on `chip-legacy-http`.
 #[test]
-fn only_provider_selection_constructs_the_legacy_provider_in_production_code() {
+fn scripts_and_workflows_do_not_name_the_removed_crate() {
+    let mut files = Vec::new();
+    walk(&root().join("scripts"), &mut files);
+    walk(&root().join(".github"), &mut files);
+    let offenders: Vec<_> = files
+        .iter()
+        .filter(|f| {
+            fs::read_to_string(f)
+                .unwrap_or_default()
+                .contains("chip-legacy-http")
+        })
+        .map(|f| f.strip_prefix(root()).unwrap().display().to_string())
+        .collect();
+    assert!(offenders.is_empty(), "{offenders:?}");
+}
+
+/// The executor choice is one place. Production code builds its model through
+/// `provider_selection`, never from an HTTP client of its own.
+#[test]
+fn production_code_has_no_http_client_of_its_own() {
     let mut files = Vec::new();
     walk(&root().join("crates"), &mut files);
     let mut offenders = Vec::new();
@@ -97,26 +108,14 @@ fn only_provider_selection_constructs_the_legacy_provider_in_production_code() {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        let production = rel.ends_with(".rs")
-            && !rel.starts_with("crates/chip-legacy-http/")
-            && !rel.contains("/tests/")
-            && rel != "crates/chip-cli/src/provider_selection.rs";
-        if !production {
+        if !rel.ends_with(".rs") || rel.contains("/tests/") || rel.contains("/benches/") {
             continue;
         }
         let text = fs::read_to_string(&f).unwrap();
         let before_tests = text.split("#[cfg(test)]").next().unwrap_or_default();
-        if before_tests
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .any(|l| l.contains("HttpProvider::new("))
-        {
+        if code_lines(before_tests).any(|l| l.contains("reqwest::") || l.contains("hyper::")) {
             offenders.push(rel);
         }
     }
-    assert!(
-        offenders.is_empty(),
-        "build the model with provider_selection::build_model_from_process (or build_model); \
-         these construct the legacy provider directly: {offenders:?}"
-    );
+    assert!(offenders.is_empty(), "{offenders:?}");
 }

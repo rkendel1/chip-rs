@@ -36,7 +36,7 @@ gate below holds.
 | --- | --- |
 | request/response types | moved to `chip-inference` (Chip-owned port types) |
 | error taxonomy | replaced by `FxError::Inference` carrying FX kind, delivery, status, retry hint, partial text |
-| `fx-provider-http` | kept as `chip-legacy-http` (see blockers) |
+| `fx-provider-http` | retired: replaced by `chip-fx-native` over FX's native provider; its successor `chip-legacy-http` was then removed |
 | any retry, repair, routing code | none existed; none added |
 
 ## Adapter contract (`chip-fx`)
@@ -75,14 +75,11 @@ Machine-checked in this repository by `crates/chip-fx/tests/architecture.rs` and
 | No second FX core crate in this workspace | met, enforced |
 | `chip-core` and `chip-inference` have no FX, `chip-fx`, legacy HTTP or `reqwest` dependency | met, enforced |
 | Only `chip-fx` and `chip-wasm-host` reference FX crates | met, enforced |
-| `reqwest` only in `chip-legacy-http` | met, enforced |
-| Consumers of `chip-legacy-http` equal `docs/product/legacy-http-consumers.txt` (may only shrink) | met, enforced |
-| `chip-legacy-http` removed | BLOCKED |
+| No HTTP client crate (`reqwest`, `hyper`, `ureq`) in any workspace crate | met, enforced |
+| `chip-legacy-http` removed, not imported, not named by scripts or workflows | met, enforced (`crates/chip-fx/tests/retirement.rs`) |
 
-Blocker for `chip-legacy-http`: the native `chip` binary (`chip-cli`, 14 files listed in the ratchet
-file) builds its own concrete provider. Moving it to FX needs a native Easy-LLM host, which is a
-product decision outside this change. Until then the legacy executor is the minimum legacy code kept,
-no new code may use it, and the ratchet fails CI if one does.
+`chip-legacy-http` and `--executor legacy` were removed; FX is the only executor. The native provider does
+not support HTTP proxies or custom CA certificates; see `native-provider.md` (Known limitations).
 
 ## Entry points
 

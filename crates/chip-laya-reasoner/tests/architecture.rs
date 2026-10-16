@@ -31,7 +31,6 @@ fn chip_core_and_the_other_crates_know_nothing_about_laya_or_candle() {
     for krate in [
         "chip-core",
         "chip-inference",
-        "chip-legacy-http",
         "chip-compute",
         "chip-wasm-reasoner",
         "chip-reasoning-corpus",

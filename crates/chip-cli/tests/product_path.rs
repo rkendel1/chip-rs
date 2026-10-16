@@ -16,7 +16,6 @@ const PRODUCT_CRATES: &[&str] = &[
     "chip_project",
     "chip_remote_env",
     "chip_inference",
-    "chip_legacy_http",
     // The authoritative FX executor with a native provider: the other model executor.
     "chip_fx",
     "chip_fx_native",
