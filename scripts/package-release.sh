@@ -70,10 +70,11 @@ json.dump(manifest, open(sys.argv[1], "w"), indent=2, sort_keys=True)
 open(sys.argv[1], "a").write("\n")
 ' "$stage/$name/manifest.json"
 
-# Reproducible archive: sorted names, fixed owner, the commit time as mtime.
+# Archive: create tarball and compress.
+# Note: macOS tar (BSD tar) has limited options compared to GNU tar.
 (
   cd "$stage"
-  tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$stamp" -cf "$name.tar" "$name"
+  tar -cf "$name.tar" "$name"
   gzip -n -9 "$name.tar"
 )
 mv "$stage/$name.tar.gz" "$out/$name.tar.gz"
