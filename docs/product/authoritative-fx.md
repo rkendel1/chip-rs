@@ -57,7 +57,9 @@ Recorded from the real binary in `rkendel1/fx` `docs/rebuild/evidence/zig-oracle
 * D1 Zig repeats a provider request after ambiguous outcomes (429, 500, cut stream). Chip and FX
   never do. A repeat is allowed only when delivery is provably `DefinitelyUnsent`, and chip-rs never
   retries at all.
-* D2 Sampling options and system prompt are not carried by the FX path.
+* D2 Caller-chosen sampling options and system prompt are not carried by the FX path. The Easy-LLM
+  OpenAI adapter applies its own fixed temperature of 0.7; that is the adapter's behavior, pinned in
+  the fx parity test.
 * D3 Zig reports an unknown tool or malformed arguments to the model and continues. Chip fails
   closed without repair.
 * D4 Zig sends provider-native tool definitions. Chip uses text decisions (`chip.work-decision.v1`)
