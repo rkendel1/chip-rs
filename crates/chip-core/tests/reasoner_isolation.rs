@@ -92,7 +92,7 @@ fn chip_core_manifest_stays_free_of_runtimes_and_adapters() {
         "wasmtime",
         "chip-wasm",
         "chip-compute",
-        "fx-provider-http",
+        "chip-legacy-http",
         "sqlite",
         "feltdb",
     ] {

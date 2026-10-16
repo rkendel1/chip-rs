@@ -21,7 +21,7 @@ use chip_core::{
     ModelDecisionBoundary, ObservationKind, TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal,
     WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec, WorkView, verify_trajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const RIGHT: &str = OP_A_INTENT;
 const RUNTIME_INFO: &str = OP_B_INTENT;

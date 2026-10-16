@@ -15,7 +15,7 @@ use chip_core::{
     WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport,
     WorkSpec, verify_trajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 fn cap(id: &str, inputs: &[&str], availability: CapabilityAvailability) -> Capability {
     let mut descriptor = CapabilityDescriptor::new(CapabilityId::new(id).unwrap(), id, "described");
@@ -628,7 +628,7 @@ fn chip_core_names_no_provider_and_reads_no_environment() {
             "chip_model",
             "std::env",
             "getenv",
-            "fx_provider_http",
+            "chip_legacy_http",
             "reqwest",
             "api_key",
         ] {
@@ -642,7 +642,7 @@ fn chip_core_names_no_provider_and_reads_no_environment() {
     let manifest =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
     let runtime = manifest.split("[dev-dependencies]").next().unwrap();
-    assert!(!runtime.contains("fx-provider-http"));
+    assert!(!runtime.contains("chip-legacy-http"));
 }
 
 #[test]

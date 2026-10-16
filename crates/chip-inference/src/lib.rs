@@ -110,8 +110,55 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// What is known about whether a failed request left the process. Mirrors the delivery
+/// certainty of the authoritative FX contract; it only ever moves toward "sent".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Delivery {
+    /// FX proved nothing was sent.
+    DefinitelyUnsent,
+    /// The request may have been sent; it may have executed and been billed.
+    PossiblySent,
+    /// A response from the provider was observed.
+    ConfirmedResponse,
+}
+
+impl Delivery {
+    /// The stable label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Delivery::DefinitelyUnsent => "definitely_unsent",
+            Delivery::PossiblySent => "possibly_sent",
+            Delivery::ConfirmedResponse => "confirmed_response",
+        }
+    }
+}
+
+/// A failed model call, with what the inference executor knew when it ended.
+///
+/// The detail is for the caller's reasoning and audit. Nothing here authorizes a retry:
+/// Chip does not retry a model call, and an attempt whose delivery is not
+/// `DefinitelyUnsent` may already have been billed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InferenceFailure {
+    /// The executor's failure kind, as its stable label (for example `rate_limited`,
+    /// `transport`, `cancelled`, `capability_unavailable`).
+    pub kind: String,
+    /// Delivery certainty when the attempt ended.
+    pub delivery: Delivery,
+    /// An HTTP status, when the provider layer supplied one. Diagnostic only.
+    pub status: Option<u16>,
+    /// A provider-requested wait in milliseconds, when supplied. Chip does not act on it.
+    pub retry_after_ms: Option<u64>,
+    /// Bounded, masked detail from the executor.
+    pub detail: Option<String>,
+    /// Output received before an interrupted stream failed. Never a completion.
+    pub partial_output: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FxError {
+    /// The inference executor ended the attempt without a verified completion.
+    Inference(Box<InferenceFailure>),
     InvalidRequest(String),
     Provider(String),
     Configuration(String),
@@ -125,6 +172,21 @@ pub enum FxError {
 impl fmt::Display for FxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Inference(failure) => {
+                write!(
+                    f,
+                    "inference failed ({}): delivery {}; not retried",
+                    failure.kind,
+                    failure.delivery.as_str()
+                )?;
+                if let Some(status) = failure.status {
+                    write!(f, "; status {status}")?;
+                }
+                if let Some(detail) = &failure.detail {
+                    write!(f, "; {detail}")?;
+                }
+                Ok(())
+            }
             Self::InvalidRequest(message) => write!(f, "invalid request: {message}"),
             Self::Provider(message) => write!(f, "provider error: {message}"),
             Self::Configuration(message) => write!(f, "configuration error: {message}"),

@@ -195,7 +195,7 @@ pub fn demo(native: &Native) -> Result<String, String> {
         DecisionExecution, DecisionProvenance, DecisionResult, DecisionValue, ModelIdentity,
         TypedDecision,
     };
-    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
     struct RemoteModel(Arc<AtomicUsize>);
 

@@ -206,7 +206,7 @@ fn chip_graph_knows_nothing_about_any_capability_provider() {
             "command::new",
             "chip-core",
             "chip-compute",
-            "fx-core",
+            "chip-inference",
             "chip-local-ml",
             "chip-laya-reasoner",
             "laya",

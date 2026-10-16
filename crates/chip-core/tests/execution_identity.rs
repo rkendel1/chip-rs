@@ -13,7 +13,7 @@ use chip_core::{
     ExecutionResult, Executor, LocalWorkPolicy, ModelDecisionBoundary, ObservationKind,
     WorkDecision, WorkEvent, WorkGoal, WorkId, WorkOutcome, WorkReport, WorkSpec, WorkView,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 /// Answers every call with a capability request and the same provider response id.
 struct Model(&'static str, Mutex<usize>);

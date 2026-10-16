@@ -16,7 +16,7 @@ use chip_core::{
     ObservationPredicate, TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal, WorkId, WorkLimits,
     WorkOutcome, WorkReport, WorkSpec, WorkView, audit_safety, measure_utility,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct Script(Mutex<VecDeque<String>>);
 

@@ -13,7 +13,7 @@ use chip_core::{
     ModelDecisionBoundary, ObservationKind, TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal,
     WorkId, WorkOutcome, WorkReport, WorkSpec, WorkView,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 /// SHA-256 of the fixed test input: known here independently of the executor and of any model.
 const DIGEST: &str = "5dc3ef3419c119833659d7288d246c87db93e4eeabb2b11126be581cb83c165f";

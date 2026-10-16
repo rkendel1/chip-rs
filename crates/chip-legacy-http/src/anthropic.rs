@@ -1,7 +1,7 @@
 //! Adapter for the Anthropic Messages API.
 //! All JSON structures here are private to this module.
 
-use fx_core::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::{HttpProviderConfig, error_detail, transport_error};

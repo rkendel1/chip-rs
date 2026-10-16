@@ -9,8 +9,8 @@
 //! so; no other provider or model is tried. The selection grants no authority: the provider sits
 //! behind FX and the runtime treats every model the same.
 
-use fx_core::FxError;
-use fx_provider_http::HttpProviderConfig;
+use chip_inference::FxError;
+use chip_legacy_http::HttpProviderConfig;
 
 /// What the command line chose. Anything left `None` is decided by the environment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

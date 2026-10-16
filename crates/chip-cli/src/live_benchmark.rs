@@ -12,7 +12,7 @@ use chip_core::{
     Agent, CapabilityId, EvidenceState, ExecutionError, ExecutionRequest, ExecutionResult,
     Executor, InputValue, ReasoningInput, TestExecutor, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 use crate::benchmark::{Stats, fmt};
 
@@ -358,15 +358,15 @@ pub fn render(report: &LiveReport, local: Option<&LocalReference>, secret: Optio
 }
 
 #[cfg(test)]
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod mock;
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use fx_core::Secret;
-    use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+    use chip_inference::Secret;
+    use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
     use super::*;
 

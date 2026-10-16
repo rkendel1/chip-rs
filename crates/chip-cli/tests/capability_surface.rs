@@ -167,7 +167,7 @@ async fn the_boundary_assigns_no_execution_id_and_keeps_the_provider_id_as_metad
     // Execution identity is Chip's, assigned by the work loop; the provider's response id is only
     // correlation metadata and is never turned into an execution id.
     use chip_core::{Capability, ModelDecisionBoundary, WorkDecision, WorkDecisionBoundary};
-    use fx_core::{ModelResponse, Usage};
+    use chip_inference::{ModelResponse, Usage};
     let capabilities: Vec<Capability> = {
         let dir = std::env::temp_dir().join(format!("chip-surface-{}", std::process::id()));
         let env = LocalEnvironment::new(
@@ -215,12 +215,12 @@ async fn the_read_range_is_a_declared_bounded_integer_input_and_nothing_else_is_
 
     struct NoModel;
     #[async_trait::async_trait]
-    impl fx_core::ModelProvider for NoModel {
+    impl chip_inference::ModelProvider for NoModel {
         async fn complete(
             &self,
-            _: fx_core::ModelRequest,
-        ) -> Result<fx_core::ModelResponse, fx_core::FxError> {
-            Err(fx_core::FxError::Provider("not used".into()))
+            _: chip_inference::ModelRequest,
+        ) -> Result<chip_inference::ModelResponse, chip_inference::FxError> {
+            Err(chip_inference::FxError::Provider("not used".into()))
         }
     }
     let dir = std::env::temp_dir().join(format!("chip-surface-range-{}", std::process::id()));

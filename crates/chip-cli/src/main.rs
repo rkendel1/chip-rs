@@ -16,8 +16,8 @@ use chip_core::{
     ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult, Executor,
     LocalReasoningResult, ScriptedDecision, StateToken, TestExecutor, TestLocalReasoner, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
-use fx_provider_http::HttpProvider;
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_legacy_http::HttpProvider;
 
 #[derive(Default)]
 struct TestModelProvider;

@@ -8,7 +8,7 @@ use chip_core::{
     ExecutionObserver, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor,
     ObservationError, ObservationKind, ScriptedDecision, TestExecutor, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 #[derive(Default)]
 struct CountingModel(AtomicUsize);

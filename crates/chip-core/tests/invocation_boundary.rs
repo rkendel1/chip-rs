@@ -23,7 +23,7 @@ use chip_core::{
     ModelDecisionBoundary, ObservationKind, TestLocalReasoner, WorkDecision, WorkEvent, WorkGoal,
     WorkId, WorkOutcome, WorkReport, WorkSpec, WorkView,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct Model(String, Mutex<usize>);
 

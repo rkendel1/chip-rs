@@ -1,7 +1,7 @@
 //! Test proving a provider can be implemented without modifying Chip.
 //! This demonstrates that Chip operates against the trait, not a concrete implementation.
 
-use fx_core::{
+use chip_inference::{
     FxError, Message, MessageRole, ModelId, ModelProvider, ModelRequest, ModelResponse, Usage,
 };
 

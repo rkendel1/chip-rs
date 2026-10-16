@@ -15,7 +15,7 @@ use chip_core::{
     Observation, ObservationKind, TestLocalReasoner, WorkDecision, WorkDecisionBoundary, WorkEvent,
     WorkGoal, WorkId, WorkSpec, WorkState, WorkTrajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 // ---- the policy on its own: a golden context --------------------------------------------
 

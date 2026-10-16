@@ -1,7 +1,7 @@
-//! Test verifying that the public FX API contains no provider-specific types.
-//! Allowed concepts: ModelId, Message, MessageRole, ModelRequest, ModelResponse, Usage, ModelProvider, FxError.
+//! Test verifying that the public model-port API contains no provider-specific types.
+//! Allowed concepts: ModelId, Message, MessageRole, ModelRequest, ModelResponse, Usage, ModelProvider, FxError, Delivery, InferenceFailure.
 
-use fx_core::*;
+use chip_inference::*;
 
 #[test]
 fn api_exports_only_required_concepts() {
@@ -42,4 +42,27 @@ fn model_request_parameters_are_standard() {
     let request = ModelRequest::new("gpt-4", vec![]);
     assert!(request.max_tokens.is_some());
     assert!(request.temperature.is_some());
+}
+
+#[test]
+fn an_inference_failure_keeps_delivery_and_says_it_was_not_retried() {
+    let failure = FxError::Inference(Box::new(InferenceFailure {
+        kind: "rate_limited".into(),
+        delivery: Delivery::PossiblySent,
+        status: Some(429),
+        retry_after_ms: Some(3000),
+        detail: None,
+        partial_output: None,
+    }));
+    let text = failure.to_string();
+    assert!(text.contains("rate_limited"), "{text}");
+    assert!(text.contains("possibly_sent"), "{text}");
+    assert!(text.contains("status 429"), "{text}");
+    assert!(text.contains("not retried"), "{text}");
+}
+
+#[test]
+fn delivery_only_moves_toward_sent() {
+    assert!(Delivery::DefinitelyUnsent < Delivery::PossiblySent);
+    assert!(Delivery::PossiblySent < Delivery::ConfirmedResponse);
 }

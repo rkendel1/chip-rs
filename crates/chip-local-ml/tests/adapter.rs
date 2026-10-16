@@ -19,7 +19,7 @@ use chip_local_ml::{
     build_request, encode_state, installation_status, interpret,
 };
 use chip_reasoning_corpus::{Verdict, corpus, evaluate};
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use rust_ml_runtime::{
     DecisionExecution, DecisionModel, DecisionModelCapabilities, DecisionModelProvider,
     DecisionProvenance, DecisionRequest, DecisionResult, DecisionValue, DeviceKind,
@@ -325,7 +325,7 @@ fn the_adapter_reaches_no_environment_filesystem_network_or_process() {
         "reqwest",
         "tokio",
         "chip_compute",
-        "fx_core",
+        "chip_inference",
         "Executor",
         "ModelProvider",
         "install_registered_model",

@@ -35,7 +35,7 @@ use chip_project::{
     GIT_CAPABILITIES, HOST_PATH_LEAK, NAVIGATION_MISMATCH, OUT_OF_ROOT_WRITE, PATH_ESCAPE,
     PROJECT_LIST, PROJECT_READ, PROJECT_SEARCH, PROJECT_WRITE, write_summary,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 use crate::local_environment::LocalEnvironmentProvider;
 use crate::verify::{
@@ -1421,7 +1421,7 @@ impl WorkRuntime {
             model: model_name.clone(),
             endpoint: crate::provider_selection::endpoint_identity(&config.endpoint),
         };
-        let provider = fx_provider_http::HttpProvider::new(config)
+        let provider = chip_legacy_http::HttpProvider::new(config)
             .map_err(|e| format!("the model provider is unusable ({e}); nothing was run"))?;
         Ok(Self {
             model: Arc::new(provider),
@@ -1722,7 +1722,7 @@ mod tests {
 
     use chip_core::{CapabilityProvider, CapabilitySet, ExecutionEvent, ObservationKind};
     use chip_project::ProjectExecutor;
-    use fx_core::{FxError, ModelRequest, ModelResponse, Usage};
+    use chip_inference::{FxError, ModelRequest, ModelResponse, Usage};
 
     use super::*;
 

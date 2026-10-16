@@ -24,8 +24,8 @@ pub mod verify;
 pub mod wasm_decision_bench;
 pub mod work_demo;
 
-use fx_core::{FxError, Secret};
-use fx_provider_http::{HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{FxError, Secret};
+use chip_legacy_http::{HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
 /// Builds provider config from CHIP_PROVIDER / CHIP_MODEL / CHIP_ENDPOINT / CHIP_API_KEY.
 pub fn config_from_env(
@@ -39,13 +39,13 @@ pub fn config_from_env(
     let provider = get("CHIP_PROVIDER").unwrap_or_else(|| PROVIDER_OPENAI_COMPATIBLE.to_string());
     // A provider with one well-known endpoint does not need CHIP_ENDPOINT.
     let set = |name: &str| get(name).filter(|v| !v.trim().is_empty());
-    let endpoint = match (provider == fx_provider_http::PROVIDER_OLLAMA)
+    let endpoint = match (provider == chip_legacy_http::PROVIDER_OLLAMA)
         .then(|| set("CHIP_OLLAMA_ENDPOINT"))
         .flatten()
         .or_else(|| set("CHIP_ENDPOINT"))
     {
         Some(endpoint) => endpoint,
-        None => match fx_provider_http::default_endpoint(&provider) {
+        None => match chip_legacy_http::default_endpoint(&provider) {
             Some(endpoint) => endpoint.to_string(),
             None => required("CHIP_ENDPOINT")?,
         },
@@ -75,7 +75,7 @@ pub fn config_from_env(
 #[cfg(test)]
 mod tests {
     use super::config_from_env;
-    use fx_core::FxError;
+    use chip_inference::FxError;
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |name| {

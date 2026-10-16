@@ -43,12 +43,12 @@ async fn live_compute_execution() {
 struct NoModel;
 
 #[async_trait::async_trait]
-impl fx_core::ModelProvider for NoModel {
+impl chip_inference::ModelProvider for NoModel {
     async fn complete(
         &self,
-        _r: fx_core::ModelRequest,
-    ) -> Result<fx_core::ModelResponse, fx_core::FxError> {
-        Err(fx_core::FxError::Provider("not used".into()))
+        _r: chip_inference::ModelRequest,
+    ) -> Result<chip_inference::ModelResponse, chip_inference::FxError> {
+        Err(chip_inference::FxError::Provider("not used".into()))
     }
 }
 
@@ -80,7 +80,7 @@ struct NeverEscalates;
 impl chip_core::WorkDecisionBoundary for NeverEscalates {
     fn interpret(
         &self,
-        _r: &fx_core::ModelResponse,
+        _r: &chip_inference::ModelResponse,
         _c: &[chip_core::Capability],
     ) -> Result<chip_core::WorkDecision, chip_core::DecisionError> {
         Err(chip_core::DecisionError::InvalidDecision(

@@ -6,7 +6,7 @@
 //! wherever PAX can produce the case; the malformed-result and old-version cases use a small script
 //! at the PAX process boundary and say so. If PAX is not installed a test says SKIPPED and returns.
 
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};

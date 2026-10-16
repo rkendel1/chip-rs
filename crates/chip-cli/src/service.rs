@@ -1292,7 +1292,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use crate::local_environment::LocalEnvironment;
-    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
     use tokio::sync::Semaphore;
 
     use super::*;

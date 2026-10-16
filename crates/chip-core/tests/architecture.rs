@@ -2,25 +2,25 @@ use std::fs;
 use std::path::Path;
 
 #[test]
-fn fx_core_has_no_chip_core_dependency() {
+fn chip_inference_has_no_chip_core_dependency() {
     let manifest =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../fx-core/Cargo.toml"))
-            .expect("fx-core Cargo.toml should exist");
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../chip-inference/Cargo.toml"))
+            .expect("chip-inference Cargo.toml should exist");
 
     assert!(
         !manifest.contains("chip-core"),
-        "fx-core must not depend on chip-core"
+        "chip-inference must not depend on chip-core"
     );
 }
 
 #[test]
-fn chip_core_depends_on_fx_core() {
+fn chip_core_depends_on_chip_inference() {
     let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
         .expect("chip-core Cargo.toml should exist");
 
     assert!(
-        manifest.contains("fx-core"),
-        "chip-core must depend on fx-core"
+        manifest.contains("chip-inference"),
+        "chip-core must depend on chip-inference"
     );
 }
 

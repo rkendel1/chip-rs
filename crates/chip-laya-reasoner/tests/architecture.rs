@@ -30,8 +30,8 @@ fn code(krate: &str, file: &str) -> String {
 fn chip_core_and_the_other_crates_know_nothing_about_laya_or_candle() {
     for krate in [
         "chip-core",
-        "fx-core",
-        "fx-provider-http",
+        "chip-inference",
+        "chip-legacy-http",
         "chip-compute",
         "chip-wasm-reasoner",
         "chip-reasoning-corpus",
@@ -111,7 +111,7 @@ fn the_reasoner_implementation_reaches_nothing_but_explicit_local_model_loading(
         "File::",
         "chip_compute",
         "fx_provider",
-        "fx_core",
+        "chip_inference",
         "Executor",
         "ModelProvider",
         "hf_hub",

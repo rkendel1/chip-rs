@@ -29,7 +29,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fx_core::ModelResponse;
+use chip_inference::ModelResponse;
 
 use crate::{
     Agent, AgentDecision, AgentError, Assessment, Capability, CapabilityEvent, CapabilityId,

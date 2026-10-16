@@ -44,7 +44,7 @@ fn chip_core_has_no_forbidden_dependencies() {
 }
 
 #[test]
-fn fx_core_has_no_forbidden_dependencies() {
+fn chip_inference_has_no_forbidden_dependencies() {
     let forbidden = [
         "openai",
         "anthropic",
@@ -55,7 +55,7 @@ fn fx_core_has_no_forbidden_dependencies() {
         "reqwest",
         "hyper",
     ];
-    check_crate_for_forbidden_patterns("fx-core", &forbidden);
+    check_crate_for_forbidden_patterns("chip-inference", &forbidden);
 }
 
 #[test]

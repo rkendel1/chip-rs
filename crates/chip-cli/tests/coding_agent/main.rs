@@ -37,7 +37,7 @@ use std::time::Instant;
 
 use acceptance::HumanDecision;
 use chip_core::WorkOutcome;
-use fx_core::ModelProvider;
+use chip_inference::ModelProvider;
 use ladder::{Env, Human, LadderResult, Level, ModelSource, Settings, Status};
 use packet::Target;
 use script::{Reply, ScriptedModel};
@@ -874,7 +874,7 @@ async fn live_provider_path_is_reported_honestly() {
         chip_cli::provider_selection::resolve(&Default::default(), |k| std::env::var(k).ok())
             .unwrap();
     let provider: Arc<dyn ModelProvider> =
-        Arc::new(fx_provider_http::HttpProvider::new(config.clone()).unwrap());
+        Arc::new(chip_legacy_http::HttpProvider::new(config.clone()).unwrap());
     let dir = fixture::materialize("live");
     let Some((pax, _)) = fixture::pax_version(&dir).await else {
         return;

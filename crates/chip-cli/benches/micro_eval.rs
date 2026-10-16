@@ -262,7 +262,7 @@ fn main() {
                     model: config.model.to_string(),
                     endpoint: chip_cli::provider_selection::endpoint_identity(&config.endpoint),
                 };
-                let provider = fx_provider_http::HttpProvider::new(config)
+                let provider = chip_legacy_http::HttpProvider::new(config)
                     .unwrap_or_else(|e| usage(&format!("the shadow provider is unusable ({e})")));
                 let responder = ProviderResponder {
                     provider: Arc::new(provider),

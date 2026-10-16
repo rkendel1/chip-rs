@@ -1,5 +1,5 @@
 [package]
-name = "fx-core"
+name = "chip-inference"
 version = "0.1.0"
 edition = "2024"
 description = "Provider-neutral FX model boundary"

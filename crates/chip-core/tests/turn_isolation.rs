@@ -29,7 +29,7 @@ fn run_turn_touches_no_runtime_apis() {
             "reqwest",
             "command",
             "shell",
-            "fx_provider_http",
+            "chip_legacy_http",
             "chip_compute",
             "openai",
             "anthropic",
@@ -69,7 +69,7 @@ fn chip_core_stays_independent_of_adapters() {
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
     for forbidden in [
         "chip-compute",
-        "fx-provider-http",
+        "chip-legacy-http",
         "reqwest",
         "rusqlite",
         "sqlite",

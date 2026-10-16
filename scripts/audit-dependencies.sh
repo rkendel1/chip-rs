@@ -12,7 +12,7 @@ set -eu
 cd "$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 
 fail=0
-for crate in chip-core chip-remote-env fx-core fx-provider-http chip-project chip-pax; do
+for crate in chip-core chip-remote-env chip-inference chip-legacy-http chip-project chip-pax; do
   if cargo tree -p "$crate" -e normal --locked 2>/dev/null | grep -i -E 'compute|feltdb|appport'; then
     echo "FAIL: $crate depends on an environment provider" >&2
     fail=1
@@ -21,7 +21,7 @@ for crate in chip-core chip-remote-env fx-core fx-provider-http chip-project chi
   fi
 done
 
-if cargo tree -p fx-core -p fx-provider-http -e normal --locked 2>/dev/null | grep -i -E 'zig|npm|node|eve'; then
+if cargo tree -p chip-inference -p chip-legacy-http -e normal --locked 2>/dev/null | grep -i -E 'zig|npm|node|eve'; then
   echo "FAIL: Rust FX depends on the npm/Zig stack" >&2
   fail=1
 else
@@ -33,7 +33,7 @@ fi
 # `durability` crate; none of them, and not the experiment crate itself, may be reachable from a
 # product crate (docs/product/production-boundary.md).
 storage='(chip-session-memory|rusqlite|libsqlite3-sys|redb|durability|feltdb) v[0-9]'
-for crate in chip-core chip-remote-env fx-core fx-provider-http chip-project chip-pax chip-cli; do
+for crate in chip-core chip-remote-env chip-inference chip-legacy-http chip-project chip-pax chip-cli; do
   if cargo tree -p "$crate" -e normal,build --locked 2>/dev/null | grep -E "$storage"; then
     echo "FAIL: $crate reaches an experimental storage engine" >&2
     fail=1
