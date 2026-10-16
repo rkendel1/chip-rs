@@ -1345,7 +1345,7 @@ fn value(args: &[String], at: usize, flag: &str) -> Result<String, i32> {
     }
 }
 
-struct Shared(Arc<dyn ModelProvider>);
+pub(crate) struct Shared(pub(crate) Arc<dyn ModelProvider>);
 
 #[async_trait::async_trait]
 impl ModelProvider for Shared {

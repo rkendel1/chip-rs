@@ -82,3 +82,41 @@ fn legacy_http_consumers_equal_the_ratchet_list() {
         "stale ratchet entries (remove them): {stale:?}"
     );
 }
+
+/// Production code builds its model through `provider_selection`, whose default is FX. Only that
+/// file may construct the legacy provider (test modules and the legacy crate itself excepted), so
+/// a new consumer cannot quietly depend on `chip-legacy-http`.
+#[test]
+fn only_provider_selection_constructs_the_legacy_provider_in_production_code() {
+    let mut files = Vec::new();
+    walk(&root().join("crates"), &mut files);
+    let mut offenders = Vec::new();
+    for f in files {
+        let rel = f
+            .strip_prefix(root())
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let production = rel.ends_with(".rs")
+            && !rel.starts_with("crates/chip-legacy-http/")
+            && !rel.contains("/tests/")
+            && rel != "crates/chip-cli/src/provider_selection.rs";
+        if !production {
+            continue;
+        }
+        let text = fs::read_to_string(&f).unwrap();
+        let before_tests = text.split("#[cfg(test)]").next().unwrap_or_default();
+        if before_tests
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .any(|l| l.contains("HttpProvider::new("))
+        {
+            offenders.push(rel);
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "build the model with provider_selection::build_model_from_process (or build_model); \
+         these construct the legacy provider directly: {offenders:?}"
+    );
+}

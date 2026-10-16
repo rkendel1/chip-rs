@@ -857,7 +857,7 @@ pub async fn test_real_work(args: &[String]) -> i32 {
 /// Keeps what the provider returned, so a successful reply can be saved as a regression
 /// fixture (`--print-reply`). It records only the model's output: no prompt, no credentials.
 struct RecordingProvider {
-    inner: chip_legacy_http::HttpProvider,
+    inner: Arc<dyn chip_inference::ModelProvider>,
     replies: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
@@ -1478,7 +1478,7 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
         }
     };
     let model_name = config.model.to_string();
-    let provider = match chip_legacy_http::HttpProvider::new(config) {
+    let provider = match crate::provider_selection::build_model_from_process(config) {
         Ok(provider) => provider,
         Err(e) => {
             println!("SKIPPED: real model provider unavailable ({e})");

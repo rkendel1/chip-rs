@@ -58,7 +58,6 @@ fn base(args: &[&str], dir: &Path) -> Command {
 
 fn mock(url: &str, mut c: Command) -> Command {
     c.env("CHIP_PROVIDER", "openai-compatible")
-        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "mock-model")
         .env("CHIP_ENDPOINT", url)
         .env("CHIP_API_KEY", "sk-work-secret-never-printed");
@@ -417,7 +416,6 @@ async fn the_command_line_selection_is_the_only_model_called() {
             &d,
         )
         .env("CHIP_PROVIDER", "anthropic")
-        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "env-model")
         .env("CHIP_ENDPOINT", &decoy_url)
         .env("CHIP_API_KEY", "sk-select-secret-never-printed")
@@ -524,7 +522,7 @@ async fn an_unavailable_provider_fails_explicitly_with_no_fallback() {
             &d,
         )
         .env("CHIP_PROVIDER", "openai-compatible")
-        .env("CHIP_EXECUTOR", "legacy")
+        .env("CHIP_EXECUTOR", "legacy") // this case selects Ollama's own API
         .env("CHIP_MODEL", "fallback-model")
         .env("CHIP_ENDPOINT", &url)
         .env("CHIP_OLLAMA_ENDPOINT", &url)
@@ -827,9 +825,11 @@ async fn work_requests_a_json_object_and_asks_for_no_thinking_only_when_configur
     let (out, bodies) = go_bodies(reply, &dir, &[]).await;
     assert_eq!(bodies.len(), 1, "{}", text(&out));
     let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
+    // The fx executor expresses "a JSON object" as a json_schema whose schema is an object.
+    assert_eq!(body["response_format"]["type"], "json_schema");
     assert_eq!(
-        body["response_format"],
-        serde_json::json!({"type": "json_object"})
+        body["response_format"]["json_schema"]["schema"],
+        serde_json::json!({"type": "object"})
     );
     assert!(body.get("chat_template_kwargs").is_none() && body.get("extra_body").is_none());
     // The request field is not prompt text.
@@ -843,7 +843,7 @@ async fn work_requests_a_json_object_and_asks_for_no_thinking_only_when_configur
         body["chat_template_kwargs"],
         serde_json::json!({"enable_thinking": false})
     );
-    assert_eq!(body["response_format"]["type"], "json_object");
+    assert_eq!(body["response_format"]["type"], "json_schema");
 }
 
 /// The decision a model might have meant, wrapped the ways reasoning models wrap it. None of these is
@@ -1060,4 +1060,55 @@ fn a_bad_context_budget_is_a_usage_error_and_runs_nothing() {
     let mut c = mock("http://127.0.0.1:1", base(&["goal"], &dir));
     let out = c.env("CHIP_CONTEXT_BUDGET_BYTES", "many").output().unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+}
+
+/// Selecting Ollama's own API on the command line while the default (fx) executor is in force is an
+/// explicit configuration error. The environment's working model is never called in its place.
+#[tokio::test(flavor = "multi_thread")]
+async fn selecting_ollamas_own_api_under_fx_fails_explicitly_and_calls_nothing() {
+    if !pax_installed() {
+        eprintln!("SKIPPED: PAX is not installed");
+        return;
+    }
+    let dir = fixture("fx-ollama");
+    let working = common::start(
+        200,
+        &completion(r#"{"decision":"block","reason":"x"}"#),
+        Duration::ZERO,
+    )
+    .await;
+    let (url, d) = (working.url.clone(), dir.clone());
+    let out = tokio::task::spawn_blocking(move || {
+        base(
+            &[
+                "--json",
+                "--provider",
+                "ollama",
+                "--model",
+                "qwen3-coder",
+                "--endpoint",
+                "http://127.0.0.1:1",
+                GOAL,
+            ],
+            &d,
+        )
+        .env("CHIP_PROVIDER", "openai-compatible")
+        .env("CHIP_MODEL", "fallback-model")
+        .env("CHIP_ENDPOINT", &url)
+        .output()
+        .unwrap()
+    })
+    .await
+    .unwrap();
+    let t = text(&out);
+    assert_eq!(out.status.code(), Some(3), "{t}");
+    assert!(
+        t.contains("ollama") && t.contains("--executor legacy") && t.contains("nothing was run"),
+        "{t}"
+    );
+    assert_eq!(
+        working.captured.lock().await.len(),
+        0,
+        "a fallback model was called"
+    );
 }

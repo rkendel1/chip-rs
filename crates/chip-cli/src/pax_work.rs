@@ -44,7 +44,7 @@ pub async fn test_pax_work(args: &[String]) -> i32 {
         }
     };
     let (provider_name, model_name) = (config.provider.clone(), config.model.to_string());
-    let provider = match chip_legacy_http::HttpProvider::new(config) {
+    let provider = match crate::provider_selection::build_model_from_process(config) {
         Ok(provider) => provider,
         Err(e) => {
             println!("SKIPPED: real model provider unavailable ({e})");
@@ -64,7 +64,7 @@ pub async fn test_pax_work(args: &[String]) -> i32 {
 
     let replies = Arc::new(Mutex::new(Vec::new()));
     let provider = Recording {
-        inner: provider,
+        inner: crate::software_work::Shared(provider),
         replies: replies.clone(),
     };
     let agent = Agent::with_model(Arc::new(provider), model_name.clone())

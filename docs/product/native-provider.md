@@ -76,8 +76,10 @@ servers, `.../v1/messages` for Anthropic), from which the API root is derived. K
 is set, otherwise from `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (see Credentials above). Anything the native path
 cannot carry is a configuration error that names it, before any request: the `ollama` provider's own API (its
 OpenAI-compatible `/v1` endpoint works), `CHIP_ENABLE_THINKING` on the Anthropic provider (which has no such field; the legacy adapter ignored it there), and an endpoint that does not end in the expected
-path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor (the default is `fx`); the other consumers
-of `chip-legacy-http` (listed in `legacy-http-consumers.txt`) have not moved.
+path. `chip work`, `chip serve` and the plain `chip "<prompt>"` turn use the selected executor (the default is `fx`); every other model-calling command
+(`verify`, `work_demo`, `horizon`, `pax_work`, the micro shadow, `--benchmark-live-reasoner`, the `micro_eval` bench) builds its
+provider through the same selection (`CHIP_EXECUTOR`, default `fx`). Only `provider_selection.rs` constructs the legacy
+provider, and `crates/chip-fx/tests/retirement.rs` fails if anything else does.
 
 ## Parity with `chip-legacy-http`
 
@@ -113,10 +115,12 @@ Differences that are deliberate or known:
 * **Live checks.** Anthropic and LM Studio were run by the owner and reported clean; the raw output and audit have not been added to the repository. **OpenRouter has not been run.** Everything else above is mocked transport; TLS has no test.
 * The **JSON-object mode** difference on real servers (above).
 * **Ollama's native API** (its OpenAI-compatible `/v1` endpoint works).
-* The remaining consumers of the legacy executor: `work_demo`, `horizon`, `verify`, `pax_work`, `micro`,
-  `live_benchmark`, the `--benchmark-live-reasoner` command, and `chip-cli`'s own benches and tests.
-* `chip work` and `chip serve` need a real PAX binary, so their end-to-end run through `fx` was not exercised in the
-  environment this was built in.
+* The legacy executor is now only an explicit option. What still names `chip-legacy-http` is listed in
+  `legacy-http-consumers.txt` (the shared config type, the explicit `legacy` constructor, one unit-test module and the
+  tests). Retiring the crate means moving `HttpProviderConfig` out and porting the Ollama-API tests, or dropping Ollama's
+  own API.
+* The horizon live run needs real Compute before it asks a model; its model request was not exercised end to end here,
+  only its provider selection.
 
 ## Evidence
 

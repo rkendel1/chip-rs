@@ -63,7 +63,6 @@ fn command(dir: &PathBuf, model_url: &str, shim: &PathBuf) -> Command {
     c.arg("serve")
         .current_dir(dir)
         .env("CHIP_PROVIDER", "openai-compatible")
-        .env("CHIP_EXECUTOR", "legacy")
         .env("CHIP_MODEL", "mock-model")
         .env("CHIP_ENDPOINT", model_url)
         .env("CHIP_API_KEY", "sk-serve-secret-never-printed")
@@ -210,14 +209,14 @@ async fn the_service_runs_work_over_http_through_the_same_runtime() {
 fn without_a_model_or_pax_nothing_listens() {
     let dir = project("unavailable");
     let shim = pax_shim("unavailable");
-    let out = command(&dir, "http://127.0.0.1:1", &shim)
+    let out = command(&dir, "http://127.0.0.1:1/v1/chat/completions", &shim)
         .env_remove("CHIP_MODEL")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
     assert!(out.stdout.is_empty(), "it must not claim to be listening");
 
-    let out = command(&dir, "http://127.0.0.1:1", &shim)
+    let out = command(&dir, "http://127.0.0.1:1/v1/chat/completions", &shim)
         .env("PAX_BIN", "/nonexistent/pax")
         .output()
         .unwrap();
@@ -235,7 +234,7 @@ fn concurrent_work_on_the_one_local_directory_is_refused_at_startup() {
     let dir = project("concurrency");
     let shim = pax_shim("concurrency");
     for n in ["2", "8"] {
-        let out = command(&dir, "http://127.0.0.1:1", &shim)
+        let out = command(&dir, "http://127.0.0.1:1/v1/chat/completions", &shim)
             .args(["--port", "0", "--max-concurrent-work", n])
             .output()
             .unwrap();
@@ -256,7 +255,7 @@ fn the_local_environment_defaults_to_one_work_at_a_time_and_says_so() {
     let dir = project("onework");
     let shim = pax_shim("onework");
     let mut server = launch(
-        command(&dir, "http://127.0.0.1:1", &shim),
+        command(&dir, "http://127.0.0.1:1/v1/chat/completions", &shim),
         &["--port", "0", "--max-concurrent-work", "1"],
     );
     let (status, _, m) = http(&server.addr, "GET", "/v1/metrics", None);
@@ -283,7 +282,7 @@ fn usage_errors_are_exit_2() {
         &["--max-queued-work", "-1"],
         &["--max-queued-work"],
     ] {
-        let out = command(&dir, "http://127.0.0.1:1", &shim)
+        let out = command(&dir, "http://127.0.0.1:1/v1/chat/completions", &shim)
             .args(args)
             .output()
             .unwrap();
@@ -338,7 +337,6 @@ async fn real_pax_executes_through_the_service_and_a_failing_run_is_not_success(
             .current_dir(&d)
             .env_remove("PAX_BIN")
             .env("CHIP_PROVIDER", "openai-compatible")
-            .env("CHIP_EXECUTOR", "legacy")
             .env("CHIP_MODEL", "mock-model")
             .env("CHIP_ENDPOINT", &url)
             .env("CHIP_API_KEY", "sk-serve-secret-never-printed");
