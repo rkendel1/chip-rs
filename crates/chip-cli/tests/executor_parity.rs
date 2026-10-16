@@ -469,8 +469,12 @@ async fn what_the_fx_executor_cannot_carry_is_refused_by_name_before_any_request
     let ollama = HttpProviderConfig::new("ollama", "m", format!("{}/api/chat", server.base));
     assert!(refuse(ollama).unwrap().contains("ollama"));
 
-    let thinking = config(PROVIDER_OPENAI_COMPATIBLE, &server.base).with_enable_thinking(true);
-    assert!(refuse(thinking).unwrap().contains("CHIP_ENABLE_THINKING"));
+    let thinking = config(PROVIDER_ANTHROPIC, &server.base).with_enable_thinking(true);
+    let key = env_of(&[("ANTHROPIC_API_KEY", "sk-test")]);
+    let refused = build_model(thinking, ExecutorKind::Fx, &key)
+        .err()
+        .map(|e| e.to_string());
+    assert!(refused.unwrap().contains("CHIP_ENABLE_THINKING"));
 
     let mut odd = config(PROVIDER_OPENAI_COMPATIBLE, &server.base);
     odd.endpoint = format!("{}/custom/path", server.base);
@@ -514,4 +518,47 @@ async fn lm_studio_on_loopback_needs_no_key_in_the_fx_executor() {
     let model = build_model(lm, ExecutorKind::Fx, &env_of(&[])).unwrap();
     assert_eq!(model.complete(request()).await.unwrap().output, "local");
     assert_eq!(header(&server.requests()[0].0, "authorization"), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_thinking_switch_is_the_same_top_level_template_field_in_both_states_and_unset() {
+    for setting in [None, Some(false), Some(true)] {
+        let mut bodies = Vec::new();
+        for executor in [ExecutorKind::Legacy, ExecutorKind::Fx] {
+            let server = Server::start(Answer::Text("ok", 1, 1));
+            let mut config = config(PROVIDER_OPENAI_COMPATIBLE, &server.base);
+            if let Some(enable) = setting {
+                config = config.with_enable_thinking(enable);
+            }
+            call(config, executor).await.unwrap();
+            bodies.push(server.requests()[0].1.clone());
+        }
+        let expected = setting.map(|enable| json!({ "enable_thinking": enable }));
+        for body in &bodies {
+            assert_eq!(
+                body.get("chat_template_kwargs"),
+                expected.as_ref(),
+                "{setting:?}"
+            );
+            assert_eq!(body.get("extra_body"), None);
+            // A request field, never prompt text.
+            assert_eq!(body["messages"], bodies[0]["messages"]);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_thinking_switch_on_anthropic_is_refused_by_the_fx_executor_before_any_request() {
+    let server = Server::start(Answer::Text("never", 1, 1));
+    let config = config(PROVIDER_ANTHROPIC, &server.base).with_enable_thinking(false);
+    // Documented difference: the legacy adapter ignored the switch on Anthropic; the fx executor
+    // names it instead of dropping it.
+    call(config.clone(), ExecutorKind::Legacy).await.unwrap();
+    let before = server.connections();
+    let error = call(config, ExecutorKind::Fx)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("CHIP_ENABLE_THINKING"), "{error}");
+    assert_eq!(server.connections(), before, "nothing was sent");
 }
