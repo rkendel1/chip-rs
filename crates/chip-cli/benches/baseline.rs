@@ -46,7 +46,7 @@ use chip_core::{
     WorkSpec,
 };
 use chip_pax::PaxExecutor;
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 

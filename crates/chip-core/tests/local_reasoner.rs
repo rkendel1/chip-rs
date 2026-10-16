@@ -10,7 +10,7 @@ use chip_core::{
     LocalReasoner, LocalReasoningResult, ReasoningError, ReasoningInput, StateToken,
     TestLocalReasoner, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 #[derive(Default)]
 struct Model(AtomicUsize);

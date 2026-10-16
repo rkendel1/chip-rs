@@ -5,7 +5,7 @@
 //! so the whole suite needs no live model and no real PAX. Mocked means mocked: nothing here
 //! claims a real model or a real PAX test run.
 
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod common;
 
 use std::io::{BufRead, BufReader, Read, Write};

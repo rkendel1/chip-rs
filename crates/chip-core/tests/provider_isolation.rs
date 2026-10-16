@@ -32,27 +32,27 @@ fn dependency_names(manifest: &str) -> Vec<String> {
 }
 
 #[test]
-fn fx_core_does_not_depend_on_chip_core_or_provider() {
-    let deps = dependency_names(&manifest("fx-core"));
+fn chip_inference_does_not_depend_on_chip_core_or_provider() {
+    let deps = dependency_names(&manifest("chip-inference"));
     assert!(!deps.contains(&"chip-core".into()));
-    assert!(!deps.contains(&"fx-provider-http".into()));
+    assert!(!deps.contains(&"chip-legacy-http".into()));
 }
 
 #[test]
-fn fx_provider_http_depends_on_fx_core_but_not_chip_core() {
-    let deps = dependency_names(&manifest("fx-provider-http"));
-    assert!(deps.contains(&"fx-core".into()));
+fn chip_legacy_http_depends_on_chip_inference_but_not_chip_core() {
+    let deps = dependency_names(&manifest("chip-legacy-http"));
+    assert!(deps.contains(&"chip-inference".into()));
     for forbidden in ["chip-core", "chip-cli"] {
         assert!(
             !deps.contains(&forbidden.to_string()),
-            "fx-provider-http must not depend on {forbidden}"
+            "chip-legacy-http must not depend on {forbidden}"
         );
     }
 }
 
 #[test]
-fn fx_provider_http_has_no_vendor_sdk() {
-    let deps = dependency_names(&manifest("fx-provider-http"));
+fn chip_legacy_http_has_no_vendor_sdk() {
+    let deps = dependency_names(&manifest("chip-legacy-http"));
     for sdk in ["openai", "async-openai", "anthropic", "ollama"] {
         assert!(
             !deps.contains(&sdk.to_string()),
@@ -62,16 +62,16 @@ fn fx_provider_http_has_no_vendor_sdk() {
 }
 
 #[test]
-fn chip_core_does_not_depend_on_fx_provider_http() {
+fn chip_core_does_not_depend_on_chip_legacy_http() {
     let manifest = manifest("chip-core");
     assert!(
-        !dependency_names(&manifest).contains(&"fx-provider-http".into()),
-        "chip-core must not depend on fx-provider-http (not even as a dev-dependency)"
+        !dependency_names(&manifest).contains(&"chip-legacy-http".into()),
+        "chip-core must not depend on chip-legacy-http (not even as a dev-dependency)"
     );
     for file in ["src/lib.rs", "tests/integration.rs"] {
         let source = fs::read_to_string(crates_dir().join("chip-core").join(file)).unwrap();
         assert!(
-            !source.contains("fx_provider_http"),
+            !source.contains("chip_legacy_http"),
             "{file} references the HTTP provider"
         );
     }

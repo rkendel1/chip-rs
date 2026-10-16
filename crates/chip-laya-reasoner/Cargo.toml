@@ -25,5 +25,5 @@ tokenizers = { version = "0.21", optional = true, default-features = false, feat
 
 [dev-dependencies]
 chip-reasoning-corpus = { path = "../chip-reasoning-corpus" }
-fx-core = { path = "../fx-core" }
+chip-inference = { path = "../chip-inference" }
 async-trait = "0.1"

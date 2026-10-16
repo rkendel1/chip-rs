@@ -56,8 +56,8 @@ fn sources(name: &str) -> Vec<(String, String)> {
 const PRODUCT: &[&str] = &[
     "chip-core",
     "chip-remote-env",
-    "fx-core",
-    "fx-provider-http",
+    "chip-inference",
+    "chip-legacy-http",
     "chip-project",
     "chip-pax",
 ];
@@ -77,7 +77,7 @@ fn no_product_crate_depends_on_compute_or_its_neighbours() {
 
 #[test]
 fn the_rust_fx_boundary_stays_independent_of_chip_compute_and_the_npm_stack() {
-    for name in ["fx-core", "fx-provider-http"] {
+    for name in ["chip-inference", "chip-legacy-http"] {
         let m = manifest(name);
         let deps = dependency_names(&m);
         assert!(

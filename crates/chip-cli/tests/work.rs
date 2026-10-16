@@ -8,7 +8,7 @@
 //! what an independent run of PAX says about the project afterwards. It does not assert that the
 //! model succeeded: that is the measurement, not the test.
 
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod common;
 
 use std::path::{Path, PathBuf};

@@ -15,8 +15,8 @@ const PRODUCT_CRATES: &[&str] = &[
     "chip_pax",
     "chip_project",
     "chip_remote_env",
-    "fx_core",
-    "fx_provider_http",
+    "chip_inference",
+    "chip_legacy_http",
 ];
 
 /// Types the product path must never name: reasoners, whether test doubles or experiments.

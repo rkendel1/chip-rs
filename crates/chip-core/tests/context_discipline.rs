@@ -18,7 +18,7 @@ use chip_core::{
     TestLocalReasoner, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport, WorkSpec,
     audit_safety, classify_observations, context_report, omissions,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct World {
     state: Mutex<String>,

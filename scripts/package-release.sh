@@ -53,7 +53,7 @@ manifest = {
     # Two layers that are versioned independently and recorded separately.
     "stack": {
         "rust_chip": {k: v[k] for k in ("chip-cli", "chip-core", "chip-remote-env", "chip-project", "chip-pax")},
-        "rust_fx": {k: v[k] for k in ("fx-core", "fx-provider-http")},
+        "rust_fx": {k: v[k] for k in ("chip-inference", "chip-legacy-http")},
     },
     # What a program that hosts or launches this artifact may rely on.
     "interfaces": {

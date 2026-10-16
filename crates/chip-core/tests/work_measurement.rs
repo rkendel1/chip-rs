@@ -14,7 +14,7 @@ use chip_core::{
     WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkMeasurement,
     WorkOutcome, WorkReport, WorkSpec, WorkView, verify_trajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct Fx {
     calls: AtomicUsize,

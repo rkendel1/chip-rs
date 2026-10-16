@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use fx_core::{FxError, Message, MessageRole, ModelProvider, ModelRequest};
+use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest};
 use sha2::{Digest, Sha256};
 
 use crate::software_work::SoftwareWork;
@@ -1247,7 +1247,7 @@ impl ShadowRecord {
 pub fn resolve(
     selection: &crate::provider_selection::Selection,
     env: impl Fn(&str) -> Option<String>,
-) -> Result<fx_provider_http::HttpProviderConfig, FxError> {
+) -> Result<chip_legacy_http::HttpProviderConfig, FxError> {
     crate::provider_selection::resolve(selection, |name| {
         name.strip_prefix("CHIP_")
             .and_then(|rest| env(&format!("CHIP_MICRO_{rest}")))
@@ -1287,7 +1287,7 @@ impl ShadowModel {
             })
             .transpose()?
             .unwrap_or(DEFAULT_TIMEOUT);
-        let provider = fx_provider_http::HttpProvider::new(config)
+        let provider = chip_legacy_http::HttpProvider::new(config)
             .map_err(|e| format!("the shadow model provider is unusable ({e})"))?;
         Ok(Self {
             provider: std::sync::Arc::new(provider),
@@ -1747,12 +1747,12 @@ mod tests {
     struct Fixed(Result<String, ()>);
     #[async_trait::async_trait]
     impl ModelProvider for Fixed {
-        async fn complete(&self, _r: ModelRequest) -> Result<fx_core::ModelResponse, FxError> {
+        async fn complete(&self, _r: ModelRequest) -> Result<chip_inference::ModelResponse, FxError> {
             match &self.0 {
-                Ok(text) => Ok(fx_core::ModelResponse::new(
+                Ok(text) => Ok(chip_inference::ModelResponse::new(
                     "r1",
                     text.clone(),
-                    fx_core::Usage::new(0, 0),
+                    chip_inference::Usage::new(0, 0),
                 )),
                 Err(()) => Err(FxError::Configuration("refused".into())),
             }
@@ -1762,7 +1762,7 @@ mod tests {
     struct Slow;
     #[async_trait::async_trait]
     impl ModelProvider for Slow {
-        async fn complete(&self, _r: ModelRequest) -> Result<fx_core::ModelResponse, FxError> {
+        async fn complete(&self, _r: ModelRequest) -> Result<chip_inference::ModelResponse, FxError> {
             tokio::time::sleep(Duration::from_secs(5)).await;
             unreachable!("the timeout fires first")
         }

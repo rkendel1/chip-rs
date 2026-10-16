@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use fx_core::ModelResponse;
+use chip_inference::ModelResponse;
 
 use crate::{
     Capability, CapabilityAvailability, CapabilityError, CapabilityId, CapabilityRequest,

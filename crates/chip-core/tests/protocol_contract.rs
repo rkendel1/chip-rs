@@ -16,7 +16,7 @@ use chip_core::{
     TestLocalReasoner, WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits,
     WorkOutcome, WorkReport, WorkSpec, WorkView, audit_safety,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 fn descriptor(id: &str, inputs: &[(&str, bool)]) -> CapabilityDescriptor {
     let mut d = CapabilityDescriptor::new(CapabilityId::new(id).unwrap(), id, format!("does {id}"));

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
-use fx_core::ModelResponse;
+use chip_inference::ModelResponse;
 
 use crate::{Capability, CapabilityError, CapabilityId, ExecutionId};
 

@@ -30,7 +30,7 @@ fn mentions_compute(names: &[String]) -> Vec<&String> {
 
 #[test]
 fn core_crates_do_not_depend_on_compute() {
-    for krate in ["chip-core", "fx-core", "fx-provider-http"] {
+    for krate in ["chip-core", "chip-inference", "chip-legacy-http"] {
         let found = deps(krate);
         assert!(
             mentions_compute(&found).is_empty(),
@@ -43,7 +43,7 @@ fn core_crates_do_not_depend_on_compute() {
 fn chip_compute_depends_on_chip_core_only_one_way() {
     let found = deps("chip-compute");
     assert!(found.contains(&"chip-core".to_string()));
-    for forbidden in ["chip-cli", "fx-provider-http"] {
+    for forbidden in ["chip-cli", "chip-legacy-http"] {
         assert!(
             !found.contains(&forbidden.to_string()),
             "chip-compute must not depend on {forbidden}"
@@ -61,8 +61,8 @@ fn chip_compute_depends_on_chip_core_only_one_way() {
 #[test]
 fn chip_core_does_not_depend_on_chip_compute() {
     assert!(!deps("chip-core").contains(&"chip-compute".to_string()));
-    assert!(!deps("fx-core").contains(&"chip-compute".to_string()));
-    assert!(!deps("fx-provider-http").contains(&"chip-compute".to_string()));
+    assert!(!deps("chip-inference").contains(&"chip-compute".to_string()));
+    assert!(!deps("chip-legacy-http").contains(&"chip-compute".to_string()));
 }
 
 #[test]

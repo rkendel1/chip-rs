@@ -5,7 +5,7 @@
 //! The one test against an actual provider is opt-in (`CHIP_TEST_REAL_MODEL=1`) and skips
 //! otherwise.
 
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod common;
 
 use std::process::{Command, Output};

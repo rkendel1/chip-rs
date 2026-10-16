@@ -8,7 +8,7 @@ use chip_core::{
     Agent, ExecutionError, ExecutionEvent, ExecutionId, ExecutionRequest, ExecutionResult,
     ExecutionStatus, Executor, TestExecutor, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct TestModel;
 

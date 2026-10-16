@@ -28,7 +28,7 @@ pub use environment::{
 };
 pub use evidence::{EvidenceError, EvidenceKey, EvidenceLookup, EvidenceStats, StateToken};
 pub use execution_evidence::ExecutionEvidence;
-use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use model_decision::{ModelDecisionBoundary, WORK_DECISION_SCHEMA};
 pub use observation::{
     ExecutionObserver, Observation, ObservationError, ObservationKind, Observer,
@@ -1096,7 +1096,7 @@ mod tests {
     use super::{Agent, Turn};
     use std::sync::Arc;
 
-    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
     #[derive(Default)]
     struct TestProvider;

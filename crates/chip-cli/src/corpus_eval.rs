@@ -208,7 +208,7 @@ mod tests {
     };
     use chip_core::{ExecutionError, ExecutionRequest, ExecutionResult, ExecutionStatus};
     use chip_reasoning_corpus::Verdict;
-    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
     use super::*;
 

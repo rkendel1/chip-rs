@@ -4,7 +4,7 @@
 //! `HttpProviderConfig::endpoint` is the server's base URL (`http://127.0.0.1:11434`); the chat
 //! path is appended unless it is already there. No API key is required, and none is ever sent.
 
-use fx_core::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, Message, MessageRole, ModelRequest, ModelResponse, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::{HttpProviderConfig, error_detail, transport_error};

@@ -17,7 +17,7 @@ use chip_core::{
     WorkDecision, WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkMeasurement,
     WorkOutcome, WorkReport, WorkSpec, WorkView, verify_trajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const CAPABILITY: &str = "compute.selftest";
 
@@ -857,16 +857,16 @@ pub async fn test_real_work(args: &[String]) -> i32 {
 /// Keeps what the provider returned, so a successful reply can be saved as a regression
 /// fixture (`--print-reply`). It records only the model's output: no prompt, no credentials.
 struct RecordingProvider {
-    inner: fx_provider_http::HttpProvider,
+    inner: chip_legacy_http::HttpProvider,
     replies: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 #[async_trait::async_trait]
-impl fx_core::ModelProvider for RecordingProvider {
+impl chip_inference::ModelProvider for RecordingProvider {
     async fn complete(
         &self,
-        request: fx_core::ModelRequest,
-    ) -> Result<fx_core::ModelResponse, fx_core::FxError> {
+        request: chip_inference::ModelRequest,
+    ) -> Result<chip_inference::ModelResponse, chip_inference::FxError> {
         let response = self.inner.complete(request).await?;
         self.replies.lock().unwrap().push(response.output.clone());
         Ok(response)
@@ -1478,7 +1478,7 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
         }
     };
     let model_name = config.model.to_string();
-    let provider = match fx_provider_http::HttpProvider::new(config) {
+    let provider = match chip_legacy_http::HttpProvider::new(config) {
         Ok(provider) => provider,
         Err(e) => {
             println!("SKIPPED: real model provider unavailable ({e})");

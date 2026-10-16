@@ -10,7 +10,7 @@ use chip_core::{
     DecisionError, DecisionInput, ExecutionError, ExecutionId, ExecutionRequest, ExecutionResult,
     Executor, InputValue, ScriptedDecision, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 struct Model(&'static str);
 

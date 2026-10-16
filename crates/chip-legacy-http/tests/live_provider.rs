@@ -1,10 +1,10 @@
 //! Live test against a real endpoint. Skipped unless configured:
 //!   FX_PROVIDER_API_KEY, FX_PROVIDER_ENDPOINT, FX_PROVIDER_MODEL
 //! (optional FX_PROVIDER_NAME, default "openai-compatible").
-//! Run: cargo test -p fx-provider-http --test live_provider -- --nocapture
+//! Run: cargo test -p chip-legacy-http --test live_provider -- --nocapture
 
-use fx_core::{Message, MessageRole, ModelProvider, ModelRequest, Secret};
-use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, Secret};
+use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
 #[tokio::test]
 async fn live_provider_returns_output() {

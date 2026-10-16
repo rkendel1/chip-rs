@@ -10,7 +10,7 @@ mod openai_compatible;
 use std::fmt;
 use std::time::Duration;
 
-use fx_core::{FxError, ModelId, ModelProvider, ModelRequest, ModelResponse, Secret};
+use chip_inference::{FxError, ModelId, ModelProvider, ModelRequest, ModelResponse, Secret};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 

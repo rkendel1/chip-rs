@@ -79,7 +79,7 @@ fn chip_core_manifest_stays_neutral() {
     let manifest = read("Cargo.toml").to_lowercase();
     for forbidden in [
         "chip-compute",
-        "fx-provider-http",
+        "chip-legacy-http",
         "sqlite",
         "feltdb",
         "wasm",

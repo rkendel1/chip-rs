@@ -295,7 +295,9 @@ dependencies = [
  "chip-core",
  "chip-decision-corpus",
  "chip-graph",
+ "chip-inference",
  "chip-laya-reasoner",
+ "chip-legacy-http",
  "chip-local-decision",
  "chip-local-ml",
  "chip-pax",
@@ -305,8 +307,6 @@ dependencies = [
  "chip-wasm-decision",
  "chip-wasm-decision-host",
  "chip-wasm-reasoner",
- "fx-core",
- "fx-provider-http",
  "serde_json",
  "sha2",
  "tokio",
@@ -318,7 +318,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chip-core",
- "fx-core",
+ "chip-inference",
  "serde_json",
  "sha2",
  "tokio",
@@ -329,7 +329,7 @@ name = "chip-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "fx-core",
+ "chip-inference",
  "serde_json",
  "sha2",
  "tokio",
@@ -341,6 +341,18 @@ version = "0.1.0"
 dependencies = [
  "chip-core",
  "sha2",
+]
+
+[[package]]
+name = "chip-fx"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-core",
+ "chip-inference",
+ "fx-core",
+ "fx-single-attempt",
+ "tokio",
 ]
 
 [[package]]
@@ -356,6 +368,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chip-inference"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "tokio",
+]
+
+[[package]]
 name = "chip-laya-reasoner"
 version = "0.1.0"
 dependencies = [
@@ -364,12 +384,24 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "chip-core",
+ "chip-inference",
  "chip-reasoning-corpus",
- "fx-core",
  "indexmap",
  "laya-decision",
  "serde_json",
  "tokenizers 0.21.4",
+]
+
+[[package]]
+name = "chip-legacy-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chip-inference",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -399,8 +431,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chip-core",
+ "chip-inference",
  "chip-reasoning-corpus",
- "fx-core",
  "rust-ml-runtime",
  "serde_json",
 ]
@@ -411,7 +443,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chip-core",
- "fx-core",
+ "chip-inference",
  "serde",
  "serde_json",
  "tokio",
@@ -482,7 +514,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chip-core",
- "fx-core",
+ "chip-inference",
  "tokio",
  "wasmi",
  "wat",
@@ -1122,21 +1154,18 @@ dependencies = [
 [[package]]
 name = "fx-core"
 version = "0.1.0"
+source = "git+https://github.com/rkendel1/fx?rev=367da42#367da424fd9db3b39907d92fd72f630c9cf55cd2"
 dependencies = [
- "async-trait",
- "tokio",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
-name = "fx-provider-http"
+name = "fx-single-attempt"
 version = "0.1.0"
+source = "git+https://github.com/rkendel1/fx?rev=367da42#367da424fd9db3b39907d92fd72f630c9cf55cd2"
 dependencies = [
- "async-trait",
  "fx-core",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1368,9 +1397,6 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-dependencies = [
- "foldhash 0.2.0",
-]
 
 [[package]]
 name = "hashlink"
@@ -2412,7 +2438,7 @@ version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
- "rand_chacha 0.9.0",
+ "rand_chacha",
  "rand_core 0.9.5",
 ]
 
@@ -2880,10 +2906,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash 0.2.0",
  "indexmap",
  "itoa",
  "memchr",
@@ -3586,7 +3613,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
 dependencies = [
  "base64 0.23.1",
- "der 0.8.2",
+ "der",
  "log",
  "native-tls",
  "percent-encoding",

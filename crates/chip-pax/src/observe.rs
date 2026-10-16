@@ -1484,21 +1484,21 @@ mod tests {
         for (text, expected) in [
             ("file:src/lib.rs", Scope::File("src/lib.rs".into())),
             (
-                "path:crates/fx-core/src",
-                Scope::Path("crates/fx-core/src".into()),
+                "path:crates/chip-inference/src",
+                Scope::Path("crates/chip-inference/src".into()),
             ),
             ("path:src", Scope::Path("src".into())),
             (
-                "crate:fx-core",
+                "crate:chip-inference",
                 Scope::Crate {
-                    package: "fx-core".into(),
+                    package: "chip-inference".into(),
                     target: None,
                 },
             ),
             (
-                "crate:fx-core/lib",
+                "crate:chip-inference/lib",
                 Scope::Crate {
-                    package: "fx-core".into(),
+                    package: "chip-inference".into(),
                     target: Some(Target::Lib),
                 },
             ),
@@ -1523,17 +1523,17 @@ mod tests {
                 },
             ),
             (
-                "module:fx-core/lib::crate",
+                "module:chip-inference/lib::crate",
                 Scope::Module {
-                    package: "fx-core".into(),
+                    package: "chip-inference".into(),
                     target: Target::Lib,
                     modules: vec![],
                 },
             ),
             (
-                "module:fx-core/lib::crate::a::b",
+                "module:chip-inference/lib::crate::a::b",
                 Scope::Module {
-                    package: "fx-core".into(),
+                    package: "chip-inference".into(),
                     target: Target::Lib,
                     modules: vec!["a".into(), "b".into()],
                 },
@@ -2110,7 +2110,7 @@ mod tests {
     fn arguments_are_fixed_and_the_scope_is_one_discrete_argument() {
         let o = PaxObserve::new(PaxExecutor::new("/work"));
         let args: Vec<String> = o
-            .invocation(&scope("crate:fx-core"))
+            .invocation(&scope("crate:chip-inference"))
             .into_iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
@@ -2122,7 +2122,7 @@ mod tests {
                 "--json",
                 "observe",
                 "--scope",
-                "crate:fx-core",
+                "crate:chip-inference",
                 "--max-files",
                 "50",
                 "--max-bytes",

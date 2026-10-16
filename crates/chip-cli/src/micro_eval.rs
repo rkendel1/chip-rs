@@ -430,7 +430,7 @@ pub trait Responder: Send + Sync {
 
 /// A real model behind FX, asked exactly as shadow mode asks it.
 pub struct ProviderResponder {
-    pub provider: std::sync::Arc<dyn fx_core::ModelProvider>,
+    pub provider: std::sync::Arc<dyn chip_inference::ModelProvider>,
     pub model: String,
     pub timeout: Duration,
 }

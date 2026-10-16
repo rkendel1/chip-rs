@@ -15,7 +15,7 @@ use chip_core::{
     WorkDecisionBoundary, WorkEvent, WorkGoal, WorkId, WorkLimits, WorkOutcome, WorkReport,
     WorkSpec, WorkView,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const SECRET: &str = "sk-live-secret-do-not-leak";
 

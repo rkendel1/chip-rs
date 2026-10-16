@@ -8,7 +8,7 @@ use chip_core::{
     CapabilityId, CapabilityProvider, ExecutionError, ExecutionId, ExecutionRequest,
     ExecutionResult, Executor, TestExecutor,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 struct NoModel;
 

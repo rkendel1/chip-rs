@@ -24,7 +24,7 @@ use chip_core::{
     WorkOutcome, WorkReport, WorkSpec, WorkUtilityMeasurement, WorkView, audit_safety,
     measure_utility, verify_trajectory,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 use sha2::{Digest, Sha256};
 
 use crate::verify::Recording;
@@ -1118,7 +1118,7 @@ pub async fn live(args: &[String]) -> i32 {
         }
     };
     let (provider_name, model_name) = (config.provider.clone(), config.model.to_string());
-    let provider = match fx_provider_http::HttpProvider::new(config) {
+    let provider = match chip_legacy_http::HttpProvider::new(config) {
         Ok(provider) => provider,
         Err(e) => {
             println!("SKIPPED: real model provider unavailable ({e})");

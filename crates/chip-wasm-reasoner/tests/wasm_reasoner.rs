@@ -193,7 +193,7 @@ fn the_module_can_drive_chip_through_the_core_trait() {
 #[tokio::test]
 async fn an_agent_consults_the_wasm_reasoner_only_after_evidence() {
     use chip_core::{Agent, Assessment, CapabilityRequest, ExecutionId, StateToken};
-    use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
     use std::sync::Arc;
 
     struct NoModel;

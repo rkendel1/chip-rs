@@ -5,8 +5,8 @@ mod common;
 use std::time::Duration;
 
 use common::{OK_BODY, start};
-use fx_core::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
-use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, Secret};
+use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
 const FAKE_KEY: &str = "fake-key-for-tests";
 

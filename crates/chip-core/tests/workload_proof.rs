@@ -12,7 +12,7 @@ use chip_core::{
     ExecutionResult, ExecutionStatus, Executor, Observation, ObservationKind, ScriptedDecision,
     Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const CAPABILITY: &str = "compute.selftest";
 

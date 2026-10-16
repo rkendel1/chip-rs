@@ -24,7 +24,7 @@ use chip_core::{
     WorkEvent, WorkId, WorkLimits, WorkOutcome,
 };
 use chip_pax::PaxExecutor;
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 const OLD_LIB: &str = "pub fn len(s: &str) -> usize {\n    s.len()\n}\n";
 const RIGHT: &str = "pub fn len(s: &str) -> usize {\n    s.len()\n}\n\npub fn canonical(s: &str) -> String {\n    let mut p: Vec<&str> = s.split('&').collect();\n    p.sort();\n    p.join(\"&\")\n}\n";

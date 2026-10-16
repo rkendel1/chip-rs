@@ -11,7 +11,7 @@ use chip_core::{
     ExecutionResult, ExecutionStatus, Executor, Observation, ObservationKind, Observer,
     ScriptedDecision, TestExecutor, Turn,
 };
-use fx_core::{FxError, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 #[derive(Default)]
 struct Model(Mutex<Vec<ModelRequest>>);

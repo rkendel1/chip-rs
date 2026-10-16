@@ -44,7 +44,7 @@ fn the_host_grants_no_host_functions() {
         "std::process",
         "std::env",
         "tokio",
-        "fx_core",
+        "chip_inference",
         "chip_compute",
     ] {
         // Allowed only inside the explanatory doc comments.

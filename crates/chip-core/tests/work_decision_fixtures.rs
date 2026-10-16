@@ -7,7 +7,7 @@ use chip_core::{
     Capability, CapabilityAvailability, CapabilityDescriptor, CapabilityId, ModelDecisionBoundary,
     WorkDecision, WorkDecisionBoundary,
 };
-use fx_core::{ModelResponse, Usage};
+use chip_inference::{ModelResponse, Usage};
 
 #[test]
 fn every_fixture_is_read_as_its_name_says() {

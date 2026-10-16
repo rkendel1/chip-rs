@@ -26,7 +26,7 @@ use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxTestPassed, ResolvedPax,
     parse_execution_result,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 
 /// Keeps what the model replied, for the report. Replies only: no prompt, no credentials.
 pub(crate) struct Recording<P> {
@@ -336,7 +336,7 @@ pub async fn verify(args: &[String]) -> i32 {
         }
     };
     let model_name = config.model.to_string();
-    let provider = match fx_provider_http::HttpProvider::new(config) {
+    let provider = match chip_legacy_http::HttpProvider::new(config) {
         Ok(provider) => provider,
         Err(e) => {
             eprintln!("error: the model provider is unusable ({e}); nothing was run");
@@ -397,7 +397,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use chip_core::ObservationKind;
-    use fx_core::{FxError, ModelRequest, ModelResponse, Usage};
+    use chip_inference::{FxError, ModelRequest, ModelResponse, Usage};
 
     use super::*;
 

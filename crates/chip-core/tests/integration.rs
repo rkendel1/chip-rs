@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use chip_core::{Agent, Turn, TurnResult};
-use fx_core::{FxError, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, MessageRole, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 #[derive(Default)]
 struct IntegrationTestProvider;

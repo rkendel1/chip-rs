@@ -62,7 +62,7 @@ fn chip_core_manifest_stays_neutral() {
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
     for forbidden in [
         "chip-compute",
-        "fx-provider-http",
+        "chip-legacy-http",
         "reqwest",
         "tokio-process",
     ] {

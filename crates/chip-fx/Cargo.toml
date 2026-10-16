@@ -1,0 +1,19 @@
+[package]
+name = "chip-fx"
+version = "0.1.0"
+edition = "2024"
+description = "Chip's model port served by the authoritative FX inference executor (rkendel1/fx)"
+license = "MIT"
+
+[dependencies]
+chip-inference = { path = "../chip-inference" }
+# The authoritative FX. One implementation of request validation, single-attempt
+# execution, normalization, delivery certainty and terminal outcomes. Pinned by commit.
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "367da42" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "367da42" }
+async-trait = "0.1"
+serde_json = "1"
+
+[dev-dependencies]
+chip-core = { path = "../chip-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

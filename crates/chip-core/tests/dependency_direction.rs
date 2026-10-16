@@ -1,6 +1,6 @@
 //! Test enforcing the dependency direction:
-//! chip-core MAY depend on fx-core
-//! fx-core MUST NOT depend on chip-core
+//! chip-core MAY depend on chip-inference
+//! chip-inference MUST NOT depend on chip-core
 
 use std::fs;
 use std::path::PathBuf;
@@ -15,24 +15,24 @@ fn get_workspace_root() -> PathBuf {
 }
 
 #[test]
-fn fx_core_does_not_depend_on_chip_core() {
-    let fx_manifest_path = get_workspace_root().join("crates/fx-core/Cargo.toml");
-    let manifest = fs::read_to_string(fx_manifest_path).expect("fx-core Cargo.toml must exist");
+fn chip_inference_does_not_depend_on_chip_core() {
+    let fx_manifest_path = get_workspace_root().join("crates/chip-inference/Cargo.toml");
+    let manifest = fs::read_to_string(fx_manifest_path).expect("chip-inference Cargo.toml must exist");
 
     assert!(
         !manifest.contains("chip-core"),
-        "fx-core must not depend on chip-core"
+        "chip-inference must not depend on chip-core"
     );
 }
 
 #[test]
-fn chip_core_depends_on_fx_core() {
+fn chip_core_depends_on_chip_inference() {
     let chip_manifest_path = get_workspace_root().join("crates/chip-core/Cargo.toml");
     let manifest = fs::read_to_string(chip_manifest_path).expect("chip-core Cargo.toml must exist");
 
     assert!(
-        manifest.contains("fx-core"),
-        "chip-core must depend on fx-core"
+        manifest.contains("chip-inference"),
+        "chip-core must depend on chip-inference"
     );
 }
 

@@ -28,7 +28,7 @@ use chip_pax::{
     PAX_TEST_CAPABILITY, PaxExecutionResult, PaxExecutor, PaxResultError, PaxStatus, PaxTestPassed,
     PaxUnavailable, RESULT_SCHEMA, parse_execution_result, render_observation,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 // ---- fixtures ---------------------------------------------------------------------------------
 

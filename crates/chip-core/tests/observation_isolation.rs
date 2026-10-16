@@ -30,7 +30,7 @@ fn observation_module_references_no_runtime_or_system_apis() {
         "reqwest",
         "openai",
         "anthropic",
-        "fx_core",
+        "chip_inference",
         "fx_provider",
         "modelprovider",
         "executor",
@@ -76,7 +76,7 @@ fn observer_is_synchronous_and_the_agent_does_not_observe_inside_run_turn() {
 fn no_persistence_or_adapter_dependencies() {
     let manifest =
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
-    for forbidden in ["chip-compute", "fx-provider-http", "sqlite", "feltdb"] {
+    for forbidden in ["chip-compute", "chip-legacy-http", "sqlite", "feltdb"] {
         assert!(!manifest.to_lowercase().contains(forbidden));
     }
 }

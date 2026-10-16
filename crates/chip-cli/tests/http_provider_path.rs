@@ -1,15 +1,15 @@
 //! First complete path: Turn → Agent → ModelProvider → HttpProvider → mock HTTP → TurnResult.
 //! Lives in chip-cli (the composition root) so chip-core never links the HTTP provider.
 
-#[path = "../../fx-provider-http/tests/common/mod.rs"]
+#[path = "../../chip-legacy-http/tests/common/mod.rs"]
 mod common;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chip_core::{Agent, AgentError, AgentEvent, Turn};
-use fx_core::Secret;
-use fx_provider_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
+use chip_inference::Secret;
+use chip_legacy_http::{HttpProvider, HttpProviderConfig, PROVIDER_OPENAI_COMPATIBLE};
 
 const FAKE_KEY: &str = "fake-key-for-tests";
 

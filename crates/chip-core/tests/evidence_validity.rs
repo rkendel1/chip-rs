@@ -9,7 +9,7 @@ use chip_core::{
     ExecutionId, ExecutionObserver, ExecutionRequest, ExecutionResult, ExecutionStatus, Executor,
     InputValue, ObservationKind, StateToken, Turn,
 };
-use fx_core::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
 
 #[derive(Default)]
 struct Model(AtomicUsize);
