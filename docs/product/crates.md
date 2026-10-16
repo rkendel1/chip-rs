@@ -141,7 +141,7 @@ member must appear exactly once.
 | `chip-inference` | PRODUCT | KEEP | L2 | L4 |
 | `chip-fx` | INTEGRATION | KEEP | L3 | - |
 | `chip-wasm-host` | INTEGRATION | KEEP | L3 | - |
-| `chip-legacy-http` | INTEGRATION | KEEP (retirement blocked, see authoritative-fx.md) | L2 | L3 |
+| `chip-legacy-http` | INTEGRATION | KEEP | L2 | L3 |
 | `chip-pax` | INTEGRATION | KEEP | L3 | - |
 | `chip-remote-env` | INTEGRATION | KEEP | L3 | L4 |
 | `chip-compute` | INTEGRATION | FROZEN | L2 | L4 |
