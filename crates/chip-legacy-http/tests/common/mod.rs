@@ -85,6 +85,7 @@ pub async fn start(status: u16, body: &str, delay: Duration) -> MockServer {
                     .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
                     .collect();
                 let req_body = String::from_utf8_lossy(&buf[head_end..]).to_string();
+                let wants_stream = req_body.contains("\"stream\":true");
                 store.lock().await.push(Captured {
                     request_line,
                     headers,
@@ -92,10 +93,25 @@ pub async fn start(status: u16, body: &str, delay: Duration) -> MockServer {
                 });
 
                 tokio::time::sleep(delay).await;
-                let response = format!(
-                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
+                // The FX executor streams (`"stream":true`); the legacy adapters do not. A
+                // successful OpenAI-style JSON body is re-served as an event stream with the same
+                // content and usage, so one scripted reply serves both executors. Anything else
+                // (errors, other shapes) is sent as written.
+                let streamed = if status == 200 && wants_stream {
+                    as_event_stream(&body)
+                } else {
+                    None
+                };
+                let response = match streamed {
+                    Some(events) => format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{events}",
+                        events.len()
+                    ),
+                    None => format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    ),
+                };
                 let _ = socket.write_all(response.as_bytes()).await;
                 let _ = socket.shutdown().await;
             });
@@ -106,3 +122,28 @@ pub async fn start(status: u16, body: &str, delay: Duration) -> MockServer {
 }
 
 pub const OK_BODY: &str = r#"{"id":"resp-1","choices":[{"message":{"role":"assistant","content":"Hello from the mock."}}],"usage":{"prompt_tokens":3,"completion_tokens":5}}"#;
+
+/// An OpenAI chat-completions JSON body as the event stream the FX executor reads.
+pub fn as_event_stream(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let content = value["choices"][0]["message"]["content"].as_str()?;
+    let mut out = String::new();
+    let mut event = |json: serde_json::Value| out.push_str(&format!("data: {json}\n\n"));
+    let id = value["id"].clone();
+    event(
+        serde_json::json!({"id": id, "model": value["model"], "choices": [{"index": 0, "delta": {"role": "assistant", "content": content}}]}),
+    );
+    event(
+        serde_json::json!({"id": id, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+    );
+    if let (Some(input), Some(output)) = (
+        value["usage"]["prompt_tokens"].as_u64(),
+        value["usage"]["completion_tokens"].as_u64(),
+    ) {
+        event(
+            serde_json::json!({"id": id, "choices": [], "usage": {"prompt_tokens": input, "completion_tokens": output}}),
+        );
+    }
+    out.push_str("data: [DONE]\n\n");
+    Some(out)
+}

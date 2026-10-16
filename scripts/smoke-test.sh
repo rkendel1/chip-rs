@@ -64,18 +64,31 @@ calls = []
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("content-length", 0)))
+        request = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
         calls.append(1)
         if len(calls) == 1:
             reply = {"decision": "request_capability", "capability": "project.read",
                      "inputs": {"path": "src/lib.rs"}}
         else:
             reply = {"decision": "block", "reason": "smoke test complete"}
-        body = json.dumps({"id": "smoke-%d" % len(calls),
-                           "choices": [{"message": {"role": "assistant", "content": json.dumps(reply)}}],
-                           "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+        content = json.dumps(reply)
+        rid = "smoke-%d" % len(calls)
+        if request.get("stream"):
+            # The default (FX) executor streams the reply as server-sent events.
+            chunks = [
+                {"id": rid, "choices": [{"index": 0, "delta": {"role": "assistant", "content": content}}]},
+                {"id": rid, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                {"id": rid, "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+            ]
+            body = ("".join("data: %s\n\n" % json.dumps(c) for c in chunks) + "data: [DONE]\n\n").encode()
+            kind = "text/event-stream"
+        else:
+            body = json.dumps({"id": rid,
+                               "choices": [{"message": {"role": "assistant", "content": content}}],
+                               "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+            kind = "application/json"
         self.send_response(200)
-        self.send_header("content-type", "application/json")
+        self.send_header("content-type", kind)
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
