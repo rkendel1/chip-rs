@@ -108,6 +108,12 @@ pub struct NativeSelection {
     /// private LAN address, for keyless OpenAI-compatible inference such as LM Studio on another
     /// machine. Off by default, and refused whenever any credential or extra header is present.
     pub allow_insecure_lan_http: bool,
+    /// PEM text of the root certificates to trust for `https` instead of the bundled public roots
+    /// (an endpoint behind a TLS-intercepting proxy or signed by a private CA). The host reads it,
+    /// for example from the file `SSL_CERT_FILE` names; this crate never reads a file or the
+    /// environment. `None` keeps the bundled roots. A bundle with no valid certificate is refused
+    /// when the provider is built.
+    pub root_certificates_pem: Option<Vec<u8>>,
 }
 
 impl NativeSelection {
@@ -123,6 +129,7 @@ impl NativeSelection {
             json_object_output: false,
             template_thinking: None,
             allow_insecure_lan_http: false,
+            root_certificates_pem: None,
         }
     }
 }
@@ -238,6 +245,7 @@ impl NativeSettings {
             json_object_output: selection.json_object_output,
             template_thinking: selection.template_thinking,
             allow_insecure_lan_http: selection.allow_insecure_lan_http,
+            root_certificates_pem: selection.root_certificates_pem.clone(),
             id_seed,
         })
     }

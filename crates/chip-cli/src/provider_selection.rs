@@ -118,11 +118,16 @@ pub fn build_model_from_process(config: ProviderConfig) -> Result<Arc<dyn ModelP
 /// Like [`build_model_from_process`], for a secondary model (the micro shadow) that must never use
 /// the work model's credentials: the provider's own key variables (`ANTHROPIC_API_KEY`,
 /// `OPENAI_API_KEY`) are hidden, so the key is only what the caller put in `config`. The executor
-/// and the LAN opt-in still come from the process environment.
+/// and the LAN opt-in still come from the process environment, as does the CA bundle (public
+/// certificates are not a credential).
 pub fn build_model_isolated(config: ProviderConfig) -> Result<Arc<dyn ModelProvider>, FxError> {
     let process = |name: &str| std::env::var(name).ok();
     let executor = ExecutorKind::choose(None, &process)?;
-    let env = |name: &str| (name == LAN_HTTP_VARIABLE).then(|| process(name)).flatten();
+    let env = |name: &str| {
+        (name == LAN_HTTP_VARIABLE || name == CA_BUNDLE_VARIABLE)
+            .then(|| process(name))
+            .flatten()
+    };
     build_model(config, executor, &env)
 }
 
@@ -179,6 +184,7 @@ fn fx_model(
     // no such field, it is refused by name instead of dropped.
     selection.template_thinking = config.enable_thinking;
     selection.allow_insecure_lan_http = lan_http_opt_in(env)?;
+    selection.root_certificates_pem = ca_bundle(env)?;
     // The key Chip already resolved from CHIP_API_KEY wins; otherwise the provider's own variable.
     let chip_key = config.api_key.as_ref().map(|k| k.expose().to_string());
     if chip_key.is_some() {
@@ -199,6 +205,29 @@ fn fx_model(
         max_tokens: config.max_tokens,
         temperature: config.temperature,
     }))
+}
+
+/// The environment variable that names a PEM file of root certificates to trust for `https`.
+pub const CA_BUNDLE_VARIABLE: &str = "SSL_CERT_FILE";
+
+/// The CA bundle `SSL_CERT_FILE` names, read here because the native provider never touches the
+/// filesystem or the environment. Unset or empty keeps the bundled public roots. When it is set it
+/// replaces them for every `https` endpoint (as `curl --cacert` does), so a file that cannot be read
+/// is an error naming the variable, never a silent fall back to the public roots. A file with no valid
+/// certificate is refused when the provider is built.
+fn ca_bundle(env: &dyn Fn(&str) -> Option<String>) -> Result<Option<Vec<u8>>, FxError> {
+    let Some(path) = env(CA_BUNDLE_VARIABLE)
+        .map(|p| p.trim().to_owned())
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(None);
+    };
+    std::fs::read(&path).map(Some).map_err(|error| {
+        FxError::Configuration(format!(
+            "{CA_BUNDLE_VARIABLE}={path} cannot be read ({error}); unset it to use the bundled public \
+             roots, or point it at a PEM file of root certificates; nothing was run"
+        ))
+    })
 }
 
 /// `CHIP_ALLOW_INSECURE_LAN_HTTP`: `1` opts in, unset or `0` does not, anything else is an error
@@ -396,5 +425,63 @@ mod tests {
             message.contains("openai-compatible") && message.contains("11434/v1/chat/completions"),
             "{message}"
         );
+    }
+
+    const TEST_ROOT: &str = "-----BEGIN CERTIFICATE-----\nMIIBpTCCAUugAwIBAgIUGxuR7UMf4wCGUFknHqHQLWt5m8UwCgYIKoZIzj0EAwIw\nJzElMCMGA1UEAwwcZngtbmF0aXZlLXByb3ZpZGVyIHRlc3Qgcm9vdDAgFw0yNjEw\nMTYyMzMzMDdaGA8yMTI2MDkyMjIzMzMwN1owJzElMCMGA1UEAwwcZngtbmF0aXZl\nLXByb3ZpZGVyIHRlc3Qgcm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD/G\nkpsDC8dks62rbWrLyQOKfPkRE8bJO5zo34h/jpjW6+Bk4E0NxvHG+/Pk5XnE0Kl4\n6ZLRPS23H2e67YN8ey+jUzBRMB0GA1UdDgQWBBSGpTf0iUNc8ZX9GGBfjFmYkX+U\n0DAfBgNVHSMEGDAWgBSGpTf0iUNc8ZX9GGBfjFmYkX+U0DAPBgNVHRMBAf8EBTAD\nAQH/MAoGCCqGSM49BAMCA0gAMEUCIQDnh3EtlQ2kBCfUMrFfqiqIhT/VVZFkqUV+\niZCe/neitgIgb1IFqNXOjw0/7R5oHwzaJiUCaJ+R5Waxy1oxMw8U2LM=\n-----END CERTIFICATE-----\n";
+
+    fn https_config() -> ProviderConfig {
+        ProviderConfig::new(
+            PROVIDER_OPENAI_COMPATIBLE,
+            "m",
+            "https://gateway.example/v1/chat/completions",
+        )
+        .with_api_key(chip_inference::Secret::new("sk-test-key"))
+    }
+
+    fn ca_file(tag: &str, text: &str) -> String {
+        let path = std::env::temp_dir().join(format!("chip-ca-{}-{tag}.pem", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        path.display().to_string()
+    }
+
+    fn build(ca: Option<&str>) -> Result<Arc<dyn ModelProvider>, FxError> {
+        let pairs: Vec<(&str, &str)> = ca.map(|c| (CA_BUNDLE_VARIABLE, c)).into_iter().collect();
+        build_model(https_config(), ExecutorKind::Fx, &env(&pairs))
+    }
+
+    #[test]
+    fn ssl_cert_file_unset_or_empty_keeps_the_bundled_roots() {
+        assert!(build(None).is_ok());
+        assert!(build(Some("  ")).is_ok());
+    }
+
+    #[test]
+    fn a_valid_ca_bundle_named_by_ssl_cert_file_is_accepted() {
+        assert!(build(Some(&ca_file("valid", TEST_ROOT))).is_ok());
+    }
+
+    #[test]
+    fn an_unreadable_ca_bundle_is_an_error_naming_the_variable_never_a_silent_fallback() {
+        let Err(FxError::Configuration(why)) = build(Some("/nonexistent/chip-ca.pem")) else {
+            panic!("an unreadable bundle must be refused");
+        };
+        assert!(
+            why.contains("SSL_CERT_FILE") && why.contains("nothing was run"),
+            "{why}"
+        );
+        assert!(!why.contains("sk-test-key"));
+    }
+
+    #[test]
+    fn a_ca_bundle_with_no_certificate_is_refused_not_ignored() {
+        for (tag, text) in [("empty", ""), ("garbage", "not a certificate")] {
+            assert!(
+                matches!(
+                    build(Some(&ca_file(tag, text))),
+                    Err(FxError::Configuration(_))
+                ),
+                "{tag}"
+            );
+        }
     }
 }

@@ -17,7 +17,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chip_cli::provider_selection::{ExecutorKind, build_model, endpoint_identity};
+use chip_cli::provider_selection::{
+    CA_BUNDLE_VARIABLE, ExecutorKind, build_model, endpoint_identity,
+};
 use chip_core::{
     Agent, ExecutionObserver, ModelDecisionBoundary, NoLocalPolicy, WorkGoal, WorkId, WorkLimits,
     WorkSpec,
@@ -196,10 +198,11 @@ pub async fn fxlive(report: &mut Report, cfg: &LiveConfig) {
     if let Some(key) = &cfg.api_key {
         config = config.with_api_key(Secret::new(key.clone()));
     }
-    // Only the LAN opt-in comes from the process environment; no provider key variable is read, so a
-    // stray ANTHROPIC_API_KEY or OPENAI_API_KEY can never be sent to the endpoint named here.
+    // Only the LAN opt-in and the CA bundle (public certificates, not a credential) come from the
+    // process environment; no provider key variable is read, so a stray ANTHROPIC_API_KEY or
+    // OPENAI_API_KEY can never be sent to the endpoint named here.
     let env = |name: &str| {
-        (name == LAN_HTTP_VARIABLE)
+        (name == LAN_HTTP_VARIABLE || name == CA_BUNDLE_VARIABLE)
             .then(|| std::env::var(name).ok())
             .flatten()
     };

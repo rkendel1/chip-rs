@@ -61,17 +61,28 @@ Tokio runtime.
 
 ## Known limitations of the native provider
 
-**HTTP proxies and custom CA certificates are not supported.** The native provider uses bundled public
-root certificates and makes direct connections: it does not read `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
-and cannot be given a private CA bundle. A deployment that must reach its model through a proxy, or
-through an endpoint signed by a private CA, cannot use `chip` against that endpoint today. The removed
-legacy executor honored both (through `reqwest`); that is a regression for such deployments, and it is
-**not** claimed to be at parity. The fix belongs inside the FX provider boundary (`fx-native-provider`),
-with integration tests for proxy routing and custom trust roots; it is tracked as its own follow-up. There
-is no second executor and no fallback to work around it.
+**HTTP proxies are not supported.** The native provider makes direct connections: it does not read
+`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` and resolves the endpoint's host itself. A deployment that must
+reach its model through a proxy (including one that also resolves host names) cannot use `chip` against that
+endpoint today. The removed legacy executor honored this (through `reqwest`); that is a regression for such
+deployments, and it is **not** claimed to be at parity. The fix belongs inside the FX provider boundary
+(`fx-native-provider`), with integration tests for proxy routing; it is tracked as its own follow-up (#35).
+There is no second executor and no fallback to work around it.
+
+**Custom root certificates: supported through `SSL_CERT_FILE`, with limits.** If `SSL_CERT_FILE` names a PEM
+file, `chip` reads it (the host reads it; the provider never touches the filesystem or the environment) and
+trusts **exactly** the certificates in it for `https`, in place of the bundled public roots, the way
+`curl --cacert` does. Consequences to know: it applies to every `https` endpoint for that process, so the file
+must contain the roots for every endpoint you use; a file that cannot be read is an error naming the variable
+(`nothing was run`), never a silent fall back to the public roots; a file with no valid certificate is refused
+when the provider is built; certificate validation stays on. Unset or empty keeps the bundled roots. What is
+verified: the bundle is accepted or refused as described (unit tests, both providers) and the variable is read
+and failed on as described. **Not verified in this repository's tests:** a TLS handshake against a server
+signed by such a CA (there is no TLS test server); the `fx-native-provider` change was exercised once by hand
+against a TLS-intercepting egress (fx#30).
 
 Other limits, unchanged: plain `http` only for loopback (or a private IP literal with the explicit
-`CHIP_ALLOW_INSECURE_LAN_HTTP=1` opt-in, keyless); no TLS test; Ollama's own `/api/chat` API is not
+`CHIP_ALLOW_INSECURE_LAN_HTTP=1` opt-in, keyless); no TLS handshake test; Ollama's own `/api/chat` API is not
 supported (below).
 
 ## The executor in `chip`

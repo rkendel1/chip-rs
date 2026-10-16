@@ -85,6 +85,10 @@ pub struct NativeSettings {
     /// Allow plain `http` to a private-LAN IP address for a keyless OpenAI-compatible server.
     /// Honored only with no credential and no extra headers; see [`LAN_HTTP_VARIABLE`].
     pub allow_insecure_lan_http: bool,
+    /// PEM text of the root certificates to trust in place of the bundled public roots, for an
+    /// endpoint behind a TLS-intercepting proxy or signed by a private CA. Certificate validation
+    /// stays on. `None` keeps the bundled roots. Applies to both providers.
+    pub root_certificates_pem: Option<Vec<u8>>,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -101,6 +105,10 @@ impl std::fmt::Debug for NativeSettings {
             )
             .field("options", &self.options)
             .field("budget", &self.budget)
+            .field(
+                "root_certificates_pem",
+                &self.root_certificates_pem.as_ref().map(|pem| pem.len()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -152,6 +160,9 @@ impl NativeModelProvider {
                 for (name, value) in &settings.headers {
                     config = config.with_header(name, value).map_err(bad)?;
                 }
+                if let Some(pem) = &settings.root_certificates_pem {
+                    config = config.with_root_certificates_pem(pem).map_err(bad)?;
+                }
                 if let Some(enable) = settings.template_thinking {
                     config = config.with_chat_template_thinking(enable);
                 }
@@ -174,6 +185,9 @@ impl NativeModelProvider {
                 }
                 for (name, value) in &settings.headers {
                     config = config.with_header(name, value).map_err(bad)?;
+                }
+                if let Some(pem) = &settings.root_certificates_pem {
+                    config = config.with_root_certificates_pem(pem).map_err(bad)?;
                 }
                 NativePort::Anthropic(Anthropic::new(config))
             }
