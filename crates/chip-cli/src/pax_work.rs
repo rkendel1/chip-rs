@@ -132,7 +132,7 @@ pub async fn test_pax_work(args: &[String]) -> i32 {
             WorkOutcome::Completed { .. } => "Completed".to_string(),
             WorkOutcome::Escalated { reason } => format!("Escalated ({reason})"),
             WorkOutcome::Blocked { reason } => format!("Blocked ({reason})"),
-            WorkOutcome::Failed { reason } => format!("Failed ({reason})"),
+            WorkOutcome::Failed { reason, .. } => format!("Failed ({reason})"),
             WorkOutcome::LimitReached { limit } => format!("LimitReached ({})", limit.name()),
         }
     );

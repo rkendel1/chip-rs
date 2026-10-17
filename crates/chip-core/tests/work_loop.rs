@@ -1092,7 +1092,7 @@ async fn a_model_response_that_is_not_a_valid_decision_fails_the_work() {
         .run_work(&spec("g"), &NoLocalPolicy, &ModelScript::new(vec![]))
         .await;
     assert!(
-        matches!(&report.outcome, WorkOutcome::Failed { reason } if reason.contains("not a valid decision"))
+        matches!(&report.outcome, WorkOutcome::Failed { reason, .. } if reason.contains("not a valid decision"))
     );
     assert_eq!((fx.calls(), exec.calls()), (1, 0));
 }

@@ -363,8 +363,9 @@ Implemented and tested: `POST /v1/work` (goal only; every other field is rejecte
 `GET /v1/work/{id}`, `GET /v1/work/{id}/events`, `POST /v1/work/{id}/cancel`, `GET /v1/metrics`,
 `GET /health`; a FIFO queue with a concurrency limit and a queue bound (429 when full); one
 environment acquired per work and released at the end; panic containment per work. Behaviour to
-know: events are available only when a work ends; cancelling running work is advisory (the in-flight
-call is not interrupted); work state is in memory only and a restart forgets it; finished work is
+know: events are available only when a work ends; cancelling running work stops further model calls and
+abandons a model call in flight through FX (reported with its delivery certainty), but does not interrupt
+an execution in flight, and the work's outcome is whatever the runtime establishes; work state is in memory only and a restart forgets it; finished work is
 bounded (`--max-retained-work`, default 256: the oldest finished is evicted and later lookups answer
 410 `work_expired`; queued, running and escalated work is never evicted; metrics stay cumulative); no authentication,
 no CORS, loopback by default, so it is not for remote or multi-user use; the local machine is one
@@ -452,8 +453,8 @@ experiments only measure model robustness against that mechanism.
   local environment is deliberately single-owner and the remote one is only tested in-process. Secrets
   and host paths: PAX diagnostics shown to the model can contain host paths (stated in the README).
   No sandbox is claimed.
-* **Service:** no persistence, authentication, streaming events or remote exposure; cancellation of
-  an in-flight call is advisory.
+* **Service:** no persistence, authentication, streaming events or remote exposure; cancellation
+  does not interrupt an execution in flight.
 * **Mock-only integrations:** `chip-compute` without a `compute` binary, the FX native provider against
   any real endpoint, the Laya/local-ml adapters against real models.
 * **Skips look like passes.** Tests that say `SKIPPED` return successfully. A green run on a machine

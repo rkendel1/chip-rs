@@ -921,9 +921,18 @@ fn outcome_reason(outcome: &WorkOutcome) -> Option<String> {
     match outcome {
         WorkOutcome::Completed { .. } => None,
         WorkOutcome::Blocked { reason }
-        | WorkOutcome::Failed { reason }
+        | WorkOutcome::Failed { reason, .. }
         | WorkOutcome::Escalated { reason } => Some(reason.clone()),
         WorkOutcome::LimitReached { limit } => Some(format!("{} limit reached", limit.name())),
+    }
+}
+
+/// For a work that failed on a model call, whether that request may have left the process, as
+/// the inference executor's stable label. Absent for every other outcome.
+fn outcome_delivery(outcome: &WorkOutcome) -> Option<&'static str> {
+    match outcome {
+        WorkOutcome::Failed { delivery, .. } => delivery.map(|d| d.as_str()),
+        _ => None,
     }
 }
 
@@ -1231,6 +1240,7 @@ pub fn render_json(w: &SoftwareWork, env: &EnvironmentDescription) -> String {
         },
         "terminal_state": m.terminal_state().name(),
         "outcome_reason": outcome_reason(&w.report.outcome),
+        "delivery": outcome_delivery(&w.report.outcome),
         "goal_satisfied": w.goal_satisfied,
         "verified": w.verified,
         "grounded": w.grounded,
@@ -1375,7 +1385,10 @@ impl RunControl {
 }
 
 /// Refuses the next model request once cancellation has been requested. The loop then ends the
-/// work the way it ends it for any model that cannot answer; nothing in flight is interrupted.
+/// work the way it ends it for any model that cannot answer. A model call already in flight
+/// through FX is given the run's cancellation too (`chip_fx::with_call_cancel`): FX abandons it at
+/// its next poll and reports the delivery certainty it established, never "unsent" once the
+/// provider was invoked. An execution in flight is not interrupted.
 /// It also notes when the first request was made, so queueing, model time and execution time can
 /// be told apart.
 struct CancelBeforeModelCall {
@@ -1396,7 +1409,17 @@ impl ModelProvider for CancelBeforeModelCall {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get_or_insert_with(std::time::Instant::now);
-        self.inner.complete(request).await
+        let cancel = Arc::new(RunCancel(self.control.clone()));
+        chip_fx::with_call_cancel(cancel, self.inner.complete(request)).await
+    }
+}
+
+/// The run's cancellation request, as the signal FX polls during a model call.
+struct RunCancel(Arc<RunControl>);
+
+impl chip_fx::CancelSignal for RunCancel {
+    fn cancelled(&self) -> bool {
+        self.0.cancel.load(Ordering::SeqCst)
     }
 }
 
@@ -2456,7 +2479,7 @@ mod tests {
             assert!(
                 matches!(
                     &w.report.outcome,
-                    WorkOutcome::Failed { reason } if reason.contains(expected_error)
+                    WorkOutcome::Failed { reason, .. } if reason.contains(expected_error)
                 ),
                 "{tag}: malformed decision must remain an explicit failure: {:?}",
                 w.report.outcome

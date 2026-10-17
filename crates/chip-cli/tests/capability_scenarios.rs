@@ -536,7 +536,7 @@ async fn scenario_4_an_undeclared_capability_executes_nothing_and_is_not_substit
         )
         .await;
         assert!(
-            matches!(&w.report.outcome, WorkOutcome::Failed { reason } if reason.contains("unknown capability")),
+            matches!(&w.report.outcome, WorkOutcome::Failed { reason, .. } if reason.contains("unknown capability")),
             "{name}: {}",
             describe(&w)
         );
@@ -1453,7 +1453,7 @@ async fn no_kind_widens_the_invocation_boundary() {
         )
         .await;
         assert!(
-            matches!(&w.report.outcome, WorkOutcome::Failed { reason } if reason.contains("unknown capability")),
+            matches!(&w.report.outcome, WorkOutcome::Failed { reason, .. } if reason.contains("unknown capability")),
             "{kind:?}: {}",
             describe(&w)
         );

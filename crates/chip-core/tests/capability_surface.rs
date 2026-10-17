@@ -228,7 +228,7 @@ async fn input_size_is_declared_by_the_capability_and_bounded_by_it() {
     )
     .await;
     assert!(
-        matches!(&r.outcome, WorkOutcome::Failed { reason } if reason.contains("not a valid decision")),
+        matches!(&r.outcome, WorkOutcome::Failed { reason, .. } if reason.contains("not a valid decision")),
         "{:?}",
         r.outcome
     );

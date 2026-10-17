@@ -412,7 +412,7 @@ fn stats(w: &Workload, report: &WorkReport) -> Stats {
         local_decisions: m.local_decisions,
         invalid_decisions: usize::from(
             invocation_rejected
-                || matches!(&report.outcome, WorkOutcome::Failed { reason } if reason.contains("not a valid decision")),
+                || matches!(&report.outcome, WorkOutcome::Failed { reason, .. } if reason.contains("not a valid decision")),
         ),
         wrong_valid_decisions: requested
             .iter()
@@ -1166,7 +1166,7 @@ pub async fn live(args: &[String]) -> i32 {
         match &report.outcome {
             WorkOutcome::Completed { .. } => "-".to_string(),
             WorkOutcome::Blocked { reason }
-            | WorkOutcome::Failed { reason }
+            | WorkOutcome::Failed { reason, .. }
             | WorkOutcome::Escalated { reason } => reason.clone(),
             WorkOutcome::LimitReached { limit } => format!("{} limit", limit.name()),
         }

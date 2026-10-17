@@ -291,7 +291,7 @@ fn print_report(title: &str, report: &WorkReport, model_calls: usize, execute_ca
         WorkOutcome::Completed { summary } => println!("  outcome: {summary}"),
         WorkOutcome::Escalated { reason }
         | WorkOutcome::Blocked { reason }
-        | WorkOutcome::Failed { reason } => println!("  outcome: {reason}"),
+        | WorkOutcome::Failed { reason, .. } => println!("  outcome: {reason}"),
         WorkOutcome::LimitReached { limit } => {
             println!("  outcome: {} limit reached", limit.name())
         }
@@ -1234,7 +1234,7 @@ fn capability_profile(
             "G",
         ),
         (true, None) => {
-            let named_unusable = matches!(&report.outcome, WorkOutcome::Failed { reason }
+            let named_unusable = matches!(&report.outcome, WorkOutcome::Failed { reason, .. }
                 if reason.contains("unknown capability") || reason.contains("capabilities unavailable"));
             if named_unusable {
                 (
@@ -1608,7 +1608,7 @@ pub async fn test_real_model_work(args: &[String]) -> i32 {
             WorkOutcome::Escalated { reason } => format!("Escalated ({reason})"),
             WorkOutcome::Blocked { reason } => format!("Blocked ({reason})"),
             WorkOutcome::LimitReached { limit } => format!("LimitReached ({})", limit.name()),
-            WorkOutcome::Failed { reason } => format!("Failed ({reason})"),
+            WorkOutcome::Failed { reason, .. } => format!("Failed ({reason})"),
         };
         println!("Outcome:           {outcome}");
         println!("Turns:             {}", m.turns);

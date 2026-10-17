@@ -12,9 +12,9 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["rt"] }
 # The authoritative FX and its native provider, pinned by one commit so every FX crate
 # in the build is the same copy.
-fx-core = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
-fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
-fx-native-provider = { git = "https://github.com/rkendel1/fx", rev = "a32d4efd5154cf88fe80a808a59ecb2cb5315971" }
+fx-core = { git = "https://github.com/rkendel1/fx", rev = "df983516e332af677b66ad53c88c71ec343c40e0" }
+fx-single-attempt = { git = "https://github.com/rkendel1/fx", rev = "df983516e332af677b66ad53c88c71ec343c40e0" }
+fx-native-provider = { git = "https://github.com/rkendel1/fx", rev = "df983516e332af677b66ad53c88c71ec343c40e0" }
 
 [dev-dependencies]
 chip-core = { path = "../chip-core" }

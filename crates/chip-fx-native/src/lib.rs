@@ -89,6 +89,9 @@ pub struct NativeSettings {
     /// endpoint behind a TLS-intercepting proxy or signed by a private CA. Certificate validation
     /// stays on. `None` keeps the bundled roots. Applies to both providers.
     pub root_certificates_pem: Option<Vec<u8>>,
+    /// An explicit HTTP `CONNECT` proxy for both providers. `None` connects directly; proxy
+    /// environment variables are never consulted.
+    pub proxy: Option<ProxySettings>,
     /// Seed for the deterministic FX request ids.
     pub id_seed: [u8; 8],
 }
@@ -109,8 +112,55 @@ impl std::fmt::Debug for NativeSettings {
                 "root_certificates_pem",
                 &self.root_certificates_pem.as_ref().map(|pem| pem.len()),
             )
+            .field("proxy", &self.proxy)
             .finish_non_exhaustive()
     }
+}
+
+/// An explicit HTTP `CONNECT` proxy, chosen by the host. The tunnel carries TLS end to end; for a
+/// TLS-intercepting proxy, also trust its CA (`root_certificates_pem`). A proxy that cannot be
+/// reached or refuses the tunnel fails the call: there is no direct connection as a fallback.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProxySettings {
+    /// `http://host:port`, with no credentials in it.
+    pub url: String,
+    /// Basic credentials for the proxy: username and password. The password is never printed.
+    pub credentials: Option<(String, String)>,
+    /// Hosts reached directly: `example.com`, `.example.com` or `*.example.com`.
+    pub no_proxy: Vec<String>,
+}
+
+impl std::fmt::Debug for ProxySettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProxySettings")
+            .field("url", &self.url)
+            .field(
+                "username",
+                &self.credentials.as_ref().map(|(user, _)| user.as_str()),
+            )
+            .field("password", &self.credentials.as_ref().map(|_| "[redacted]"))
+            .field("no_proxy", &self.no_proxy)
+            .finish()
+    }
+}
+
+/// Applies `proxy` to an FX provider config (both configs have the same proxy methods).
+macro_rules! with_proxy {
+    ($config:expr, $proxy:expr, $bad:expr) => {{
+        let mut config = $config;
+        if let Some(proxy) = $proxy {
+            config = config.with_proxy(&proxy.url).map_err($bad)?;
+            if let Some((username, password)) = &proxy.credentials {
+                config = config
+                    .with_proxy_credentials(username, Secret::new(password.clone()))
+                    .map_err($bad)?;
+            }
+            for host in &proxy.no_proxy {
+                config = config.with_no_proxy(host).map_err($bad)?;
+            }
+        }
+        config
+    }};
 }
 
 /// Chip's model port over the authoritative FX executor and the native OpenAI-compatible provider.
@@ -163,6 +213,7 @@ impl NativeModelProvider {
                 if let Some(pem) = &settings.root_certificates_pem {
                     config = config.with_root_certificates_pem(pem).map_err(bad)?;
                 }
+                config = with_proxy!(config, &settings.proxy, bad);
                 if let Some(enable) = settings.template_thinking {
                     config = config.with_chat_template_thinking(enable);
                 }
@@ -189,6 +240,7 @@ impl NativeModelProvider {
                 if let Some(pem) = &settings.root_certificates_pem {
                     config = config.with_root_certificates_pem(pem).map_err(bad)?;
                 }
+                config = with_proxy!(config, &settings.proxy, bad);
                 NativePort::Anthropic(Anthropic::new(config))
             }
         };
@@ -218,10 +270,18 @@ impl ModelProvider for NativeModelProvider {
     async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, FxError> {
         let inner = Arc::clone(&self.inner);
         let handle = tokio::runtime::Handle::current();
+        // A cancellation scoped to this call (`chip_fx::with_call_cancel`) lives on this thread;
+        // it is carried to the blocking thread and scoped again there.
+        let cancel = chip_fx::current_call_cancel();
         // The FX attempt blocks while it polls the network. Run it where blocking is allowed,
         // and drive the (immediately ready) async wrapper to completion there.
-        tokio::task::spawn_blocking(move || handle.block_on(inner.complete(request)))
-            .await
-            .map_err(|error| FxError::Provider(format!("the model call did not finish: {error}")))?
+        tokio::task::spawn_blocking(move || match cancel {
+            Some(cancel) => {
+                handle.block_on(chip_fx::with_call_cancel(cancel, inner.complete(request)))
+            }
+            None => handle.block_on(inner.complete(request)),
+        })
+        .await
+        .map_err(|error| FxError::Provider(format!("the model call did not finish: {error}")))?
     }
 }

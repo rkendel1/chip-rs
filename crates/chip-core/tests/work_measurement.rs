@@ -701,6 +701,7 @@ async fn the_trajectory_checker_catches_what_it_is_there_to_catch() {
     twice.push(WorkEvent::WorkFailed {
         work_id: WorkId::new("w"),
         reason: "x".into(),
+        delivery: None,
     });
     assert!(bad(twice));
     // No terminal event.

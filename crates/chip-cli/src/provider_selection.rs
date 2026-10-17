@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use chip_fx::OptionsPolicy;
 use chip_fx_native::{
     EnvCredentials, LAN_HTTP_VARIABLE, NativeModelProvider, NativeSelection, NativeSettings,
-    ProviderKind,
+    ProviderKind, ProxySettings,
 };
 use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse};
 use chip_inference::{PROVIDER_ANTHROPIC, PROVIDER_OPENAI_COMPATIBLE, ProviderConfig};
@@ -185,6 +185,7 @@ fn fx_model(
     selection.template_thinking = config.enable_thinking;
     selection.allow_insecure_lan_http = lan_http_opt_in(env)?;
     selection.root_certificates_pem = ca_bundle(env)?;
+    selection.proxy = proxy(env)?;
     // The key Chip already resolved from CHIP_API_KEY wins; otherwise the provider's own variable.
     let chip_key = config.api_key.as_ref().map(|k| k.expose().to_string());
     if chip_key.is_some() {
@@ -228,6 +229,64 @@ fn ca_bundle(env: &dyn Fn(&str) -> Option<String>) -> Result<Option<Vec<u8>>, Fx
              roots, or point it at a PEM file of root certificates; nothing was run"
         ))
     })
+}
+
+/// The explicit proxy for model calls: `http://host:port` of an HTTP `CONNECT` proxy.
+pub const PROXY_VARIABLE: &str = "CHIP_PROXY";
+/// Basic credentials for [`PROXY_VARIABLE`]; both or neither.
+pub const PROXY_USERNAME_VARIABLE: &str = "CHIP_PROXY_USERNAME";
+pub const PROXY_PASSWORD_VARIABLE: &str = "CHIP_PROXY_PASSWORD";
+/// Comma-separated hosts reached directly: `example.com`, `.example.com` or `*.example.com`.
+pub const NO_PROXY_VARIABLE: &str = "CHIP_NO_PROXY";
+
+/// The proxy the operator chose with `CHIP_PROXY` and its companions. Chip's own variables, never
+/// `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`: a proxy is an explicit choice, not something inherited
+/// from whatever the shell exported. A companion without `CHIP_PROXY`, or a username without a
+/// password, is an error rather than a setting quietly ignored. No message here prints a value: a
+/// proxy URL or password may hold a secret. The URL's form is checked when the provider is built.
+fn proxy(env: &dyn Fn(&str) -> Option<String>) -> Result<Option<ProxySettings>, FxError> {
+    let get = |name: &str| {
+        env(name)
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    let (url, username, password, no_proxy) = (
+        get(PROXY_VARIABLE),
+        get(PROXY_USERNAME_VARIABLE),
+        // A password is taken as given: surrounding spaces may be part of it.
+        env(PROXY_PASSWORD_VARIABLE).filter(|v| !v.is_empty()),
+        get(NO_PROXY_VARIABLE),
+    );
+    let Some(url) = url else {
+        if username.is_some() || password.is_some() || no_proxy.is_some() {
+            return Err(FxError::Configuration(format!(
+                "{PROXY_USERNAME_VARIABLE}, {PROXY_PASSWORD_VARIABLE} and {NO_PROXY_VARIABLE} \
+                 apply only with {PROXY_VARIABLE}; set it or unset them; nothing was run"
+            )));
+        }
+        return Ok(None);
+    };
+    let credentials = match (username, password) {
+        (None, None) => None,
+        (Some(username), Some(password)) => Some((username, password)),
+        _ => {
+            return Err(FxError::Configuration(format!(
+                "{PROXY_USERNAME_VARIABLE} and {PROXY_PASSWORD_VARIABLE} go together; set both or \
+                 neither; nothing was run"
+            )));
+        }
+    };
+    Ok(Some(ProxySettings {
+        url,
+        credentials,
+        no_proxy: no_proxy
+            .iter()
+            .flat_map(|list| list.split(','))
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    }))
 }
 
 /// `CHIP_ALLOW_INSECURE_LAN_HTTP`: `1` opts in, unset or `0` does not, anything else is an error
@@ -470,6 +529,70 @@ mod tests {
             "{why}"
         );
         assert!(!why.contains("sk-test-key"));
+    }
+
+    fn build_with(pairs: &[(&str, &str)]) -> Result<Arc<dyn ModelProvider>, FxError> {
+        build_model(https_config(), ExecutorKind::Fx, &env(pairs))
+    }
+
+    #[test]
+    fn chip_proxy_is_read_with_its_companions_and_ambient_proxy_variables_are_not() {
+        assert!(build_with(&[(PROXY_VARIABLE, "http://proxy.corp:3128")]).is_ok());
+        assert!(
+            build_with(&[
+                (PROXY_VARIABLE, "http://proxy.corp:3128"),
+                (PROXY_USERNAME_VARIABLE, "chip"),
+                (PROXY_PASSWORD_VARIABLE, "pw-0123456789"),
+                (NO_PROXY_VARIABLE, "localhost, .internal.example ,"),
+            ])
+            .is_ok()
+        );
+        // Not Chip's variables: no proxy is configured from them, so nothing can fail.
+        assert!(
+            build_with(&[
+                ("HTTP_PROXY", "not a url"),
+                ("HTTPS_PROXY", "not a url"),
+                ("ALL_PROXY", "not a url"),
+            ])
+            .is_ok()
+        );
+        let parsed = proxy(&env(&[
+            (PROXY_VARIABLE, " http://proxy.corp:3128 "),
+            (NO_PROXY_VARIABLE, "localhost, .internal.example ,"),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.url, "http://proxy.corp:3128");
+        assert_eq!(parsed.no_proxy, ["localhost", ".internal.example"]);
+        assert_eq!(proxy(&env(&[("HTTPS_PROXY", "http://x:1")])).unwrap(), None);
+    }
+
+    #[test]
+    fn an_incomplete_or_invalid_proxy_is_refused_and_no_secret_is_printed() {
+        let secret = "pw-0123456789";
+        for pairs in [
+            vec![
+                (PROXY_USERNAME_VARIABLE, "chip"),
+                (PROXY_PASSWORD_VARIABLE, secret),
+            ],
+            vec![(NO_PROXY_VARIABLE, "localhost")],
+            vec![
+                (PROXY_VARIABLE, "http://proxy.corp:3128"),
+                (PROXY_PASSWORD_VARIABLE, secret),
+            ],
+            vec![(PROXY_VARIABLE, "https://proxy.corp:3128")],
+            vec![(PROXY_VARIABLE, "http://chip:pw-0123456789@proxy.corp:3128")],
+            vec![
+                (PROXY_VARIABLE, "http://proxy.corp:3128"),
+                (PROXY_USERNAME_VARIABLE, "chip"),
+                (PROXY_PASSWORD_VARIABLE, "pw-0123456789/with-a-slash"),
+            ],
+        ] {
+            let Err(FxError::Configuration(why)) = build_with(&pairs) else {
+                panic!("{pairs:?} was accepted");
+            };
+            assert!(!why.contains(secret), "{why}");
+        }
     }
 
     #[test]

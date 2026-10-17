@@ -108,7 +108,7 @@ pub fn build(
             chip_core::WorkOutcome::LimitReached { limit } => {
                 format!("limit reached: {}", limit.name())
             }
-            chip_core::WorkOutcome::Failed { reason } => format!("failed: {reason}"),
+            chip_core::WorkOutcome::Failed { reason, .. } => format!("failed: {reason}"),
         };
         rung_lines.push(format!(
             "rung {} [{} tier]: {} turns, {} executions, {}",
