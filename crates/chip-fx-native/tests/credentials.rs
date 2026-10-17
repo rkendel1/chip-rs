@@ -302,6 +302,7 @@ fn lan_selection(endpoint: &str, allow: bool) -> NativeSelection {
     NativeSelection {
         allow_insecure_lan_http: allow,
         root_certificates_pem: None,
+        proxy: None,
         ..selection(ProviderKind::OpenAiCompatible, endpoint)
     }
 }
@@ -405,6 +406,7 @@ fn the_opt_in_never_applies_to_anthropic() {
     let selection = NativeSelection {
         allow_insecure_lan_http: true,
         root_certificates_pem: None,
+        proxy: None,
         ..selection(ProviderKind::Anthropic, "http://192.168.1.20:1234/v1")
     };
     let text = message(resolve(&selection, &[("ANTHROPIC_API_KEY", ANTHROPIC_KEY)]));

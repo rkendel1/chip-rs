@@ -390,7 +390,7 @@ pub async fn run(
                     Target::Human
                 }
             }
-            WorkOutcome::Failed { reason } => {
+            WorkOutcome::Failed { reason, .. } => {
                 result.status = Status::Unresolved(format!("rung {index} failed: {reason}"));
                 return result;
             }

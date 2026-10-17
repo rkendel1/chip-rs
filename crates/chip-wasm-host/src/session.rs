@@ -248,9 +248,14 @@ fn done_json(report: &WorkReport, limits: &WorkLimits) -> Value {
             result.insert("summary".into(), json!(summary));
         }
         chip_core::WorkOutcome::Escalated { reason }
-        | chip_core::WorkOutcome::Blocked { reason }
-        | chip_core::WorkOutcome::Failed { reason } => {
+        | chip_core::WorkOutcome::Blocked { reason } => {
             result.insert("reason".into(), json!(reason));
+        }
+        chip_core::WorkOutcome::Failed { reason, delivery } => {
+            result.insert("reason".into(), json!(reason));
+            if let Some(delivery) = delivery {
+                result.insert("delivery".into(), json!(delivery.as_str()));
+            }
         }
         chip_core::WorkOutcome::LimitReached { limit } => {
             result.insert("limit".into(), json!(format!("{limit:?}")));

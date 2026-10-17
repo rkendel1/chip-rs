@@ -114,6 +114,9 @@ pub struct NativeSelection {
     /// environment. `None` keeps the bundled roots. A bundle with no valid certificate is refused
     /// when the provider is built.
     pub root_certificates_pem: Option<Vec<u8>>,
+    /// An explicit HTTP `CONNECT` proxy the host chose (for `chip`, from `CHIP_PROXY` and its
+    /// companions). `None` connects directly; `HTTP_PROXY` and similar are never read.
+    pub proxy: Option<crate::ProxySettings>,
 }
 
 impl NativeSelection {
@@ -130,6 +133,7 @@ impl NativeSelection {
             template_thinking: None,
             allow_insecure_lan_http: false,
             root_certificates_pem: None,
+            proxy: None,
         }
     }
 }
@@ -246,6 +250,7 @@ impl NativeSettings {
             template_thinking: selection.template_thinking,
             allow_insecure_lan_http: selection.allow_insecure_lan_http,
             root_certificates_pem: selection.root_certificates_pem.clone(),
+            proxy: selection.proxy.clone(),
             id_seed,
         })
     }

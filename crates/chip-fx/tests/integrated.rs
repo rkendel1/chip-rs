@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chip_core::{
-    Agent, ModelDecisionBoundary, NoLocalPolicy, WorkEvent, WorkOutcome, WorkReport,
+    Agent, Delivery, ModelDecisionBoundary, NoLocalPolicy, WorkEvent, WorkOutcome, WorkReport,
     verify_trajectory,
 };
-use chip_fx::{CancelSignal, FxModelProvider, OptionsPolicy, RequestIds};
+use chip_fx::{CancelSignal, FxModelProvider, OptionsPolicy, RequestIds, with_call_cancel};
 use common::{
     Attempt, COMPLETE, Caps, CountingExecutor, REQUEST_SELFTEST, SequencePort, failure, spec,
 };
@@ -74,10 +74,18 @@ async fn run(h: &Harness) -> WorkReport {
 
 fn reason(report: &WorkReport) -> &str {
     match &report.outcome {
-        WorkOutcome::Failed { reason }
+        WorkOutcome::Failed { reason, .. }
         | WorkOutcome::Blocked { reason }
         | WorkOutcome::Escalated { reason } => reason,
         other => panic!("expected a non-success outcome with a reason, got {other:?}"),
+    }
+}
+
+/// The typed delivery certainty on a failed work (G5): what a caller reads instead of `reason`.
+fn delivery(report: &WorkReport) -> Option<Delivery> {
+    match &report.outcome {
+        WorkOutcome::Failed { delivery, .. } => *delivery,
+        other => panic!("expected a failure, got {other:?}"),
     }
 }
 
@@ -315,6 +323,17 @@ async fn a_provider_failure_reaches_chip_with_its_delivery_and_is_not_retried() 
     );
     assert!(text.contains("status 429"), "{text}");
     assert!(text.contains("not retried"), "{text}");
+    assert_eq!(delivery(&report), Some(Delivery::PossiblySent));
+    assert!(
+        report.events.iter().any(|e| matches!(
+            e,
+            WorkEvent::WorkFailed {
+                delivery: Some(Delivery::PossiblySent),
+                ..
+            }
+        )),
+        "the terminal event carries the same certainty"
+    );
     assert_eq!(
         h.invokes.load(Ordering::SeqCst),
         1,
@@ -330,6 +349,25 @@ async fn a_provider_failure_reaches_chip_with_its_delivery_and_is_not_retried() 
         )),
         "the failed call is on the event stream"
     );
+}
+
+#[tokio::test]
+async fn a_call_that_never_left_is_reported_definitely_unsent_as_a_typed_field() {
+    let h = harness(vec![Attempt::Fail(failure(
+        PortFailureKind::ProviderError,
+        Observed::NotInvoked,
+        None,
+    ))]);
+    let report = run(&h).await;
+    assert_eq!(delivery(&report), Some(Delivery::DefinitelyUnsent));
+}
+
+#[tokio::test]
+async fn a_failure_that_is_not_a_model_call_carries_no_delivery() {
+    let h = harness(vec![Attempt::Reply("not json at all".into())]);
+    let report = run(&h).await;
+    assert!(reason(&report).contains("not a valid decision"));
+    assert_eq!(delivery(&report), None);
 }
 
 #[tokio::test]
@@ -376,6 +414,7 @@ async fn a_stream_that_ends_without_a_verified_finish_is_not_a_success() {
         "{}",
         reason(&report)
     );
+    assert_eq!(delivery(&report), Some(Delivery::ConfirmedResponse));
     assert_eq!(h.invokes.load(Ordering::SeqCst), 1);
     assert_eq!(h.executor.runs(), 0);
 }
@@ -457,6 +496,35 @@ async fn cancellation_before_invocation_sends_nothing() {
         h.invokes.load(Ordering::SeqCst),
         0,
         "the provider was never called"
+    );
+}
+
+#[tokio::test]
+async fn a_cancellation_scoped_to_one_call_interrupts_that_call_only() {
+    // The provider has no signal of its own (it may be shared by many works); the caller's
+    // signal is scoped to its call with `with_call_cancel`.
+    let flag = Arc::new(AtomicBool::new(false));
+    let h = harness_with(
+        SequencePort::new(vec![
+            Attempt::CancelWhileStreaming(COMPLETE.into()),
+            Attempt::Reply(COMPLETE.into()),
+        ])
+        .with_cancel_flag(flag.clone()),
+        CountingExecutor::new(),
+        OptionsPolicy::DropUnsupported,
+        None,
+    );
+    let report = with_call_cancel(Arc::new(Flag(flag.clone())), run(&h)).await;
+    assert!(reason(&report).contains("cancelled"), "{}", reason(&report));
+    assert_eq!(delivery(&report), Some(Delivery::ConfirmedResponse));
+    assert_eq!(h.invokes.load(Ordering::SeqCst), 1);
+
+    // Outside the scope the same flag means nothing to the provider: the next call completes.
+    let report = run(&h).await;
+    assert!(
+        matches!(report.outcome, WorkOutcome::Completed { .. }),
+        "{:?}",
+        report.outcome
     );
 }
 

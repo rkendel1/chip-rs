@@ -15,7 +15,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 pub use capability_set::{CapabilityBackend, CapabilitySet};
-use chip_inference::{Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
+pub use chip_inference::{Delivery, InferenceFailure};
+use chip_inference::{FxError, Message, MessageRole, ModelProvider, ModelRequest, ModelResponse};
 pub use decision::{
     AgentDecision, CapabilityRequest, DecisionBoundary, DecisionError, DecisionInput, InputValue,
     ScriptedDecision,
@@ -100,6 +101,9 @@ pub struct TurnResult {
 pub enum AgentError {
     InvalidTurn(String),
     Provider(String),
+    /// The inference executor ended the model call without a completion, with what it knew,
+    /// delivery certainty included. Displayed as a provider error.
+    Inference(Box<InferenceFailure>),
     Decision(DecisionError),
     Capability(CapabilityError),
     Execution(ExecutionError),
@@ -489,11 +493,25 @@ pub struct AgentResult {
     pub execution: ExecutionReport,
 }
 
+impl AgentError {
+    /// When a model call failed with a delivery certainty from the inference executor, that
+    /// certainty. `None` for every other error, which says nothing about delivery.
+    pub fn delivery(&self) -> Option<Delivery> {
+        match self {
+            Self::Inference(failure) => Some(failure.delivery),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidTurn(message) => write!(f, "invalid turn: {message}"),
             Self::Provider(message) => write!(f, "provider error: {message}"),
+            Self::Inference(failure) => {
+                write!(f, "provider error: {}", FxError::Inference(failure.clone()))
+            }
             Self::Decision(error) => write!(f, "{error}"),
             Self::Capability(error) => write!(f, "{error}"),
             Self::Execution(error) => write!(f, "{error}"),
@@ -1057,11 +1075,14 @@ impl Agent {
             request.max_tokens = Some(tokens);
         }
 
-        let response = self
-            .provider
-            .complete(request.clone())
-            .await
-            .map_err(|error| AgentError::Provider(error.to_string()))?;
+        let response =
+            self.provider
+                .complete(request.clone())
+                .await
+                .map_err(|error| match error {
+                    FxError::Inference(failure) => AgentError::Inference(failure),
+                    other => AgentError::Provider(other.to_string()),
+                })?;
 
         let events = vec![
             AgentEvent::TurnReceived {

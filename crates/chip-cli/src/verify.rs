@@ -171,7 +171,7 @@ fn outcome_reason(outcome: &WorkOutcome) -> Option<String> {
     match outcome {
         WorkOutcome::Completed { .. } => None,
         WorkOutcome::Blocked { reason }
-        | WorkOutcome::Failed { reason }
+        | WorkOutcome::Failed { reason, .. }
         | WorkOutcome::Escalated { reason } => Some(reason.clone()),
         WorkOutcome::LimitReached { limit } => Some(format!("{} limit reached", limit.name())),
     }

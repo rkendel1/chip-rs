@@ -61,13 +61,24 @@ Tokio runtime.
 
 ## Known limitations of the native provider
 
-**HTTP proxies are not supported.** The native provider makes direct connections: it does not read
-`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` and resolves the endpoint's host itself. A deployment that must
-reach its model through a proxy (including one that also resolves host names) cannot use `chip` against that
-endpoint today. The removed legacy executor honored this (through `reqwest`); that is a regression for such
-deployments, and it is **not** claimed to be at parity. The fix belongs inside the FX provider boundary
-(`fx-native-provider`), with integration tests for proxy routing; it is tracked as its own follow-up (#35).
-There is no second executor and no fallback to work around it.
+**HTTP proxies: supported through `CHIP_PROXY`, explicitly.** `CHIP_PROXY=http://host:port` sends model calls
+through that HTTP `CONNECT` proxy, for both providers (#35). The tunnel carries TLS end to end, so certificate
+validation is unchanged; for a TLS-intercepting proxy, also set `SSL_CERT_FILE` to its CA (below).
+`CHIP_PROXY_USERNAME` and `CHIP_PROXY_PASSWORD` (both or neither) authenticate to the proxy with Basic; the
+password is never printed (errors, `Debug` output and the provider's failure text are scrubbed) and the endpoint
+never receives it. `CHIP_NO_PROXY` is a comma-separated list of hosts reached directly (`example.com`,
+`.example.com` or `*.example.com`). `chip` reads only its own variables: `HTTP_PROXY`, `HTTPS_PROXY`,
+`ALL_PROXY` and `NO_PROXY` are **not** honored, so an inherited shell setting never redirects model traffic.
+Refused before anything is sent: a companion variable without `CHIP_PROXY`; a username without a password; a
+proxy URL that is not `http://host:port` (no `https://` or SOCKS proxy, no path, no credentials in the URL); and a
+keyed plain-`http` endpoint, whose key the proxy would see in the clear. A proxy that cannot be reached, or that
+refuses the tunnel (for example `407`), is the model call's `transport` failure with its delivery certainty: there
+is no direct connection as a fallback and no second executor. The proxy lives inside the FX provider boundary
+(`fx-native-provider`). What is verified: routing through a loopback `CONNECT` proxy, the no-proxy bypass, Basic
+credentials reaching only the proxy, a refused or unreachable proxy failing with zero connections to the endpoint
+(FX's `tests/proxy.rs`, and `crates/chip-fx-native/tests/proxy.rs` through Chip), and the variable rules
+(`provider_selection.rs` tests). **Not verified:** a real corporate proxy, and proxy authentication schemes other
+than Basic (not supported).
 
 **Custom root certificates: supported through `SSL_CERT_FILE`, with limits.** If `SSL_CERT_FILE` names a PEM
 file, `chip` reads it (the host reads it; the provider never touches the filesystem or the environment) and
@@ -77,12 +88,13 @@ must contain the roots for every endpoint you use; a file that cannot be read is
 (`nothing was run`), never a silent fall back to the public roots; a file with no valid certificate is refused
 when the provider is built; certificate validation stays on. Unset or empty keeps the bundled roots. What is
 verified: the bundle is accepted or refused as described (unit tests, both providers) and the variable is read
-and failed on as described. **Not verified in this repository's tests:** a TLS handshake against a server
-signed by such a CA (there is no TLS test server); the `fx-native-provider` change was exercised once by hand
-against a TLS-intercepting egress (fx#30).
+and failed on as described. The TLS handshake itself is tested in FX
+(`tests/private_ca.rs` in `fx-native-provider`, against `openssl s_server` with a generated CA): a server signed
+by a private CA is refused with the bundled roots and with a different CA, and reached with its CA, directly and
+through a proxy.
 
 Other limits, unchanged: plain `http` only for loopback (or a private IP literal with the explicit
-`CHIP_ALLOW_INSECURE_LAN_HTTP=1` opt-in, keyless); no TLS handshake test; Ollama's own `/api/chat` API is not
+`CHIP_ALLOW_INSECURE_LAN_HTTP=1` opt-in, keyless); no client certificates (mTLS); Ollama's own `/api/chat` API is not
 supported (below).
 
 ## The executor in `chip`

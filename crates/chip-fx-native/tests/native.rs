@@ -35,6 +35,7 @@ fn settings(server: &Server, options: OptionsPolicy) -> NativeSettings {
         template_thinking: None,
         allow_insecure_lan_http: false,
         root_certificates_pem: None,
+        proxy: None,
         id_seed: *b"chip-nat",
     }
 }
@@ -171,6 +172,33 @@ async fn cancelling_mid_stream_stops_the_attempt_and_keeps_the_partial_output() 
     assert_eq!(server.connections(), 1);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_scoped_cancellation_reaches_the_blocking_attempt() {
+    // No provider-level signal: the cancellation is the caller's, scoped to this call, and must
+    // survive the move of the FX attempt onto the blocking pool.
+    let server = Server::start(vec![Reply::Stall(vec![mock::delta("so far")])]);
+    let provider =
+        NativeModelProvider::new(settings(&server, OptionsPolicy::DropUnsupported)).unwrap();
+    let flag = Arc::new(AtomicBool::new(false));
+    let setter = flag.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        setter.store(true, Ordering::SeqCst);
+    });
+    let started = std::time::Instant::now();
+    let error = chip_fx::with_call_cancel(Arc::new(After(flag)), provider.complete(request()))
+        .await
+        .unwrap_err();
+    let f = failure(error);
+    assert_eq!(f.kind, "cancelled");
+    assert_eq!(f.delivery, Delivery::ConfirmedResponse);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the stalled call was not interrupted"
+    );
+    assert_eq!(server.connections(), 1);
+}
+
 #[test]
 fn settings_the_provider_refuses_are_configuration_errors_and_never_print_the_key() {
     let mut s = NativeSettings {
@@ -185,6 +213,7 @@ fn settings_the_provider_refuses_are_configuration_errors_and_never_print_the_ke
         template_thinking: None,
         allow_insecure_lan_http: false,
         root_certificates_pem: None,
+        proxy: None,
         id_seed: [0; 8],
     };
     assert!(matches!(
@@ -294,6 +323,7 @@ fn a_ca_bundle_is_accepted_for_both_providers_and_a_bundle_without_a_certificate
             template_thinking: None,
             allow_insecure_lan_http: false,
             root_certificates_pem: pem.map(|p| p.as_bytes().to_vec()),
+            proxy: None,
             id_seed: *b"chip-nat",
         };
         assert!(NativeModelProvider::new(base(None)).is_ok());
@@ -328,6 +358,7 @@ fn the_settings_debug_output_shows_that_a_bundle_is_set_but_not_its_contents() {
         template_thinking: None,
         allow_insecure_lan_http: false,
         root_certificates_pem: Some(TEST_ROOT.as_bytes().to_vec()),
+        proxy: None,
         id_seed: *b"chip-nat",
     };
     let shown = format!("{s:?}");

@@ -1,6 +1,10 @@
 //! The native driver: Chip's model port over `fx_core::execute` and a `ProviderPort`.
 
+use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -27,11 +31,60 @@ impl CancelSignal for Never {
     }
 }
 
-struct CancelHost<'a>(&'a dyn CancelSignal);
+/// The provider's own signal and, when the call runs inside [`with_call_cancel`], the caller's.
+/// Either one cancels.
+struct CancelHost<'a> {
+    provider: &'a dyn CancelSignal,
+    call: Option<Arc<dyn CancelSignal>>,
+}
 
 impl Host for CancelHost<'_> {
     fn cancel_requested(&mut self) -> bool {
-        self.0.cancelled()
+        self.provider.cancelled() || self.call.as_ref().is_some_and(|call| call.cancelled())
+    }
+}
+
+thread_local! {
+    static CALL_CANCEL: RefCell<Option<Arc<dyn CancelSignal>>> = const { RefCell::new(None) };
+}
+
+/// Runs `call` (a model call on any [`FxModelProvider`]) with `signal` as an additional
+/// cancellation signal for that call only. A provider is often shared by many works, while
+/// cancellation belongs to one: this scopes it to the future that makes the call. FX polls it
+/// before invoking the provider and between polls, so a call in flight is abandoned at its next
+/// poll and reported with the delivery certainty FX establishes (never as unsent once invoked).
+pub fn with_call_cancel<F: Future>(
+    signal: Arc<dyn CancelSignal>,
+    call: F,
+) -> impl Future<Output = F::Output> {
+    CallCancel {
+        signal,
+        call: Box::pin(call),
+    }
+}
+
+/// The signal [`with_call_cancel`] put in place for the call being polled on this thread, if
+/// any. An embedder that moves the call to another thread (for example onto a blocking pool)
+/// reads it here and scopes it again there.
+pub fn current_call_cancel() -> Option<Arc<dyn CancelSignal>> {
+    CALL_CANCEL.with(|slot| slot.borrow().clone())
+}
+
+struct CallCancel<F> {
+    signal: Arc<dyn CancelSignal>,
+    call: Pin<Box<F>>,
+}
+
+impl<F: Future> Future for CallCancel<F> {
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        // `execute` runs synchronously inside this poll, on this thread, so the signal is in
+        // place for exactly the polls of this call and restored after each one.
+        let previous = CALL_CANCEL.with(|slot| slot.replace(Some(self.signal.clone())));
+        let polled = self.call.as_mut().poll(cx);
+        CALL_CANCEL.with(|slot| *slot.borrow_mut() = previous);
+        polled
     }
 }
 
@@ -133,7 +186,10 @@ where
         }
         let mut fx_request = to_fx_request(&request, id, self.policy, self.budget)?;
         fx_request.options.response_format = self.response_format.clone();
-        let mut host = CancelHost(self.cancel.as_ref());
+        let mut host = CancelHost {
+            provider: self.cancel.as_ref(),
+            call: current_call_cancel(),
+        };
         let report = {
             let mut capability = self.capability.lock().expect("capability lock");
             execute(&mut *capability, &fx_request, &self.limits, &mut host)

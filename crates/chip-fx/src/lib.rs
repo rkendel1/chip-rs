@@ -26,4 +26,6 @@ mod native;
 pub mod report;
 
 pub use mapping::{OptionsPolicy, RequestIds, from_outcome, kind_label, to_fx_request};
-pub use native::{CancelSignal, FxModelProvider, Never, ProviderStats};
+pub use native::{
+    CancelSignal, FxModelProvider, Never, ProviderStats, current_call_cancel, with_call_cancel,
+};

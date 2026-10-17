@@ -29,7 +29,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chip_inference::ModelResponse;
+use chip_inference::{Delivery, ModelResponse};
 
 use crate::{
     Agent, AgentDecision, AgentError, Assessment, Capability, CapabilityEvent, CapabilityId,
@@ -170,11 +170,27 @@ impl TerminalState {
 /// How the work ended. Limits and failures are never reported as success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkOutcome {
-    Completed { summary: String },
-    Escalated { reason: String },
-    Blocked { reason: String },
-    LimitReached { limit: LimitKind },
-    Failed { reason: String },
+    Completed {
+        summary: String,
+    },
+    Escalated {
+        reason: String,
+    },
+    Blocked {
+        reason: String,
+    },
+    LimitReached {
+        limit: LimitKind,
+    },
+    /// The work failed. `delivery` is set when a model call failed: what the inference executor
+    /// established about whether that request left the process (`definitely_unsent`,
+    /// `possibly_sent` or `confirmed_response`), so a caller deciding whether retrying is safe
+    /// need not parse `reason`. `None` means the failure was not a model call that reported a
+    /// delivery certainty; a caller must then not assume nothing was sent. Chip never retries.
+    Failed {
+        reason: String,
+        delivery: Option<Delivery>,
+    },
 }
 
 impl WorkOutcome {
@@ -840,6 +856,8 @@ pub enum WorkEvent {
     WorkFailed {
         work_id: WorkId,
         reason: String,
+        /// As [`WorkOutcome::Failed::delivery`].
+        delivery: Option<Delivery>,
     },
 }
 
@@ -1663,11 +1681,13 @@ impl<'a> Run<'a> {
         });
         let (_, response) = called.map_err(|e| WorkOutcome::Failed {
             reason: format!("model escalation failed: {e}"),
+            delivery: e.delivery(),
         })?;
         let mut decision = boundary
             .interpret(&response, &self.capabilities)
             .map_err(|e| WorkOutcome::Failed {
                 reason: format!("the model's response is not a valid decision: {e}"),
+                delivery: None,
             })?;
         // Chip, not the provider, names the execution: assigned here, once, where the request is
         // authorized, and carried unchanged by the execution, its events, its observation and its
@@ -1746,6 +1766,7 @@ impl<'a> Run<'a> {
             Err(e) => {
                 return Step::Done(WorkOutcome::Failed {
                     reason: e.to_string(),
+                    delivery: None,
                 });
             }
         };
@@ -1754,6 +1775,7 @@ impl<'a> Run<'a> {
             Err(e) => {
                 return Step::Done(WorkOutcome::Failed {
                     reason: e.to_string(),
+                    delivery: None,
                 });
             }
         };
@@ -1781,6 +1803,7 @@ impl<'a> Run<'a> {
             Err(e) => {
                 return Step::Done(WorkOutcome::Failed {
                     reason: e.to_string(),
+                    delivery: None,
                 });
             }
         }
@@ -1836,9 +1859,10 @@ fn terminal_event(work_id: WorkId, outcome: &WorkOutcome) -> WorkEvent {
             work_id,
             limit: *limit,
         },
-        WorkOutcome::Failed { reason } => WorkEvent::WorkFailed {
+        WorkOutcome::Failed { reason, delivery } => WorkEvent::WorkFailed {
             work_id,
             reason: reason.clone(),
+            delivery: *delivery,
         },
     }
 }
@@ -1964,6 +1988,7 @@ impl Agent {
         if spec.goal.as_str().trim().is_empty() {
             return WorkOutcome::Failed {
                 reason: "the goal cannot be empty".to_string(),
+                delivery: None,
             };
         }
 
@@ -2061,6 +2086,7 @@ impl Agent {
                         Err(e) => {
                             return WorkOutcome::Failed {
                                 reason: e.to_string(),
+                                delivery: None,
                             };
                         }
                     }
@@ -2615,7 +2641,7 @@ pub fn measure_utility(report: &WorkReport, spec: &WorkSpec) -> WorkUtilityMeasu
         }
     }
 
-    let invalid = matches!(&report.outcome, WorkOutcome::Failed { reason }
+    let invalid = matches!(&report.outcome, WorkOutcome::Failed { reason, .. }
             if reason.contains("not a valid decision"))
         || matches!(&report.outcome, WorkOutcome::Blocked { reason }
             if reason.starts_with("invalid capability input"));

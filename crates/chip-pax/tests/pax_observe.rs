@@ -508,7 +508,7 @@ fn shim(tag: &str, version: &str, stdout: &str, stderr: &str, code: i32) -> (Pat
     std::fs::write(dir.join("stdout.txt"), stdout).unwrap();
     std::fs::write(dir.join("stderr.txt"), stderr).unwrap();
     let script = format!(
-        "#!/bin/sh\necho \"$*\" >> '{calls}'\nif [ \"$1\" = \"--version\" ]; then echo 'pax {version}'; exit 0; fi\ncat '{stderr}' >&2\ncat '{stdout}'\nexit {code}\n",
+        "#!/bin/sh\nif [ \"$1\" = \"{FIXTURE_PROBE}\" ]; then exit 0; fi\necho \"$*\" >> '{calls}'\nif [ \"$1\" = \"--version\" ]; then echo 'pax {version}'; exit 0; fi\ncat '{stderr}' >&2\ncat '{stdout}'\nexit {code}\n",
         calls = dir.join("calls").display(),
         stderr = dir.join("stderr.txt").display(),
         stdout = dir.join("stdout.txt").display(),
@@ -519,8 +519,48 @@ fn shim(tag: &str, version: &str, stdout: &str, stderr: &str, code: i32) -> (Pat
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_executable(&path);
     }
     (path, project)
+}
+
+/// The argument the shim answers with an immediate success and no log entry, so that
+/// [`wait_until_executable`] can try the file without running any of its logic.
+#[cfg(unix)]
+const FIXTURE_PROBE: &str = "--chip-fixture-probe";
+
+/// Returns once the freshly written shim can be executed. As in `pax_boundary.rs`: another test's
+/// spawn can briefly inherit this file's write descriptor between `fork` and `exec`, and Linux
+/// refuses to execute a file held open for writing (`ETXTBSY`). This waits for exactly that,
+/// bounded, and treats any other error as a real failure. The code under test is never retried.
+#[cfg(unix)]
+fn wait_until_executable(path: &Path) {
+    use std::io::ErrorKind;
+    use std::process::{Command, Stdio};
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match Command::new(path)
+            .arg(FIXTURE_PROBE)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Ok(status) => {
+                assert!(status.success(), "{}: {status}", path.display());
+                return;
+            }
+            Err(e) if e.kind() == ErrorKind::ExecutableFileBusy => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{} stayed busy for ten seconds",
+                    path.display()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(e) => panic!("{} cannot be executed: {e}", path.display()),
+        }
+    }
 }
 
 fn calls(pax: &Path) -> Vec<String> {

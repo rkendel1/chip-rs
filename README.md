@@ -330,7 +330,7 @@ started only when a work runs `pax.test`.
 | `POST /v1/work` | `{"goal": "..."}` -> 202 `{"work_id","status":"running"\|"queued"}`; 429 `queue_full` when the queue is full |
 | `GET /v1/work/{id}` | 410 `work_expired` if it finished and was evicted (see *Retention*); otherwise `status` (`queued`, `running`, or the terminal state), `lifecycle`, `goal`, `cancellation_requested`, `scheduling`, and once ended `result` and `timing` |
 | `GET /v1/work/{id}/events` | `{"work_id","complete","events":[...]}` the runtime's recorded trajectory |
-| `POST /v1/work/{id}/cancel` | queued: removed, `cancelled`. Running: `cancellation_requested` (advisory). Ended: 409 |
+| `POST /v1/work/{id}/cancel` | queued: removed, `cancelled`. Running: `cancellation_requested` (stops model calls; an execution in flight runs on). Ended: 409 |
 | `GET /v1/metrics` | service-level counts and queue/duration statistics |
 
 The accepted body fields are `goal` and, optionally, `kind` (`change` by default, `verify` or
@@ -381,9 +381,14 @@ decision.
   running work reports `"complete": false` and none. Order is guaranteed within a work only, never
   across works.
 - **Cancellation.** Queued work is removed and never starts (`cancelled`: no model call, execution or
-  observation). Running work gets an advisory request that stops the *next* model call; a call or
-  execution already in flight is not interrupted, the runtime may still complete, and the status is
-  never `cancelled`.
+  observation). Running work gets a request that stops the *next* model call and abandons a model call
+  in flight through FX at its next poll (that call fails with FX's delivery certainty, never "unsent"
+  once the provider was invoked). An execution already in flight is not interrupted, the runtime may
+  still complete, and the status is never `cancelled`.
+- **Failed works** carry `result.delivery` when a model call failed: `definitely_unsent`,
+  `possibly_sent` or `confirmed_response`, as FX established it (the `WorkFailed` event has the same
+  field). It is absent when the failure was not a model call. Chip never retries; a caller deciding
+  whether a retry is safe reads this field instead of parsing `outcome_reason`.
 - **Failure containment.** A panic inside one work ends that work as `failed` (no events are invented),
   frees its slot, and affects no other work, the scheduler or the server.
 - **Timing.** `scheduling.queue_wait_ms` (the scheduler's), `scheduling.time_to_first_model_call_ms`,

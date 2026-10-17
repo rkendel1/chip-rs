@@ -623,8 +623,10 @@ impl Service {
                     }),
                 )
             }
-            // Advisory: it stops the next model call. Nothing in flight is interrupted, the runtime
-            // may still complete the work, and the outcome is whatever the runtime then reports.
+            // It stops the next model call, and a model call in flight through FX is abandoned at
+            // its next poll (reported with FX's delivery certainty, never as unsent once invoked).
+            // An execution in flight is not interrupted, the runtime may still complete the work,
+            // and the outcome is whatever the runtime then reports.
             Phase::Running { .. } => {
                 item.control.cancel.store(true, Ordering::SeqCst);
                 Response::ok(
@@ -632,7 +634,7 @@ impl Service {
                     json!({
                         "work_id": id,
                         "status": "cancellation_requested",
-                        "note": "advisory: no further model call will be made; work already in flight is not interrupted, and the outcome is whatever the runtime establishes",
+                        "note": "no further model call will be made, and a model call in flight is abandoned with its delivery certainty; an execution already in flight is not interrupted, and the outcome is whatever the runtime establishes",
                     }),
                 )
             }
@@ -906,7 +908,12 @@ fn event_json(event: &WorkEvent) -> Value {
         WorkEvent::WorkLimitReached { limit, .. } => {
             json!({"kind": "WorkLimitReached", "limit": limit.name()})
         }
-        WorkEvent::WorkFailed { reason, .. } => json!({"kind": "WorkFailed", "reason": reason}),
+        WorkEvent::WorkFailed {
+            reason, delivery, ..
+        } => json!({
+            "kind": "WorkFailed", "reason": reason,
+            "delivery": delivery.map(|d| d.as_str()),
+        }),
     }
 }
 
@@ -1292,7 +1299,9 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use crate::local_environment::LocalEnvironment;
-    use chip_inference::{FxError, ModelProvider, ModelRequest, ModelResponse, Usage};
+    use chip_inference::{
+        Delivery, FxError, InferenceFailure, ModelProvider, ModelRequest, ModelResponse, Usage,
+    };
     use tokio::sync::Semaphore;
 
     use super::*;
@@ -1300,6 +1309,8 @@ mod tests {
     const LIST: &str =
         r#"{"decision":"request_capability","capability":"project.list","inputs":{"path":"."}}"#;
     const BLOCK: &str = r#"{"decision":"block","reason":"scripted stop"}"#;
+    /// Not a reply: the scripted model call fails as FX reports a call that may have been sent.
+    const POSSIBLY_SENT: &str = "<possibly sent>";
     /// An invented input on a capability that does not declare it.
     const FORGED: &str = r#"{"decision":"request_capability","capability":"project.list","inputs":{"path":".","executable":"/bin/sh"}}"#;
     const WRITE_A: &str = r#"{"decision":"request_capability","capability":"project.write","inputs":{"path":"alpha.txt","content":"from alpha"}}"#;
@@ -1429,6 +1440,16 @@ mod tests {
                 .and_then(|q| q.pop_front());
             done(self);
             let reply = reply.ok_or_else(|| FxError::Provider("unscripted model call".into()))?;
+            if reply == POSSIBLY_SENT {
+                return Err(FxError::Inference(Box::new(InferenceFailure {
+                    kind: "transport".into(),
+                    delivery: Delivery::PossiblySent,
+                    status: None,
+                    retry_after_ms: None,
+                    detail: None,
+                    partial_output: None,
+                })));
+            }
             Ok(ModelResponse::new(
                 format!("{}-{n}", marker.to_lowercase()),
                 reply,
@@ -2479,6 +2500,22 @@ mod tests {
             assert_eq!(executions, 3);
             assert!(!open);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_model_call_reports_its_delivery_as_a_field_not_only_text() {
+        let model = Model::new(&[("ALPHA", &[POSSIBLY_SENT])]).arc();
+        let (addr, _s, _d) = start_with(model.clone(), "delivery", cap(1, 4)).await;
+        let a = submit(addr, "ALPHA");
+        let failed = finished(addr, &a).await;
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["result"]["delivery"], "possibly_sent", "{failed}");
+        let terminal = events(addr, &a)
+            .into_iter()
+            .find(|e| e["kind"] == "WorkFailed")
+            .expect("a WorkFailed event");
+        assert_eq!(terminal["delivery"], "possibly_sent");
+        assert_eq!(model.entered("ALPHA"), 1, "the model call was not retried");
     }
 
     #[tokio::test(flavor = "multi_thread")]
